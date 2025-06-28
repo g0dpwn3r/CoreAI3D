@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: coreai3d_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: pmAkRV4lAAKsOfdWCUxP
+      MYSQL_DATABASE: CoreAI3D
+    ports:
+      - "33060:33060" # X Plugin
+      - "3306:3306"   # classic protocol
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./my.cnf:/etc/mysql/conf.d/my.cnf
+    command: --default-authentication-plugin=mysql_native_password
+
+volumes:
+  mysql_data:

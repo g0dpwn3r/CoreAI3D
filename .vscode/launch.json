@@ -1,0 +1,90 @@
+{
+    "version": "0.2.1",
+    "defaults": {},
+    "configurations": [
+      // --- Windows Debug Configuration ---
+      {
+        "type": "default",
+        "name": "Debug CoreAI3D with args (Windows)",
+        "project": "CMakeLists.txt",
+        "projectTarget": "CoreAI3D.exe",
+        "debuggerConfiguration": "MSVC_Debug",
+        "args": [
+          "-i", "polygon.csv",
+          "-d", ",",
+          "-s", "5",
+          "-e", "25",
+          "-lr", "0.001",
+          "-iz", "3",
+          "-oz", "5",
+          "-l", "5000",
+          "-n", "250000",
+          // "--contains-header", // KEEP OR REMOVE BASED ON YOUR ACTUAL CSV
+          "-di", "2",
+          "--load",
+          "--dataset-name", "polygon-calc-11",
+          "--db-host", "127.0.0.1",
+          "--db-port", "33060",
+          "--db-user", "root",
+          "--db-password", "pmAkRV4lAAKsOfdWCUxP",
+          "--db-schema", "CoreAI3D",
+          "--min", "0",
+          "--max", "100"
+        ],
+        "cwd": "${workspaceFolder}/out/build/windows-x64-debug/CoreAI3D/",
+        "stopAtEntry": false,
+        "preLaunchTask": "CMake: Build",
+        "program": "${command:cmake.launchTargetPath}"
+      },
+  
+      // --- WSL (Linux) Debug Configuration ---
+      {
+        "type": "cppgdb",
+        "name": "Debug CoreAI3D with args (WSL)",
+        "project": "CMakeLists.txt",
+        "projectTarget": "CoreAI3D", // No .exe extension for Linux
+        "debuggerConfiguration": "gdb",
+        "args": [
+          "-i", "polygon.csv",
+          "-d", ",",
+          "-s", "5",
+          "-e", "25",
+          "-lr", "0.001",
+          "-iz", "3",
+          "-oz", "5",
+          "-l", "5000",
+          "-n", "250000",
+          // "--contains-header", // KEEP OR REMOVE BASED ON YOUR ACTUAL CSV
+          "-di", "2",
+          "--load",
+          "--dataset-name", "polygon-calc-11",
+          "--db-host", "127.0.0.1",
+          "--db-port", "33060",
+          "--db-user", "root",
+          "--db-password", "pmAkRV4lAAKsOfdWCUxP",
+          "--db-schema", "CoreAI3D",
+          "--min", "0",
+          "--max", "100"
+        ],
+        // Full path to the executable *within your WSL environment*.
+        "program": "/mnt/d/code/CoreAI3D/out/build/linux-x64-debug-wsl/CoreAI3D/CoreAI3D",
+        // Current working directory *within your WSL environment*.
+        "cwd": "/mnt/d/code/CoreAI3D/out/build/linux-x64-debug-wsl/CoreAI3D/",
+        "MIMode": "gdb",
+        "miDebuggerPath": "/usr/bin/gdb", // CONFIRM THIS PATH IN YOUR WSL!
+        "externalConsole": true,
+        "pipeTransport": {
+          "pipeProgram": "${env.SystemRoot}\\sysnative\\bash.exe", // Or try "wsl.exe"
+          "pipeArgs": [ "-c" ],
+          "debuggerPath": "/usr/bin/gdb", // CONFIRM THIS PATH IN YOUR WSL!
+          "pipeCwd": "${workspaceFolder}",
+          "targetArchitecture": "x64"
+        },
+        "sourceFileMap": {
+          "D:\\code\\CoreAI3D": "/mnt/d/code/CoreAI3D"
+        },
+        "stopAtEntry": false,
+        "preLaunchTask": "CMake: Build"
+      }
+    ]
+  }

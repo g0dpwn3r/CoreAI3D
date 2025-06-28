@@ -1,0 +1,48 @@
+# Visual Studio files
+.vs/
+*.vspscc
+*.suo
+*.user
+*.config
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.lib
+*.exp
+*.log
+*.ncb
+*.aps
+*.bsc
+*.sbr
+*.res
+
+# CMake build directories
+/build/
+/out/
+/x64/
+/bin/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.vcxproj
+*.vcxproj.filters
+*.sln # Uncomment this if you want to exclude CoreAI3D.sln as well
+
+# vcpkg related
+/vcpkg/
+/vcpkg_installed/
+vcpkg-init.cmd
+mysql-connector-cpp
+
+# External dependencies (like mysql-connector-cpp if managed by vcpkg)
+/ChatGPT-Cpp
+
+# Other common exclusions
+*~
+*.bak
+*.swp
+.DS_Store

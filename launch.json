@@ -1,0 +1,44 @@
+{
+	"version": "0.2.1",
+	"defaults": {},
+	"configurations": [
+		{
+			"type": "cppvsdbg",
+			"name": "CoreAI3D args Debug",
+			"project": "CMakeLists.txt",
+			"projectTarget": "CoreAI3D.exe",
+			"debuggerConfiguration": "MSVC_Debug",
+			"args": [
+				"--version"
+			],
+			"cwd": "D:/code/CoreAI3D/out/build/windows-x64-debug/CoreAI3D/",
+			"stopAtEntry": false
+		},
+		{
+			"type": "cppgdb",
+			"name": "CoreAI3D args Debug WSL",
+			"project": "CMakeLists.txt",
+			"projectTarget": "CoreAI3D",
+			"debuggerConfiguration": "gdb",
+			"args": [
+				"--version"
+			],
+			"program": "/mnt/d/code/CoreAI3D/out/build/linux-x64-debug-wsl/CoreAI3D/CoreAI3D",
+			"cwd": "/mnt/d/code/CoreAI3D/out/build/linux-x64-debug-wsl/CoreAI3D/",
+			"MIMode": "gdb",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"externalConsole": true,
+			"pipeTransport": {
+				"pipeProgram": "${env.SystemRoot}\\sysnative\\bash.exe",
+				"pipeArgs": [ "-c" ],
+				"debuggerPath": "/usr/bin/gdb",
+				"pipeCwd": "/home/h4x0r/.vs/",
+				"targetArchitecture": "x64"
+			},
+			"sourceFileMap": {
+				"D:\\code\\CoreAI3D": "/mnt/d/code/CoreAI3D"
+			},
+			"stopAtEntry": false
+		}
+	]
+}

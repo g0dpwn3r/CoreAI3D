@@ -1,0 +1,25 @@
+{
+  "configurations": [
+    {
+      "name": "WSL-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}/out/build/${name}",
+      "installRoot": "${projectDir}/out/install/${name}",
+      "cmakeCommandArgs": "-DCMAKE_TOOLCHAIN_FILE=${env.VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "buildCommandArgs": "",
+      "inheritEnvironments": [ "linux" ],
+      "remoteMachineName": "WSL"
+    },
+
+    {
+      "name": "Windows-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}/out/build/${name}",
+      "installRoot": "${projectDir}/out/install/${name}",
+      "cmakeCommandArgs": "-DCMAKE_TOOLCHAIN_FILE=${env.VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "inheritEnvironments": [ "msvc_x64_x64" ]
+    }
+  ]
+}

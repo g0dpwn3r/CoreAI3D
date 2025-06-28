@@ -1,0 +1,16 @@
+{
+  "builtin-baseline": "a9eee3b18df395dbb8be71a31bd78ea441056e42",
+  "name": "core-ai-3d",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "cpr",
+    "argparse",
+    "curl",
+    "mysql-connector-cpp",
+    "boost-asio",
+    "boost-system",
+    "boost-beast",
+    "nlohmann-json"
+  ]
+
+}

@@ -1,0 +1,34 @@
+{
+    "configurations": [
+      {
+        "name": "Windows",
+        "includePath": [
+          "${workspaceFolder}/**",
+          "${workspaceFolder}/CoreAI3D",
+          "${workspaceFolder}/CoreAI3D/include"
+        ],
+        "defines": [],
+        "compilerPath": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.3x.xx/bin/Hostx64/x64/cl.exe",
+        "cStandard": "c17",
+        "cppStandard": "c++20",
+        "intelliSenseMode": "windows-msvc-x64"
+      },
+      {
+        "name": "WSL",
+        "includePath": [
+          "${workspaceFolder}/**",
+          "/mnt/d/code/CoreAI3D/CoreAI3D",
+          "/mnt/d/code/CoreAI3D/CoreAI3D/include"
+        ],
+        "defines": [],
+        "compilerPath": "/usr/bin/g++",
+        "cStandard": "c17",
+        "cppStandard": "c++20",
+        "intelliSenseMode": "linux-gcc-x64"
+      }
+      
+    ],
+
+    "version": 4
+  }
+  
