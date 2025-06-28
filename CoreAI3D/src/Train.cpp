@@ -109,7 +109,6 @@ bool Training::loadCSV(const std::string & filename, long long numSamplesToLoad,
         return false;
     }
     
-
     std::string line;
     long long lineCounter = 0; // Tracks actual line number in file
 
@@ -904,7 +903,7 @@ void Training::loadModel(int& datasetId) {
     std::cout << "Model loaded successfully for dataset ID " << datasetId << std::endl; // End message
 }
 
-void Training::printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int& len, int precision)
+void Training::printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision)
 {
     if (normalized_data.empty()) {
         std::cout << "  (Empty matrix to denormalize and print)\n";

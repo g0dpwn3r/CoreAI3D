@@ -3,7 +3,12 @@
 #
 cmake_minimum_required (VERSION 3.20)
 
-
+# Suppress problematic Windows macros and ensure Winsock 2 is prioritized
+add_compile_definitions(
+    WIN32_LEAN_AND_MEAN  # Excludes less-used headers from windows.h to speed up compilation and reduce conflicts
+    NOMINMAX             # Prevents min/max macros in windows.h from conflicting with std::min/std::max
+    _WINSOCKAPI_         # Prevents winsock.h from being included by windows.h, forcing winsock2.h
+)
 
 # Enable Hot Reload for MSVC compilers if supported.
 if (POLICY CMP0141)

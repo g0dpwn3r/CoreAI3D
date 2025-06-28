@@ -70,6 +70,7 @@
               "vcpkg_installed",
               "vcpkg",
               "mysql-connector-cpp",
+              "protobuf",
               "build",
               "CMakeCache.txt",
               "CMakeFiles"

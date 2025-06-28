@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
     program.add_argument("--db-port")
         .help("Database port for MySQL X DevAPI.")
         .default_value(33060)
-        .scan<'i', unsigned int>();
+        .scan<'i', int>();
 
     program.add_argument("--db-user")
         .help("Database user for MySQL X DevAPI.")
@@ -92,6 +92,10 @@ int main(int argc, char* argv[]) {
     program.add_argument("--ssl-mode")
         .help("SSL mode for database connection (DISABLED, VERIFY_CA, VERIFY_IDENTITY).")
         .default_value(std::string("DISABLED"));
+
+    program.add_argument("--dataset-name")
+        .help("Name for the dataset")
+        .default_value(std::string("online-1a"));
 
     program.add_argument("--create-tables")
         .help("Create database tables if they don't exist.")
@@ -137,7 +141,7 @@ int main(int argc, char* argv[]) {
     program.add_argument("--api-port")
         .help("Port for the HTTP API server to listen on.")
         .default_value(8080) // Default API port
-        .scan<'i', unsigned short>();
+        .scan<'i', int>();
 
     try {
         program.parse_args(argc, argv);
@@ -151,6 +155,7 @@ int main(int argc, char* argv[]) {
     // Retrieve arguments
     std::string inputFile = program.get<std::string>("--input-file");
     std::string targetFile = program.get<std::string>("--target-file");
+    std::string datasetName = program.get<std::string>("--dataset-name");
     std::string delimiter_str = program.get<std::string>("--delimiter");
     char delimiter = delimiter_str.empty() ? ',' : delimiter_str[0];
     int numSamples = program.get<int>("--num-samples");
@@ -229,7 +234,7 @@ int main(int argc, char* argv[]) {
                 std::getline(std::cin, embeddingFile);
             }
             if (language == "en" && embeddingFile.find(language) == std::string::npos) { // Simple check for default language
-                std::cout << "Enter language code (e.g., en, nl, ru): ";
+                std::cout << "Enter language  code (e.g., en, nl, ru): ";
                 std::getline(std::cin, language);
             }
 
@@ -305,12 +310,14 @@ int main(int argc, char* argv[]) {
                 ? Training(true)
                 : Training(dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, createTables);
 
+            
             // Set training parameters (important for model structure if loading from DB)
             trainer.layers = layers;
             trainer.neurons = neurons;
             trainer.min = minRange;
             trainer.max = maxRange;
             trainer.outputSize = outputSize;
+            trainer.numSamples = numSamples;
 
             // If text is involved, the Training class (or Core) would need to use Language class.
             // This part assumes that 'Training' or 'Core' can handle text embedding internally
@@ -328,14 +335,14 @@ int main(int argc, char* argv[]) {
             std::cout << "Attempting to predict and save results to: " << outputCsvFile << std::endl;
             if (datasetId != -1) {
                 std::cout << "Using dataset ID " << datasetId << " (likely to load a pre-trained model).\n";
-                // Example: trainer.loadModel(datasetId); // A method to load a trained model from DB
+                trainer.loadDatasetFromDB((int&) datasetId);
             }
-
-            // Assuming 'Training' has a method to perform prediction on an input file
-            // and write to an output file.
-            // trainer.predict(inputFile, outputCsvFile, delimiter, hasHeader, numSamples, containsText);
-            std::cout << "Prediction process initiated. (Actual prediction logic for CSV needs to be implemented in Training/Core classes).\n";
-            // --- End Placeholder ---
+            trainer.loadCSV(inputFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName);
+            CoreAI core = CoreAI(trainer.inputSize, layers, neurons, trainer.outputSize, minRange, maxRange);
+            trainer.preprocess(minRange, maxRange);
+            trainer.train(learningRate, epochs);
+            trainer.printDenormalizedAsOriginalMatrix(core.getOutput(), 10, 10);
+            trainer.printDenormalizedAsOriginalMatrix(core.getResults(), 10, 10);
 
             std::cout << "Prediction mode finished.\n";
         }
@@ -347,13 +354,14 @@ int main(int argc, char* argv[]) {
                 ? Training(true)
                 : Training(dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, createTables);
 
+           
             // Set training parameters (now that they are members of Training class)
             trainer.layers = layers;
             trainer.neurons = neurons;
             trainer.min = minRange;
             trainer.max = maxRange;
             trainer.outputSize = outputSize; // Ensure this is set for backend actions
-
+            CoreAI core = CoreAI(trainer.inputSize, layers, neurons, outputSize, minRange, maxRange);
             // Initialize Boost.Asio io_context
             net::io_context ioc{ 1 }; // One thread for io_context
 

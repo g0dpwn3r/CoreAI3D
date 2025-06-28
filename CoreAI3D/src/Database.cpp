@@ -304,9 +304,21 @@ Database::DatasetData Database::getDataset(int& datasetId) {
             .execute();
 
         for (mysqlx::Row row_record : res_records) {
-            std::string feature_json_str = row_record[0].get<std::string>();
-            std::string label_json_str = row_record[1].get<std::string>();
+            // In Database::getDataset, inside the loop over res_records
+            // Retrieve as mysqlx::DbDoc, which represents a JSON document
+            mysqlx::DbDoc feature_doc = row_record[0].get<mysqlx::DbDoc>();
+            mysqlx::DbDoc label_doc = row_record[1].get<mysqlx::DbDoc>();
 
+            // Use ostringstream to convert DbDoc to its string representation
+            std::ostringstream ss_features;
+            ss_features << feature_doc; // Stream the DbDoc object to the stringstream
+            std::string feature_json_str = ss_features.str(); // Get the string from the stream
+
+            std::ostringstream ss_labels;
+            ss_labels << label_doc; // Stream the DbDoc object to the stringstream
+            std::string label_json_str = ss_labels.str(); // Get the string from the stream
+
+            // Now, parse with nlohmann::json using the obtained strings
             nlohmann::json features_json = nlohmann::json::parse(feature_json_str);
             nlohmann::json labels_json = nlohmann::json::parse(label_json_str);
 

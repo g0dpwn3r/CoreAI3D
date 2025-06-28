@@ -56,7 +56,7 @@ public:
     void saveModel(int& datasetId);
     void loadModel(int& datasetId);
     void printFullMatrix(std::vector<std::vector<float>>& data, int& len, int precision = 6);
-    void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int& len, int precision = 4);
+    void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);
     float original_data_global_min;                 // Stores global min from original data for denorm
     float original_data_global_max;                 // Stores global max from original data for denorm
 

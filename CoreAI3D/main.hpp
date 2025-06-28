@@ -1,9 +1,19 @@
 ﻿#ifndef MAIN_H
 #define MAIN_H
 #ifdef _WIN32
-#include <windows.h>
+// At the very top of any .cpp or .hpp file that might interact with Winsock
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef _WINSOCKAPI_
+    #define _WINSOCKAPI_ // This specifically prevents winsock.h from being included
+#endif
+    #include <windows.h>
 #else
-#include <unistd.h>
+    #include <unistd.h>
 #endif
 
 #include <boost/asio.hpp>
