@@ -5,6 +5,7 @@
   "dependencies": [
     "cpr",
     "argparse",
+    "catch2",
     "curl",
     "mysql-connector-cpp",
     "boost-asio",

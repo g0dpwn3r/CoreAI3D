@@ -15,5 +15,24 @@ services:
       - ./my.cnf:/etc/mysql/conf.d/my.cnf
     command: --default-authentication-plugin=mysql_native_password
 
+  coreai3d:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: coreai3d
+    depends_on:
+      - mysql
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 33060
+      DB_USER: root
+      DB_PASSWORD: pmAkRV4lAAKsOfdWCUxP
+      DB_SCHEMA: CoreAI3D
+    ports:
+      - "8080:8080" # Assuming your app listens on 8080
+    volumes:
+    #Change to release
+      - ./out/build/linux-x64-debug-wsl/CoreAI3D/CoreAI3D:/app/CoreAI3D
+
 volumes:
   mysql_data:

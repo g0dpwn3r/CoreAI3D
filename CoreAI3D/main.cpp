@@ -169,7 +169,7 @@ int main(int argc, char* argv[]) {
     bool startPredict = program.get<bool>("--start-predict"); // New variable
 
     std::string dbHost = program.get<std::string>("--db-host");
-    unsigned int dbPort = program.get<unsigned int>("--db-port");
+    int dbPort = program.get<int>("--db-port");
     std::string dbUser = program.get<std::string>("--db-user");
     std::string dbPassword = program.get<std::string>("--db-password");
     std::string dbSchema = program.get<std::string>("--db-schema");
@@ -178,7 +178,7 @@ int main(int argc, char* argv[]) {
     bool isOfflineMode = program.get<bool>("--offline");
     int datasetId = program.get<int>("--dataset-id");
     std::string outputCsvFile = program.get<std::string>("--output-csv");
-    unsigned short apiPort = program.get<unsigned short>("--api-port");
+    int apiPort = program.get<int>("--api-port");
 
 
     // Map string to mysqlx::SSLMode enum

@@ -23,14 +23,17 @@ find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED) # Assumes nlohmann_json is installed via vcpkg and provides a config file
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-    set(Boost_INCLUDE_DIR /usr/include/boost)
-    set(Boost_LIBRARY_DIR /usr/lib/x86_64-linux-gnu)
+    set(INCLUDE_DIR /usr/include)
+    set(LIBRARY_DIR /usr/lib/x86_64-linux-gnu)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
+    set(INCLUDE_DIR D:/code/CoreAI3D/vcpkg_installed/x64-windows/include)
+    set(LIBRARY_DIR D:/code/CoreAI3D/vcpkg_installed/x64-windows/lib)
 endif()
 
 
 # Include directories for your project headers
-include_directories(. include ${Boost_INCLUDE_DIR})
-link_directories(${Boost_LIBRARY_DIR})
+include_directories(. include ${INCLUDE_DIR})
+link_directories(${LIBRARY_DIR})
 
 # Source files
 set(SOURCE_FILES
