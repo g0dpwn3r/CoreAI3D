@@ -1,18 +1,16 @@
 FROM ubuntu:22.04
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential cmake git libmysqlcppconn-dev mysql-client \
-    && rm -rf /var/lib/apt/lists/*
+# Install required runtime dependencies
+RUN apt update && apt install -y \
+    libboost-system-dev \
+    libmysqlcppconn-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    zlib1g \
+    && apt clean
 
-# Create app dir
 WORKDIR /app
+COPY CoreAI3D .
 
-# Copy source (assumed to be copied in docker-compose)
-COPY . .
-
-# Build
-RUN cmake -S . -B build && cmake --build build
-
-# Entry point
-CMD ["./build/CoreAI3D"]
+# Default command can be empty or help-related
+CMD ["./CoreAI3D"]

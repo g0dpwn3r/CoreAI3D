@@ -67,7 +67,6 @@
             "exclusionList": [
               ".vs",
               ".git",
-              "out",
               "vcpkg_installed",
               "vcpkg",
               "mysql-connector-cpp",
