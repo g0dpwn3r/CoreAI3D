@@ -10,7 +10,9 @@
 #endif
 #ifndef _WINSOCKAPI_
     #define _WINSOCKAPI_ // This specifically prevents winsock.h from being included
-#endif
+#endif 
+// Include Windows headers only if not already included
+    #include <winsock2.h>
     #include <windows.h>
 #else
     #include <unistd.h>
@@ -52,6 +54,7 @@
 #include <iomanip> // Added for std::fixed, std::setprecision, std::setw
 
 #include <argparse/argparse.hpp> // Keep this if argparse is a local include or part of your project
+
 
 using namespace ::mysqlx;
 using namespace std;

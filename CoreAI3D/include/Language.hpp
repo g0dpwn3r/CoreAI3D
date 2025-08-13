@@ -1,36 +1,59 @@
 #pragma once
 
-#include "main.hpp"
 #include "Core.hpp"
 #include "Train.hpp"
+#include "main.hpp"
 
 class Training;
 class CoreAI;
 
-class Language {
+class Language
+{
 public:
-    Language();
-    std::string currentLang = "en";
+    Language(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort,
+        std::string& dbUser, std::string& dbPassword,
+        std::string& dbSchema, mysqlx::SSLMode ssl, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
     std::string detectLanguage(const std::string& text);
     std::vector<float> encodeText(const std::string& text);
-    void loadEmbeddingsFor(const std::string& languageCode, const std::string& filepath);
     void setCurrentLanguage(const std::string& languageCode);
-    Language(int embeddingDim);
+    
     CoreAI* getCore();
     Training* getTrainer();
 
+    std::string currentLang = "en";
+
+    static std::vector<float> flattenEmbeddings(const std::unordered_map<std::string, std::vector<float>>& embeddingsByLang);
+
+    static int detectMaxSeqLength(const std::string& filename);
+
+    float cosine_similarity(std::vector<float> a, std::vector<float> b);
+    std::vector<float> generateRandomEmbedding();
     std::unordered_map<std::string, std::vector<float>> loadWordEmbeddingsFromFile(const std::string& filepath, int expectedDim);
+    int chat(std::string& filename);
+    std::unordered_map<std::string, std::vector<float>> embeddingsByLang;
 
-    int chat(std::string& filename, int& inputSize, int& layers, int& neurons, int& outputSize, float& minVal, float& maxVal, int embeddingDimension = 50);
-    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<float>>> embeddingsByLang;
-
+    std::unordered_map<std::string, std::vector<float>> createEmbeddingsByLang(int embeddingDim);
+    std::vector<std::string> tokenize(const std::string& text);
 private:
+
     
     int embeddingDim;
-    
+    int inputSize;
+    int outputSize;
+    int layers;
+    int neurons;
+    int dbPort;
+    std::string embedingFile;
+    std::string dbHost;
+    std::string dbUser;
+    std::string dbPassword;
+    std::string dbSchema;
+    mysqlx::SSLMode ssl;
+    bool createTables;
+    std::unordered_map<std::string, std::vector<float>> db;
+
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Training> trainer;
-    std::vector<std::string> tokenize(const std::string& text);
-    std::vector<float> flattenEmbeddings(const std::vector<std::vector<float>>& words);
-    std::vector<float> generateRandomEmbedding();
+    std::string answer(std::vector<float>& textEmbedding);
+
 };

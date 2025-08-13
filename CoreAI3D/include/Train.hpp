@@ -18,6 +18,8 @@ public:
     // Constructor for offline mode (no database)
     Training(bool isOffline);
 
+    void initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort, std::string& dbUser, std::string& dbPassword, std::string& dbSchema, mysqlx::SSLMode ssl, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
+
 
     float convertDateTimeToTimestamp(const std::string& datetime);
     std::string timestampToDateTimeString(float timestamp);
@@ -46,6 +48,8 @@ public:
     double learningRate;
     float min, max;
 
+    std::string embedding_file;
+    std::string language;
     // New evaluation method
     float calculateRMSE();
     const std::vector<std::vector<float>>& getTargets() const { return targets; }
@@ -55,7 +59,7 @@ public:
     // Database interaction methods
     void saveModel(int& datasetId);
     void loadModel(int& datasetId);
-    void printFullMatrix(std::vector<std::vector<float>>& data, int& len, int precision = 6);
+    void printFullMatrix(std::vector<std::vector<float>>& data, int len, int precision = 6);
     void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);
     float original_data_global_min;                 // Stores global min from original data for denorm
     float original_data_global_max;                 // Stores global max from original data for denorm
@@ -65,6 +69,7 @@ public:
     bool saveResultsToCSV(const std::string& filename, const std::string& inputFilename, bool hasHeader, const char& delimiter); // New parameter for input filename and header
     std::vector<std::vector<float>> denormalizeMatrix(const std::vector<std::vector<float>>& normalized_data) const;
 private:
+    std::mt19937 gen;
     std::vector<std::vector<float>> raw_data; // Might be less used now
     std::vector<std::vector<float>> inputs;
     std::vector<std::vector<float>> targets;
@@ -73,7 +78,7 @@ private:
     std::default_random_engine randomEngine;
 
     std::unique_ptr<CoreAI> core;
-    std::unique_ptr<Language> lang;
+    std::unique_ptr<Language> langProc;
     std::unique_ptr<Database> dbManager; // Changed to unique_ptr
     std::vector<std::vector<float>> normalizeData(const std::vector<std::vector<float>>& data_to_normalize,
         float original_min, float original_max,
@@ -95,7 +100,7 @@ private:
 
     int getDecimalPlacesInString(float value, int precision_for_conversion);
     std::string formatValueForDisplay(float value, int customPrecision) const;
- 
+
     // NEW: Helper method to denormalize a matrix
-  
+
 };

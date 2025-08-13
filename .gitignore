@@ -38,6 +38,7 @@ Makefile
 vcpkg-init.cmd
 mysql-connector-cpp
 protobuf
+argparse
 
 # External dependencies (like mysql-connector-cpp if managed by vcpkg)
 /ChatGPT-Cpp

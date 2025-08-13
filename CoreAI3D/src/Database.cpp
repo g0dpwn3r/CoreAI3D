@@ -4,24 +4,24 @@
 using mysqlx::expr;
 
 // Constructor
+// Changed 'int port' to 'unsigned int port' to match Database.hpp declaration
 Database::Database(const std::string& host, unsigned int port,
     const std::string& user, const std::string password,
-    const std::string& schemaName, mysqlx::SSLMode ssl) // Changed SSLMode to mysqlx::SSLMode
+    const std::string& schemaName, mysqlx::SSLMode ssl)
     : session(mysqlx::SessionOption::HOST, host,
         mysqlx::SessionOption::PORT, port,
         mysqlx::SessionOption::USER, user,
         mysqlx::SessionOption::PWD, password,
         mysqlx::SessionOption::SSL_MODE, ssl),
+    dbSchema(schemaName), // Initialize 'dbSchema' member
     schema(session.getSchema(schemaName)) // Initialize 'schema' directly in the initializer list
 {
     try {
-        // Explicitly set this schema as the default for the session using a USE statement
-        session.sql("USE " + schemaName).execute();
-        std::cout << "Successfully connected to MySQLX schema: " << schemaName << std::endl;
+        // Test the session by attempting a simple operation
+        session.sql("SELECT 1").execute();
     }
-    catch (const mysqlx::Error& err) {
-        std::cerr << "Error connecting to MySQLX schema '" << schemaName << "': " << err.what() << std::endl;
-        throw; // Re-throw to indicate a critical failure during database initialization
+    catch (const std::exception& e) {
+        throw std::runtime_error("Database connection failed: " + std::string(e.what()));
     }
 }
 
@@ -33,11 +33,11 @@ mysqlx::bytes Database::matrixToBlob(const std::vector<std::vector<float>>& matr
         int cols = 0;
         blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(&rows), reinterpret_cast<const char*>(&rows) + sizeof(int));
         blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(&cols), reinterpret_cast<const char*>(&cols) + sizeof(int));
-        return mysqlx::bytes(reinterpret_cast<const mysqlx::abi2::r0::common::byte*>(blob_data.data()), blob_data.size()); // Corrected cast
+        return mysqlx::bytes(reinterpret_cast<const mysqlx::abi2::r0::common::byte*>(blob_data.data()), blob_data.size());
     }
 
-    int rows = matrix.size();
-    int cols = matrix[0].size();
+    int rows = static_cast<int>(matrix.size());
+    int cols = static_cast<int>(matrix[0].size());
 
     // Store dimensions
     blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(&rows), reinterpret_cast<const char*>(&rows) + sizeof(int));
@@ -48,7 +48,7 @@ mysqlx::bytes Database::matrixToBlob(const std::vector<std::vector<float>>& matr
         blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(row.data()), reinterpret_cast<const char*>(row.data()) + row.size() * sizeof(float));
     }
 
-    return mysqlx::bytes(reinterpret_cast<const mysqlx::abi2::r0::common::byte*>(blob_data.data()), blob_data.size()); // Corrected cast
+    return mysqlx::bytes(reinterpret_cast<const mysqlx::abi2::r0::common::byte*>(blob_data.data()), blob_data.size());
 }
 
 std::vector<std::vector<float>> Database::blobToMatrix(const std::vector<char>& blob) {
@@ -61,13 +61,13 @@ std::vector<std::vector<float>> Database::blobToMatrix(const std::vector<char>& 
     size_t offset = 0;
 
     // Read dimensions
-    if (blob.size() < sizeof(int) * 2) return matrix; // Not enough data for dimensions
+    if (blob.size() < sizeof(int) * 2) return matrix;
     std::copy(blob.data() + offset, blob.data() + offset + sizeof(int), reinterpret_cast<char*>(&rows));
     offset += sizeof(int);
     std::copy(blob.data() + offset, blob.data() + offset + sizeof(int), reinterpret_cast<char*>(&cols));
     offset += sizeof(int);
 
-    if (rows <= 0 || cols <= 0) return matrix; // Invalid dimensions
+    if (rows <= 0 || cols <= 0) return matrix;
 
     matrix.resize(rows, std::vector<float>(cols));
 
@@ -75,7 +75,7 @@ std::vector<std::vector<float>> Database::blobToMatrix(const std::vector<char>& 
     for (int i = 0; i < rows; ++i) {
         if (offset + cols * sizeof(float) > blob.size()) {
             std::cerr << "Error: Blob data truncated for matrix. Expected " << cols * sizeof(float) << " bytes, got " << (blob.size() - offset) << std::endl;
-            return std::vector<std::vector<float>>(); // Return empty or partially filled
+            return std::vector<std::vector<float>>();
         }
         std::copy(blob.data() + offset, blob.data() + offset + cols * sizeof(float), reinterpret_cast<char*>(matrix[i].data()));
         offset += cols * sizeof(float);
@@ -86,7 +86,7 @@ std::vector<std::vector<float>> Database::blobToMatrix(const std::vector<char>& 
 // Helper to convert std::vector<float> to mysqlx::bytes
 mysqlx::bytes Database::vectorToBlob(const std::vector<float>& vec) {
     std::vector<char> blob_data;
-    int size = vec.size();
+    int size = static_cast<int>(vec.size());
 
     // Store size
     blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(&size), reinterpret_cast<const char*>(&size) + sizeof(int));
@@ -94,7 +94,7 @@ mysqlx::bytes Database::vectorToBlob(const std::vector<float>& vec) {
     // Store data
     blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(vec.data()), reinterpret_cast<const char*>(vec.data()) + size * sizeof(float));
 
-    return mysqlx::bytes(reinterpret_cast<const mysqlx::abi2::r0::common::byte*>(blob_data.data()), blob_data.size()); // Corrected cast
+    return mysqlx::bytes(reinterpret_cast<const mysqlx::abi2::r0::common::byte*>(blob_data.data()), blob_data.size());
 }
 
 
@@ -109,18 +109,18 @@ std::vector<float> Database::blobToVector(const std::vector<char>& blob) {
     size_t offset = 0;
 
     // Read size
-    if (blob.size() < sizeof(int)) return vec; // Not enough data for size
+    if (blob.size() < sizeof(int)) return vec;
     std::copy(blob.data() + offset, blob.data() + offset + sizeof(int), reinterpret_cast<char*>(&size));
     offset += sizeof(int);
 
-    if (size <= 0) return vec; // Invalid size
+    if (size <= 0) return vec;
 
     vec.resize(size);
 
     // Read data
     if (offset + size * sizeof(float) > blob.size()) {
         std::cerr << "Error: Blob data truncated for vector. Expected " << size * sizeof(float) << " bytes, got " << (blob.size() - offset) << std::endl;
-        return std::vector<float>(); // Return empty or partially filled
+        return std::vector<float>();
     }
     std::copy(blob.data() + offset, blob.data() + offset + size * sizeof(float), reinterpret_cast<char*>(vec.data()));
     offset += size * sizeof(float);
@@ -133,7 +133,7 @@ void Database::createPredictionResultsTable() {
         session.sql(R"(
             CREATE TABLE IF NOT EXISTS prediction_results (
                 result_id INT AUTO_INCREMENT PRIMARY KEY,
-                dataset_id INT NOT NULL COMMENT 'Foreign Key linking to the datasets table',
+                dataset_id BIGINT NOT NULL COMMENT 'Foreign Key linking to the datasets table',
                 sample_index INT NOT NULL COMMENT 'The index of the sample within the dataset',
                 input_features JSON COMMENT 'JSON array of input feature values',
                 actual_targets JSON COMMENT 'JSON array of actual target values',
@@ -160,10 +160,10 @@ void Database::createTables() {
         // Create 'datasets' table
         session.sql(R"(
             CREATE TABLE IF NOT EXISTS datasets (
-                dataset_id INT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 dataset_name VARCHAR(255) NOT NULL UNIQUE COMMENT 'Unique name for the dataset (e.g., historical_stock_prices, sensor_readings)',
                 description TEXT COMMENT 'Detailed description of the dataset, e.g., source, collection method',
-                num_rows INT COMMENT 'Total number of rows/samples in the dataset',
+                num_rows BIGINT COMMENT 'Total number of rows/samples in the dataset',
                 num_features INT COMMENT 'Number of input features/columns for this dataset',
                 num_labels INT COMMENT 'Number of output labels/target columns for this dataset',
                 uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp when the dataset metadata was added'
@@ -174,8 +174,8 @@ void Database::createTables() {
         // Create 'dataset_records' table
         session.sql(R"(
             CREATE TABLE IF NOT EXISTS dataset_records (
-                record_id INT AUTO_INCREMENT PRIMARY KEY,
-                dataset_id INT NOT NULL COMMENT 'Foreign Key linking to the datasets table',
+                record_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id BIGINT NOT NULL COMMENT 'Foreign Key linking to the datasets table',
                 row_index INT NOT NULL COMMENT 'The original row number of this record in the CSV file (0-indexed or 1-indexed)',
                 feature_values JSON COMMENT 'JSON array of input feature values for this row (e.g., [val1, val2, ...])',
                 label_values JSON COMMENT 'JSON array of output label/target values for this row (e.g., [label1, label2, ...])',
@@ -191,9 +191,9 @@ void Database::createTables() {
         // Create 'ai_model_states' table
         session.sql(R"(
             CREATE TABLE IF NOT EXISTS ai_model_states (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp when this model state was saved',
-                dataset_id INT COMMENT 'Foreign Key referencing the datasets table, indicating which dataset the model was trained on',
+                dataset_id BIGINT COMMENT 'Foreign Key referencing the datasets table, indicating which dataset the model was trained on',
                 input_data LONGBLOB COMMENT 'Serialized input data matrix (internal model state)',
                 output_data LONGBLOB COMMENT 'Serialized output data matrix (internal model state)',
                 hidden_data LONGBLOB COMMENT 'Serialized hidden layer activations (internal model state)',
@@ -219,38 +219,37 @@ void Database::createTables() {
 }
 
 int Database::addDataset(const std::string& datasetName, const std::string& description,
-    int numRows, int numFeatures, int numLabels) {
+    int numRows, int numFeatures, int numLabels) { // numRows passed as int here, but DB is BIGINT
     try {
+        mysqlx::Table datasetsTable = schema.getTable("datasets");
         // 1. Check if dataset_name already exists
-        mysqlx::RowResult res = session.sql("SELECT dataset_id FROM datasets WHERE dataset_name = ?")
-            .bind(datasetName)
+        mysqlx::RowResult res = session.sql(std::string("SELECT dataset_id FROM datasets WHERE dataset_name = '") + datasetName + std::string("'")) // Fixed string concat
             .execute();
         mysqlx::Row row = res.fetchOne();
 
         if (row) {
             // Dataset exists, update it
-            int existingDatasetId = row[0].get<int>();
-            schema.getTable("datasets").update()
+            long long existingDatasetId = row[0].get<long long>(); // Changed to long long
+            datasetsTable.update()
                 .set("description", description)
-                .set("num_rows", numRows)
+                .set("num_rows", static_cast<long long>(numRows)) // Cast to long long
                 .set("num_features", numFeatures)
                 .set("num_labels", numLabels)
-                .set("uploaded_at", mysqlx::expr("NOW()")) // Corrected: Use mysqlx::Expression for SQL function
+                .set("uploaded_at", mysqlx::expr("NOW()"))
                 .where("dataset_id = :id")
                 .bind("id", existingDatasetId)
                 .execute();
             std::cout << "Updated existing dataset '" << datasetName << "' with ID: " << existingDatasetId << std::endl;
-            return existingDatasetId;
+            return static_cast<int>(existingDatasetId); // Cast back to int for return
         }
         else {
             // Dataset does not exist, insert new
-            mysqlx::Table datasetsTable = schema.getTable("datasets");
             mysqlx::Result insertRes = datasetsTable.insert("dataset_name", "description", "num_rows", "num_features", "num_labels")
-                .values(datasetName, description, numRows, numFeatures, numLabels)
+                .values(datasetName, description, static_cast<long long>(numRows), numFeatures, numLabels) // Cast to long long
                 .execute();
-            int newDatasetId = static_cast<int>(insertRes.getAutoIncrementValue());
+            long long newDatasetId = insertRes.getAutoIncrementValue(); // Get as long long
             std::cout << "Added new dataset '" << datasetName << "' with ID: " << newDatasetId << std::endl;
-            return newDatasetId;
+            return static_cast<int>(newDatasetId); // Cast back to int for return
         }
     }
     catch (const mysqlx::Error& err) {
@@ -263,14 +262,12 @@ void Database::addDatasetRecord(int& datasetId, int rowIndex,
     const std::vector<float>& featureValues,
     const std::vector<float>& labelValues) {
     try {
-        // Convert vectors to JSON strings
         nlohmann::json features_json = featureValues;
         nlohmann::json labels_json = labelValues;
 
-        // Use schema.getTable().insert() for better context
         mysqlx::Table datasetRecordsTable = schema.getTable("dataset_records");
         datasetRecordsTable.insert("dataset_id", "row_index", "feature_values", "label_values")
-            .values(datasetId, rowIndex, features_json.dump(), labels_json.dump())
+            .values(static_cast<long long>(datasetId), rowIndex, features_json.dump(), labels_json.dump()) // Cast datasetId to long long
             .execute();
     }
     catch (const mysqlx::Error& err) {
@@ -283,44 +280,39 @@ Database::DatasetData Database::getDataset(int& datasetId) {
     DatasetData data;
     try {
         // Fetch dataset metadata
-        mysqlx::RowResult res_meta = session.sql("SELECT dataset_name, num_rows, num_features, num_labels FROM datasets WHERE dataset_id = ?")
-            .bind(datasetId)
+        mysqlx::RowResult res_meta = session.sql(std::string("SELECT dataset_name, num_rows, num_features, num_labels FROM datasets WHERE dataset_id = ") + std::to_string(datasetId)) // Fixed string concat
             .execute();
         mysqlx::Row row_meta = res_meta.fetchOne();
 
         if (!row_meta) {
             std::cerr << "Error: Dataset with ID " << datasetId << " not found.\n";
-            return data; // Return empty data
+            return data;
         }
 
         data.datasetName = row_meta[0].get<std::string>();
-        data.numRows = row_meta[1].get<int>();
+        data.numRows = row_meta[1].get<long long>(); // Changed to long long
         data.numFeatures = row_meta[2].get<int>();
         data.numLabels = row_meta[3].get<int>();
 
         // Fetch dataset records
-        mysqlx::RowResult res_records = session.sql("SELECT feature_values, label_values FROM dataset_records WHERE dataset_id = ? ORDER BY row_index ASC")
-            .bind(datasetId)
+        mysqlx::RowResult res_records = session.sql(std::string("SELECT feature_values, label_values FROM dataset_records WHERE dataset_id = ") + std::to_string(datasetId) + std::string(" ORDER BY row_index ASC")) // Fixed string concat
             .execute();
 
         for (mysqlx::Row row_record : res_records) {
-            // In Database::getDataset, inside the loop over res_records
-            // Retrieve as mysqlx::DbDoc, which represents a JSON document
             mysqlx::DbDoc feature_doc = row_record[0].get<mysqlx::DbDoc>();
             mysqlx::DbDoc label_doc = row_record[1].get<mysqlx::DbDoc>();
 
-            // Use ostringstream to convert DbDoc to its string representation
             std::ostringstream ss_features;
-            ss_features << feature_doc; // Stream the DbDoc object to the stringstream
-            std::string feature_json_str = ss_features.str(); // Get the string from the stream
+            ss_features << feature_doc;
+            std::string feature_json_str = ss_features.str();
 
             std::ostringstream ss_labels;
-            ss_labels << label_doc; // Stream the DbDoc object to the stringstream
-            std::string label_json_str = ss_labels.str(); // Get the string from the stream
+            ss_labels << label_doc;
+            std::string label_json_str = ss_labels.str();
 
-            // Now, parse with nlohmann::json using the obtained strings
-            nlohmann::json features_json = nlohmann::json::parse(feature_json_str);
-            nlohmann::json labels_json = nlohmann::json::parse(label_json_str);
+            
+            json features_json = nlohmann::json::parse(feature_json_str);
+            json labels_json = nlohmann::json::parse(label_json_str);
 
             std::vector<float> features = features_json.get<std::vector<float>>();
             std::vector<float> labels = labels_json.get<std::vector<float>>();
@@ -347,7 +339,7 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
         datasetRecordsTable.update()
             .set("label_values", labels_json.dump())
             .where("dataset_id = :dataset_id AND row_index = :row_index")
-            .bind("dataset_id", datasetId)
+            .bind("dataset_id", static_cast<long long>(datasetId)) // Cast to long long
             .bind("row_index", rowIndex)
             .execute();
     }
@@ -357,10 +349,10 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
     }
 }
 
-void Database::clearDatasetRecords(int& datasetId) {
+// Corrected parameter type to long long to match declaration in Database.hpp
+void Database::clearDatasetRecords(long long& datasetId) {
     try {
-        session.sql("DELETE FROM dataset_records WHERE dataset_id = ?")
-            .bind(datasetId)
+        session.sql(std::string("DELETE FROM dataset_records WHERE dataset_id = ") + std::to_string(datasetId)) // Fixed string concat
             .execute();
         std::cout << "Cleared existing records for dataset ID: " << datasetId << std::endl;
     }
@@ -388,7 +380,7 @@ void Database::saveAIModelState(int& datasetId,
             << "?, NOW(), ?, ?, ?, ?, ?, ?, ?)"; // NOW() directly in SQL
 
         session.sql(ss.str())
-            .bind(datasetId)
+            .bind(static_cast<long long>(datasetId)) // Cast datasetId to long long
             .bind(matrixToBlob(inputData))
             .bind(matrixToBlob(outputData))
             .bind(matrixToBlob(hiddenData))
@@ -410,28 +402,36 @@ Database::AIModelState Database::loadLatestAIModelState(int& datasetId) {
     AIModelState state;
     try {
         // Use raw SQL query for selection to ensure correct ordering and limit
-        mysqlx::RowResult res = session.sql(R"(
+        mysqlx::RowResult res = session.sql(std::string(R"(
             SELECT input_data, output_data, hidden_data, hidden_output_data, hidden_error_data,
                    weights_hidden_input, weights_output_hidden
             FROM ai_model_states
-            WHERE dataset_id = ?
+            WHERE dataset_id = )") + std::to_string(datasetId) + std::string(R"(
             ORDER BY timestamp DESC
             LIMIT 1;
-        )")
-            .bind(datasetId)
+        )")) // Fixed string concat
             .execute();
 
         mysqlx::Row row = res.fetchOne();
 
         if (row) {
-            // Corrected: Use length() instead of empty() for mysqlx::bytes
-            state.inputData = blobToMatrix(std::vector<char>(row[0].get<mysqlx::bytes>().begin(), row[0].get<mysqlx::bytes>().end()));
-            state.outputData = blobToMatrix(row[1].get<mysqlx::bytes>().length() == 0 ? std::vector<char>() : std::vector<char>(row[1].get<mysqlx::bytes>().begin(), row[1].get<mysqlx::bytes>().end()));
-            state.hiddenData = blobToMatrix(row[2].get<mysqlx::bytes>().length() == 0 ? std::vector<char>() : std::vector<char>(row[2].get<mysqlx::bytes>().begin(), row[2].get<mysqlx::bytes>().end()));
-            state.hiddenOutputData = blobToVector(row[3].get<mysqlx::bytes>().length() == 0 ? std::vector<char>() : std::vector<char>(row[3].get<mysqlx::bytes>().begin(), row[3].get<mysqlx::bytes>().end()));
-            state.hiddenErrorData = blobToVector(row[4].get<mysqlx::bytes>().length() == 0 ? std::vector<char>() : std::vector<char>(row[4].get<mysqlx::bytes>().begin(), row[4].get<mysqlx::bytes>().end()));
-            state.weightsHiddenInput = blobToMatrix(row[5].get<mysqlx::bytes>().length() == 0 ? std::vector<char>() : std::vector<char>(row[5].get<mysqlx::bytes>().begin(), row[5].get<mysqlx::bytes>().end()));
-            state.weightsOutputHidden = blobToMatrix(row[6].get<mysqlx::bytes>().length() == 0 ? std::vector<char>() : std::vector<char>(row[6].get<mysqlx::bytes>().begin(), row[6].get<mysqlx::bytes>().end()));
+            // Haal blobs op als std::string en converteer naar vector<uint8_t>
+            std::string inputDataBlob = row[0].get<std::string>();
+            std::string outputDataBlob = row[1].get<std::string>();
+            std::string hiddenDataBlob = row[2].get<std::string>();
+            std::string hiddenOutputDataBlob = row[3].get<std::string>();
+            std::string hiddenErrorDataBlob = row[4].get<std::string>();
+            std::string weightsHiddenInputBlob = row[5].get<std::string>();
+            std::string weightsOutputHiddenBlob = row[6].get<std::string>();
+
+            // Converteer naar je datastructuren
+            state.inputData = blobToMatrix(std::vector<char>(inputDataBlob.begin(), inputDataBlob.end()));
+            state.outputData = blobToMatrix(std::vector<char>(outputDataBlob.begin(), outputDataBlob.end()));
+            state.hiddenData = blobToMatrix(std::vector<char>(hiddenDataBlob.begin(), hiddenDataBlob.end()));
+            state.hiddenOutputData = blobToVector(std::vector<char>(hiddenOutputDataBlob.begin(), hiddenOutputDataBlob.end()));
+            state.hiddenErrorData = blobToVector(std::vector<char>(hiddenErrorDataBlob.begin(), hiddenErrorDataBlob.end()));
+            state.weightsHiddenInput = blobToMatrix(std::vector<char>(weightsHiddenInputBlob.begin(), weightsHiddenInputBlob.end()));
+            state.weightsOutputHidden = blobToMatrix(std::vector<char>(weightsOutputHiddenBlob.begin(), weightsOutputHiddenBlob.end()));
             std::cout << "Loaded latest AI model state for dataset_id: " << datasetId << std::endl;
         }
         else {
@@ -440,7 +440,6 @@ Database::AIModelState Database::loadLatestAIModelState(int& datasetId) {
     }
     catch (const mysqlx::Error& err) {
         std::cerr << "Error loading AI model state: " << err.what() << std::endl;
-        // Depending on your application's error handling, you might re-throw or return an empty state.
     }
     return state;
 }
@@ -457,8 +456,6 @@ void Database::savePredictionResults(int& datasetId, int sampleIndex,
 
         mysqlx::Table predictionResultsTable = schema.getTable("prediction_results");
 
-        // Use INSERT ... ON DUPLICATE KEY UPDATE to handle existing records
-        // This is useful if you might run the prediction saving multiple times for the same dataset and sample index
         session.sql(R"(
             INSERT INTO prediction_results (dataset_id, sample_index, input_features, actual_targets, predicted_targets)
             VALUES (?, ?, ?, ?, ?)
@@ -468,14 +465,13 @@ void Database::savePredictionResults(int& datasetId, int sampleIndex,
                 predicted_targets = VALUES(predicted_targets),
                 prediction_timestamp = NOW();
         )")
-            .bind(datasetId)
+            .bind(static_cast<long long>(datasetId)) // Cast to long long
             .bind(sampleIndex)
             .bind(input_features_json.dump())
             .bind(actual_targets_json.dump())
             .bind(predicted_targets_json.dump())
             .execute();
 
-        // std::cout << "Saved prediction results for dataset_id: " << datasetId << ", sample_index: " << sampleIndex << std::endl;
     }
     catch (const mysqlx::Error& err) {
         std::cerr << "Error saving prediction results: " << err.what() << std::endl;

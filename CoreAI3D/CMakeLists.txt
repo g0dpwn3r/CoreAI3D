@@ -20,7 +20,7 @@ find_package(Boost REQUIRED COMPONENTS system)
 find_package(CURL REQUIRED)
 
 # Find nlohmann_json
-find_package(nlohmann_json CONFIG REQUIRED) # Assumes nlohmann_json is installed via vcpkg and provides a config file
+find_package(nlohmann_json CONFIG REQUIRED)# Assumes nlohmann_json is installed via vcpkg and provides a config file
 
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(INCLUDE_DIR /usr/include)
