@@ -1,8 +1,11 @@
 #ifndef CORE_HPP
 #define CORE_HPP
 
-#include "Train.hpp"
 #include "main.hpp"
+
+#include "Train.hpp"
+#include "Database.hpp"
+#include "Language.hpp"
 
 class Training;
 

@@ -1,0 +1,24 @@
+PyQt6
+aiohttp
+websockets
+psutil
+python-dateutil
+pathlib2
+requests
+numpy 
+opencv-python 
+Pillow 
+pytesseract 
+SpeechRecognition 
+pyaudio 
+sounddevice 
+soundfile 
+ librosa 
+ moviepy
+matplotlib 
+seaborn 
+pandas 
+scikit-learn 
+tensorflow 
+torch 
+transformers

@@ -1,0 +1,86 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Windows",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/out/build/windows-debug/CoreAI3D/CoreAI3D.exe",
+            "args": [
+                "-i", "gold.csv",
+                "-d", ",",
+                "-s", "5",
+                "--language", "en",
+                "--embedding-file", "emb.txt",
+                "-e", "5",
+                "-lr", "0.001",
+                "-l", "5",
+                "-n", "25",
+                "--min", "0",
+                "--max", "100000000",
+                "--iz", "1",
+                "-oz", "1",
+                "--db-host", "localhost",
+                "--db-port", "33050",
+                "--db-user", "root",
+                "--db-password", "pmAkRV4lAAKsOfdWCUxP",
+                "--db-schema", "coreai3d",
+                "--dataset-name", "test1A",
+                "--create-tables",
+                "-di", "1",
+                "-o", "output.csv",
+                "--contains-header",
+                "--start-predict"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug WSL",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/out/build/wsl-debug/CoreAI3D/CoreAI3D",
+            "args": [
+                "-i", "gold.csv",
+                "-d", ",",
+                "-s", "5",
+                "--language", "en",
+                "--embedding-file", "emb.txt",
+                "-e", "5",
+                "-lr", "0.001",
+                "-l", "5",
+                "-n", "25",
+                "--min", "0",
+                "--max", "100000000",
+                "--iz", "1",
+                "-oz", "1",
+                "--db-host", "localhost",
+                "--db-port", "33050",
+                "--db-user", "root",
+                "--db-password", "pmAkRV4lAAKsOfdWCUxP",
+                "--db-schema", "coreai3d",
+                "--dataset-name", "test1A",
+                "--create-tables",
+                "-di", "1",
+                "-o", "output.csv",
+                "--contains-header",
+                "--start-predict"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}

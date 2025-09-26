@@ -1,22 +1,40 @@
 FROM ubuntu:latest
 
+# Install build dependencies and runtime libraries
 RUN apt update -y && apt upgrade -y && apt dist-upgrade -y && apt install -y \
-    libboost-system-dev \
+    build-essential \
+    cmake \
+    git \
+    libboost-all-dev \
     libmysqlcppconn-dev \
     libmysqlcppconn7t64 \
     libcurl4-openssl-dev \
     libssl-dev \
     wget \
     zlib1g \
+    nlohmann-json3-dev \
+    pkg-config \
     && apt clean
 
 WORKDIR /app
-#install mysql-connector-cpp-x
-RUN wget -O libmysqlcppconx.deb https://dev.mysql.com/get/Downloads/Connector-C++/libmysqlcppconnx2_9.3.0-1ubuntu25.04_amd64.deb && dpkg -i libmysqlcppconx.deb
-#Change to release
-COPY out/build/linux-x64-debug-wsl/CoreAI3D/CoreAI3D /app/CoreAI3D
-RUN chmod +x /app/CoreAI3D
 
+# Install vcpkg
+RUN git clone https://github.com/g0dpwn3r/vcpkg && \
+    cd vcpkg && \
+    ./bootstrap-vcpkg.sh && \
+    ./vcpkg integrate install
 
-# Default command can be empty or help-related
-CMD ["./CoreAI3D"]
+# Copy source code
+COPY . /app
+
+# Build the application
+RUN mkdir -p build && \
+    cd build && \
+    cmake -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake --build . --config Release
+
+# Make executable
+RUN chmod +x /app/build/CoreAI3D
+
+# Default command
+CMD ["/app/build/CoreAI3D"]

@@ -1,5 +1,9 @@
 #pragma once
 #include "main.hpp"
+
+#include "Train.hpp"
+#include "Core.hpp"
+#include "Language.hpp"
 //Assuming this is the correct header for mysqlx
 
 // Forward declarations for nlohmann::json if needed in header for method signatures

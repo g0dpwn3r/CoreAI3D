@@ -1,8 +1,10 @@
 #pragma once
 
-#include "Core.hpp"
-#include "Train.hpp"
 #include "main.hpp"
+
+#include "Train.hpp"
+#include "Database.hpp"
+#include "Core.hpp"
 
 class Training;
 class CoreAI;
@@ -37,7 +39,7 @@ public:
 private:
 
     
-    int embeddingDim;
+    int embeddingDim = 300;
     int inputSize;
     int outputSize;
     int layers;

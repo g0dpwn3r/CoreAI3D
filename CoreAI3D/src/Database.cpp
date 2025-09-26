@@ -229,10 +229,10 @@ int Database::addDataset(const std::string& datasetName, const std::string& desc
 
         if (row) {
             // Dataset exists, update it
-            long long existingDatasetId = row[0].get<long long>(); // Changed to long long
+            long existingDatasetId = row[0].get<long long>(); // Changed to long long
             datasetsTable.update()
                 .set("description", description)
-                .set("num_rows", static_cast<long long>(numRows)) // Cast to long long
+                .set("num_rows", static_cast<long>(numRows)) // Cast to long long
                 .set("num_features", numFeatures)
                 .set("num_labels", numLabels)
                 .set("uploaded_at", mysqlx::expr("NOW()"))
@@ -245,9 +245,9 @@ int Database::addDataset(const std::string& datasetName, const std::string& desc
         else {
             // Dataset does not exist, insert new
             mysqlx::Result insertRes = datasetsTable.insert("dataset_name", "description", "num_rows", "num_features", "num_labels")
-                .values(datasetName, description, static_cast<long long>(numRows), numFeatures, numLabels) // Cast to long long
+                .values(datasetName, description, static_cast<long>(numRows), numFeatures, numLabels) // Cast to long long
                 .execute();
-            long long newDatasetId = insertRes.getAutoIncrementValue(); // Get as long long
+            long newDatasetId = insertRes.getAutoIncrementValue(); // Get as long long
             std::cout << "Added new dataset '" << datasetName << "' with ID: " << newDatasetId << std::endl;
             return static_cast<int>(newDatasetId); // Cast back to int for return
         }

@@ -1,11 +1,10 @@
 ﻿#include "Language.hpp"
-#include <iomanip> // For std::put_time
 
-Language::Language(std::string& embedingFile_, int& embeddingDim_, std::string& dbHost_, int& dbPort_,
-    std::string& dbUser_, std::string& dbPassword_,
-    std::string& dbSchema_, mysqlx::SSLMode ssl_, std::string& lang_, int& inputSize_, int& outputSize_, int& layers_, int& neurons_)
-    : embedingFile(embedingFile_), embeddingDim(embeddingDim_), dbHost(dbHost_), dbPort(dbPort_), dbUser(dbUser_), dbPassword(dbPassword_), dbSchema(dbSchema_),
-    ssl(ssl_), currentLang(lang_), inputSize(inputSize_), outputSize(outputSize_), layers(layers_), neurons(neurons_)
+Language::Language(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort,
+    std::string& dbUser, std::string& dbPassword,
+    std::string& dbSchema, mysqlx::SSLMode ssl, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons)
+    : embedingFile(embedingFile), embeddingDim(embeddingDim), dbHost(dbHost), dbPort(dbPort), dbUser(dbUser), dbPassword(dbPassword), dbSchema(dbSchema),
+    ssl(ssl), currentLang(lang), inputSize(inputSize), outputSize(outputSize), layers(layers), neurons(neurons)
 {
     // Initialize trainer and core here, ensuring they use the class members for their construction
     // Use the actual parameters passed to Language constructor

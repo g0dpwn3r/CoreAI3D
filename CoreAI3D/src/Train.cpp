@@ -1,17 +1,4 @@
 ﻿#include "Train.hpp"
-#include <fstream>
-#include <sstream>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <algorithm> // For std::transform, std::min, std::max
-#include <cmath> // For std::abs, std::isnan, std::isinf, std::sqrt
-#include <limits> // For std::numeric_limits
-#include <iomanip> // For std::fixed, std::setprecision, std::put_time
-#include <stdexcept> // For std::runtime_error, std::invalid_argument, std::out_of_range
-#include <ctime> // For std::tm, std::mktime, std::localtime
-#include <random> // For std::mt19937, std::uniform_real_distribution
-
 // Constructor for online mode (with database)
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
     const std::string dbPassword, const std::string& dbSchema, mysqlx::SSLMode ssl, bool createTables)
@@ -782,14 +769,14 @@ Language* Training::getLanguage()
     return this->langProc.get();
 }
 
-void Training::saveModel(int& datasetId) {
+bool Training::saveModel(int& datasetId) {
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot save model to database in offline mode or if database manager is not initialized." << std::endl;
-        return;
+        return false;
     }
     if (!core) {
         std::cerr << "Error: CoreAI not initialized. Cannot save model." << std::endl;
-        return;
+        return false;
     }
 
     std::cout << "Saving AI model state to database (ID: " << datasetId << ")...\n";
@@ -807,20 +794,20 @@ void Training::saveModel(int& datasetId) {
     // Ideally, CoreAI's getters return correctly sized data.
     // For now, retaining the resize calls with a warning about their necessity.
     if (!hiddenData.empty() && hiddenData[0].size() != (size_t)this->neurons) {
-        // std::cerr << "Warning: hiddenData size mismatch before saving model." << std::endl;
+        std::cerr << "Warning: hiddenData size mismatch before saving model." << std::endl;
         // Consider resizing or re-populating hiddenData in CoreAI
     }
     if (hiddenOutputData.size() != (size_t)this->neurons) { // Assuming hidden_output is `neurons` size
-        // std::cerr << "Warning: hiddenOutputData size mismatch before saving model." << std::endl;
+        std::cerr << "Warning: hiddenOutputData size mismatch before saving model." << std::endl;
     }
     if (hiddenErrorData.size() != (size_t)this->outputSize) { // Assuming hidden_error is `outputSize` size
-        // std::cerr << "Warning: hiddenErrorData size mismatch before saving model." << std::endl;
+        std::cerr << "Warning: hiddenErrorData size mismatch before saving model." << std::endl;
     }
     if (!weightsHiddenInput.empty() && weightsHiddenInput[0].size() != (size_t)this->inputSize) { // Assuming input layer size
-        // std::cerr << "Warning: weightsHiddenInput size mismatch before saving model." << std::endl;
+        std::cerr << "Warning: weightsHiddenInput size mismatch before saving model." << std::endl;
     }
     if (!weightsOutputHidden.empty() && weightsOutputHidden[0].size() != (size_t)this->neurons) { // Assuming hidden layer size
-        // std::cerr << "Warning: weightsOutputHidden size mismatch before saving model." << std::endl;
+        std::cerr << "Warning: weightsOutputHidden size mismatch before saving model." << std::endl;
     }
 
 
@@ -829,12 +816,13 @@ void Training::saveModel(int& datasetId) {
         weightsHiddenInput, weightsOutputHidden);
 
     std::cout << "AI model state saved successfully." << std::endl;
+    return true;
 }
 
-void Training::loadModel(int& datasetId) {
+bool Training::loadModel(int& datasetId) {
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot load model from database in offline mode or if database manager is not initialized." << std::endl;
-        return;
+        return false;
     }
 
     std::cout << "Loading AI model state from database (ID: " << datasetId << ")...\n";
@@ -843,7 +831,7 @@ void Training::loadModel(int& datasetId) {
 
     if (state.inputData.empty() || state.outputData.empty() || state.weightsHiddenInput.empty() || state.weightsOutputHidden.empty()) {
         std::cerr << "No valid model state found or loaded for dataset ID " << datasetId << std::endl;
-        return;
+        return false;
     }
 
     this->inputSize = state.inputData[0].size();
@@ -862,6 +850,7 @@ void Training::loadModel(int& datasetId) {
     core->setWeightsOutputHidden(state.weightsOutputHidden);
 
     std::cout << "Model loaded successfully for dataset ID " << datasetId << std::endl;
+	return true;
 }
 
 void Training::printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision)

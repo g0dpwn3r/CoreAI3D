@@ -18,15 +18,22 @@
       "configurationType": "Debug",
       "buildRoot": "${projectDir}/out/build/${name}",
       "installRoot": "${projectDir}/out/install/${name}",
-      "cmakeCommandArgs": "-DCMAKE_TOOLCHAIN_FILE=${env.VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cmakeCommandArgs": "-DCMAKE_TOOLCHAIN_FILE=$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "inheritEnvironments": [ "msvc_x64_x64" ],
-      "launch": {
-        "project":  "CoreAI3D",
-        "program": "${buildRoot}\\CoreAI3D.exe",
-        "args": "--version",
-        "workingDirectory": "D:/code/CoreAI3D",
-        "environment": []
-      }
+      "variables": [
+        {
+          "name": "VCPKG_TARGET_TRIPLET",
+          "value": "x64-windows"
+        },
+        {
+          "name": "VCPKG_VERBOSE",
+          "value": "ON"
+        },
+        {
+          "name": "VCPKG_INSTALL_PREFIX",
+          "value": "D:/code/CoreAI3D/out/build/windows-debug/vcpkg_installed"
+        }
+      ]
     }
   ]
 }

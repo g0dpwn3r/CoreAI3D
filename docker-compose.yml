@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   mysql:
-    image: mysql:8.0
+    image: mysql:latest
     container_name: coreai3d_mysql
     environment:
       MYSQL_ROOT_PASSWORD: pmAkRV4lAAKsOfdWCUxP
@@ -11,9 +9,7 @@ services:
       - "33060:33060" # X Plugin
       - "3306:3306"   # classic protocol
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./my.cnf:/etc/mysql/conf.d/my.cnf
-    command: --default-authentication-plugin=mysql_native_password
+        - mysql_data:/var/lib/mysql
 
   coreai3d:
     build:
@@ -29,10 +25,145 @@ services:
       DB_PASSWORD: pmAkRV4lAAKsOfdWCUxP
       DB_SCHEMA: CoreAI3D
     ports:
-      - "8080:8080" # Assuming your app listens on 8080
+      - "8080:8080" # API Server
+      - "8081:8081" # WebSocket Server
+    command:
+      - "/app/build/CoreAI3D"
+      - "-i"
+      - "gold.csv"
+      - "-d"
+      - ","
+      - "-iz"
+      - "2"
+      - "-s"
+      - "5"
+      - "-e"
+      - "5"
+      - "-l"
+      - "5"
+      - "-n"
+      - "25"
+      - "--min"
+      - "0"
+      - "--max"
+      - "1000000"
+      - "-oz"
+      - "1"
+      - "-lr"
+      - "0.001"
+      - "--contains-header"
+      - "--start-predict"
+      - "--dataset-name"
+      - "gold-test-1A"
+      - "--db-host"
+      - "mysql"
+      - "--db-port"
+      - "33060"
+      - "--db-user"
+      - "root"
+      - "--db-password"
+      - "pmAkRV4lAAKsOfdWCUxP"
+      - "--db-schema"
+      - "CoreAI3D"
+      - "-di"
+      - "1"
+      - "-o"
+      - "gold-output.csv"
+      - "--language"
+      - "en"
+      - "--embedding-file"
+      - "emb.txt"
+
+  # Linux Sandbox Environments
+  ubuntu-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.ubuntu
+    container_name: ubuntu_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
     volumes:
-    #Change to release
-      - ./out/build/linux-x64-debug-wsl/CoreAI3D/CoreAI3D:/app/CoreAI3D
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - SANDBOX_TYPE=ubuntu
+    networks:
+      - sandbox_network
+
+  centos-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.centos
+    container_name: centos_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=centos
+    networks:
+      - sandbox_network
+
+  alpine-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.alpine
+    container_name: alpine_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=alpine
+    networks:
+      - sandbox_network
+
+  # AI Training Environment
+  ai-trainer:
+    build:
+      context: .
+      dockerfile: docker/training/Dockerfile.trainer
+    container_name: ai_trainer
+    depends_on:
+      - ubuntu-sandbox
+      - centos-sandbox
+      - alpine-sandbox
+    volumes:
+      - ./training_data:/training_data
+      - ./ai_models:/ai_models
+      - ./logs:/logs
+    environment:
+      - TRAINING_MODE=true
+      - LOG_LEVEL=INFO
+    command: ["python3", "/app/train_linux_operations.py"]
 
 volumes:
-  mysql_data:
+    mysql_data:
+
+networks:
+  sandbox_network:
+    driver: bridge

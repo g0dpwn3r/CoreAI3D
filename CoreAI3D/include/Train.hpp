@@ -2,12 +2,14 @@
 #define EMBEDDING_DIM 50
 
 #include "main.hpp"
+
 #include "Core.hpp"
-#include "Database.hpp" // Now includes mysqlx::SSLMode via main.hpp
+#include "Database.hpp"
 #include "Language.hpp"
 
 class Language;
 class CoreAI;
+class Database;
 
 class Training {
 public:
@@ -57,8 +59,8 @@ public:
     CoreAI* getCore();
     Language* getLanguage();
     // Database interaction methods
-    void saveModel(int& datasetId);
-    void loadModel(int& datasetId);
+    bool saveModel(int& datasetId);
+    bool loadModel(int& datasetId);
     void printFullMatrix(std::vector<std::vector<float>>& data, int len, int precision = 6);
     void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);
     float original_data_global_min;                 // Stores global min from original data for denorm

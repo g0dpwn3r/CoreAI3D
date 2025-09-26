@@ -1,150 +1,52 @@
 {
-  "version": 4,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 20,
-    "patch": 0
-  },
+  "version": 8,
   "configurePresets": [
     {
-      "name": "windows-x64-debug",
-      "displayName": "Windows x64 Debug",
-      "description": "Targeting Windows with MSVC, Debug configuration.",
+      "name": "windows-debug",
+      "displayName": "Windows Debug",
+      "description": "Debug build for Windows using vcpkg",
       "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
       "binaryDir": "${sourceDir}/out/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "CMAKE_CXX_STANDARD": "17"
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+        "VCPKG_INSTALL_PREFIX": "${sourceDir}/out/build/${presetName}/vcpkg_installed",
+        "VCPKG_VERBOSE": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       },
-      "architecture": {
-        "value": "x64",
-        "strategy": "external"
+      "environment": {
+        "VCPKG_ROOT": "C:/vcpkg"
       }
     },
     {
-      "name": "windows-x64-release",
-      "displayName": "Windows x64 Release",
-      "description": "Targeting Windows with MSVC, Release configuration.",
-      "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "CMAKE_CXX_STANDARD": "17"
-      },
-      "architecture": {
-        "value": "x64",
-        "strategy": "external"
-      }
-    },
-    {
-      "name": "linux-x64-debug-wsl",
-      "displayName": "Linux x64 Debug (WSL)",
-      "description": "Targeting WSL (Linux) with GCC/Clang, Debug configuration.",
+      "name": "wsl-debug",
+      "displayName": "WSL Debug",
+      "description": "Debug build for WSL using vcpkg",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "CMAKE_PREFIX_PATH": "/usr/local",
+        "CMAKE_TOOLCHAIN_FILE": "/home/h4x0r/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "CMAKE_CXX_STANDARD": "17",
-        "BOOST_ROOT": "/usr/include/boost", 
-        "Boost_USE_STATIC_LIBS": "ON"
-      },
-      "vendor": {
-        "microsoft.com/VisualStudioRemoteSettings/1.0": {
-          "sourceDir": "$env{HOME}/.vs/${projectDirName}"
-        },
-        "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
-          "copySourcesOptions": {
-            "method": "rsync",
-            "exclusionList": [
-              ".vs",
-              ".git",
-              "vcpkg_installed",
-              "vcpkg",
-              "mysql-connector-cpp",
-              "argparse",
-              "protobuf",
-              "build",
-              "CMakeCache.txt",
-              "CMakeFiles"
-            ]
-          },
-          "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
-            "intelliSenseMode": "linux-gcc-x64",
-            "copySources": true
-            // You can add copySourcesOptions here if needed for rsync exclusions
-            // "copySourcesOptions": "--exclude=.vs/ --exclude=build/"
-          }
-        }
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
       },
       "environment": {
-        "PKG_CONFIG_PATH": "/usr/local/lib/pkgconfig"
+        "VCPKG_ROOT": "/home/h4x0r/vcpkg"
       }
-    },
-    {
-      "name": "linux-x64-release-wsl",
-      "displayName": "Linux x64 Release (WSL)",
-      "description": "Targeting WSL (Linux) with GCC/Clang, Release configuration.",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "CMAKE_PREFIX_PATH": "/usr/local",
-        "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "CMAKE_CXX_STANDARD": "17"
-      },
-      "vendor": {
-        "microsoft.com/VisualStudioRemoteSettings/1.0": {
-          "sourceDir": "$env{HOME}/.vs/${projectDirName}"
-        }
-      },
-      "environment": {
-        "PKG_CONFIG_PATH": "/usr/local/lib/pkgconfig"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "windows-x64-debug",
-      "displayName": "Windows x64 Debug",
-      "configurePreset": "windows-x64-debug"
-    },
-    {
-      "name": "windows-x64-release",
-      "displayName": "Windows x64 Release",
-      "configurePreset": "windows-x64-release"
-    },
-    {
-      "name": "linux-x64-debug-wsl",
-      "displayName": "Linux x64 Debug (WSL)",
-      "configurePreset": "linux-x64-debug-wsl"
-    },
-    {
-      "name": "linux-x64-release-wsl",
-      "displayName": "Linux x64 Release (WSL)",
-      "configurePreset": "linux-x64-release-wsl"
     }
   ],
   "testPresets": [
     {
-      "name": "windows-x64-debug",
-      "displayName": "Windows x64 Debug",
-      "configurePreset": "windows-x64-debug"
+      "name": "windows-debug",
+      "displayName": "Windows Debug",
+      "configurePreset": "windows-debug"
     },
     {
-      "name": "linux-x64-debug-wsl",
-      "displayName": "Linux x64 Debug (WSL)",
-      "configurePreset": "linux-x64-debug-wsl"
+      "name": "wsl-debug",
+      "displayName": "WSL Debug",
+      "configurePreset": "wsl-debug"
     }
   ]
 }
