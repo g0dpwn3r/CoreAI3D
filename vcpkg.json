@@ -1,24 +1,36 @@
 {
-  "name": "coreai3d",
+    "name": "coreai3d",
     "version-string": "1.0.0",
-  "dependencies": [
-    "abseil",
-    "utf8-range",
-    "boost-filesystem",
-    "boost-system",
-    "boost-regex",
-    "boost-asio",
-    "boost-beast",
-    "boost-program-options",
-    "nlohmann-json",
-    "boost-asio",
-    "boost-beast",
-    "boost-system",
-    "boost-regex",
-    "curl",
-    "mysql-connector-cpp",
-    "protobuf",
-    "zlib",
-    "zstd"
-  ]
+
+    "builtin-baseline": "a62ce77d56ee07513b4b67de1ec2daeaebfae51a",
+
+    "dependencies": [
+        {
+            "name": "google-cloud-cpp",
+            "features": [
+                "speech"
+            ]
+        },
+        "abseil",
+        "openssl",
+        "boost-filesystem",
+        "boost-system",
+        "boost-regex",
+        "boost-asio",
+        "boost-beast",
+        "boost-program-options",
+
+        "utf8-range",
+        "nlohmann-json",
+        "curl",
+        "mysql-connector-cpp",
+        "zlib",
+        "zstd"
+    ],
+    "overrides": [
+        {
+            "name": "openssl",
+            "version": "3.5.0"
+        }
+    ]
 }

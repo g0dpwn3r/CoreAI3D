@@ -1,0 +1,37 @@
+# CRITICAL FIX: Explicitly add the missing transitive dependency
+bazel_dep(
+    name = "com_google_disco_to_proto3_converter",
+    version = "0.0.0-20230206-a946b5a", # A known working version from BCR
+    repo_name = "com_google_disco_to_proto3_converter", # Ensures the legacy name is mapped
+)
+
+# CRITICAL FIX for the current error (@com_google_googleapis)
+bazel_dep(
+    name = "googleapis",
+    version = "0.0.0-20250826-a92cee39", # Use a recent date-based version from the BCR
+    repo_name = "com_google_googleapis",
+)
+
+# --- Ensure ALL PREVIOUS MIGRATION FIXES ARE ALSO PRESENT ---
+# These fixes are required for the entire Google build to pass:
+
+# Fix for previous @com_google_protobuf error
+bazel_dep(
+    name = "protobuf",
+    version = "32.1",
+    repo_name = "com_google_protobuf",
+)
+
+# Fix for previous @com_google_grpc error
+bazel_dep(
+    name = "grpc",
+    version = "1.62.1.bcr.2",
+    repo_name = "com_google_grpc",
+)
+
+# Fix for previous @rules_shell error
+bazel_dep(
+    name = "rules_shell",
+    version = "0.5.1",
+    repo_name = "rules_shell",
+)

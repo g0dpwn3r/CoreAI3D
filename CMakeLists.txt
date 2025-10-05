@@ -65,7 +65,7 @@ else()
     add_definitions(-D_POSIX_C_SOURCE=200809L)
 endif()
 
-project ("CoreAI3D")
+project("CoreAI3D")
 
 # Include sub-projects.
 add_subdirectory ("CoreAI3D")

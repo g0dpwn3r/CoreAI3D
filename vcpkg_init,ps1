@@ -1,0 +1,6 @@
+# Set the VCPKG_ROOT environment variable (Recommended by vcpkg documentation)
+$env:VCPKG_ROOT = "D:\code\CoreAI3D\vcpkg"
+
+# Append the VCPKG_ROOT path to the existing PATH variable
+$env:PATH += ";$env:VCPKG_ROOT"
+

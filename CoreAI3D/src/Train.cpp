@@ -676,7 +676,7 @@ void Training::preprocess(float minVal, float maxVal) {
     }
     else {
         // If core is already initialized, update its parameters if necessary
-        // core->updateParameters(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal); // Example update method
+        //core->updateParameters(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal); // Example update method
     }
 
     core->setInput(inputs);

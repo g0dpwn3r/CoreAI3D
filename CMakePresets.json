@@ -1,52 +1,124 @@
 {
-  "version": 8,
-  "configurePresets": [
-    {
-      "name": "windows-debug",
-      "displayName": "Windows Debug",
-      "description": "Debug build for Windows using vcpkg",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-        "VCPKG_INSTALL_PREFIX": "${sourceDir}/out/build/${presetName}/vcpkg_installed",
-        "VCPKG_VERBOSE": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-      },
-      "environment": {
-        "VCPKG_ROOT": "C:/vcpkg"
-      }
+    "version": 8,
+    "vendor": {
+        "microsoft.com/VisualStudio/CMake/1.0": {
+            "defaultBuildPreset": "windows-debug"
+        }
     },
-    {
-      "name": "wsl-debug",
-      "displayName": "WSL Debug",
-      "description": "Debug build for WSL using vcpkg",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_TOOLCHAIN_FILE": "/home/h4x0r/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
-      },
-      "environment": {
-        "VCPKG_ROOT": "/home/h4x0r/vcpkg"
-      }
-    }
-  ],
-  "testPresets": [
-    {
-      "name": "windows-debug",
-      "displayName": "Windows Debug",
-      "configurePreset": "windows-debug"
-    },
-    {
-      "name": "wsl-debug",
-      "displayName": "WSL Debug",
-      "configurePreset": "wsl-debug"
-    }
-  ]
+    "configurePresets": [
+        {
+            "name": "windows-base",
+            "hidden": true,
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            },
+            "environment": {
+                "VCPKG_ROOT": "${sourceDir}/vcpkg"
+            }
+        },
+        {
+            "name": "windows-debug",
+            "displayName": "Windows Debug (VS 2022)",
+            "description": "Debug build for Windows using vcpkg",
+            "inherits": "windows-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "windows-release",
+            "displayName": "Windows Release (VS 2022)",
+            "description": "Release build for Windows using vcpkg",
+            "inherits": "windows-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "wsl-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "/home/h4x0r/vcpkg/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_OVERLAY_PORTS": "/home/h4x0r/vcpkg/overlay-ports",
+                "VCPKG_TARGET_TRIPLET": "x64-linux",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+            },
+            "environment": {
+                "VCPKG_ROOT": "/home/h4x0r/vcpkg"
+            }
+        },
+        {
+            "name": "wsl-debug",
+            "displayName": "WSL Debug",
+            "description": "Debug build for WSL using vcpkg",
+            "inherits": "wsl-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "wsl-release",
+            "displayName": "WSL Release",
+            "description": "Release build for WSL using vcpkg",
+            "inherits": "wsl-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-debug",
+            "displayName": "Windows Debug Build",
+            "configurePreset": "windows-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-release",
+            "displayName": "Windows Release Build",
+            "configurePreset": "windows-release",
+            "configuration": "Release"
+        },
+        {
+            "name": "wsl-debug",
+            "displayName": "WSL Debug Build",
+            "configurePreset": "wsl-debug"
+        },
+        {
+            "name": "wsl-release",
+            "displayName": "WSL Release Build",
+            "configurePreset": "wsl-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "windows-debug",
+            "displayName": "Windows Debug Tests",
+            "configurePreset": "windows-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-release",
+            "displayName": "Windows Release Tests",
+            "configurePreset": "windows-release",
+            "configuration": "Release"
+        },
+        {
+            "name": "wsl-debug",
+            "displayName": "WSL Debug Tests",
+            "configurePreset": "wsl-debug"
+        },
+        {
+            "name": "wsl-release",
+            "displayName": "WSL Release Tests",
+            "configurePreset": "wsl-release"
+        }
+    ]
 }

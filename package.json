@@ -1,0 +1,9 @@
+{
+    "name": "coreai3d-project",
+    "version": "1.0.0",
+    "main": "index.js",
+    "dependencies": {
+        "googleapis": "^129.0.0",
+        "@google-cloud/local-auth": "^3.0.0"
+    }
+}

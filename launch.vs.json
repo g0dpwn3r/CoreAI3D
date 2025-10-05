@@ -59,6 +59,58 @@
         "--embedding-file",
         "emb.txt"
       ]
+    },
+    {
+      "name": "Docker: Attach to CoreAI3D",
+      "type": "docker",
+      "request": "attach",
+      "containerName": "coreai3d",
+      "platform": "linux",
+      "sourceFileMap": {
+        "/app": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: HuggingFace Dataset Manager",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/python/huggingface_dataset_manager.py",
+      "console": "integratedTerminal",
+      "args": ["search", "--query", "linux"],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: Train HuggingFace Datasets",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/python/train_huggingface_datasets.py",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: GUI Dashboard",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/windows_gui/run_dashboard.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/windows_gui",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Python: AI Trainer (Docker)",
+      "type": "docker",
+      "request": "attach",
+      "containerName": "ai_trainer",
+      "platform": "linux",
+      "sourceFileMap": {
+        "/app": "${workspaceFolder}"
+      }
     }
   ]
 }

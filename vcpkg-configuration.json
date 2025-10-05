@@ -1,7 +1,9 @@
 {
-  "default-registry": {
-    "kind": "git",
-    "repository": "https://github.com/g0dpwn3r/vcpkg",
-    "baseline": "187d4fe8a18399a055612b51d320c81223eca76a"
+  "builtin-baseline": "2024-09-01",
+  "overrides": {
+    "googleapis": {
+      "path": "D:/code/CoreAI3D/googleapis"
+    }
   }
 }
+

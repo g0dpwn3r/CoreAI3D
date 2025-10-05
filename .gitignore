@@ -40,7 +40,7 @@ mysql-connector-cpp
 protobuf
 argparse
 fastText
-googleapiscd
+
 
 # External dependencies (like mysql-connector-cpp if managed by vcpkg)
 /ChatGPT-Cpp

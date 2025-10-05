@@ -1,0 +1,34 @@
+^D:\CODE\COREAI3D\CMAKEFILES\0ACC5C8BA8AAEFE200876F2C30B709EC\COPY_PROTOBUF_INCLUDES.RULE
+setlocal
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E echo "Source GOOGLE_DIR: D:/code/CoreAI3D/CoreAI3D/../googleapis/google"
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E echo "Source GOOGLEAPIS_DIR: D:/code/CoreAI3D/CoreAI3D/../googleapis"
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E echo "Build directory: D:/code/CoreAI3D/CoreAI3D"
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory D:/code/CoreAI3D/CoreAI3D/google 2>nul || "D:/Program Files/Viual Studio/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe" -E echo "Directory exists"
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory D:/code/CoreAI3D/CoreAI3D/googleapis 2>nul || "D:/Program Files/Viual Studio/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe" -E echo "Directory exists"
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_directory D:/code/CoreAI3D/CoreAI3D/../googleapis/google D:/code/CoreAI3D/CoreAI3D/google
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_directory D:/code/CoreAI3D/CoreAI3D/../googleapis D:/code/CoreAI3D/CoreAI3D/googleapis
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E echo "Protobuf includes copied successfully"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\CODE\COREAI3D\COREAI3D\CMAKELISTS.TXT
+setlocal
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SD:/code/CoreAI3D -BD:/code/CoreAI3D --check-stamp-file D:/code/CoreAI3D/CoreAI3D/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

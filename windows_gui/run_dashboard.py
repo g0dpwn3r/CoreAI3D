@@ -17,6 +17,11 @@ def setup_environment():
         if str(current_dir) not in sys.path:
             sys.path.insert(0, str(current_dir))
 
+        # Add python directory to Python path (for coreai3d_client)
+        python_dir = current_dir.parent / 'python'
+        if str(python_dir) not in sys.path:
+            sys.path.insert(0, str(python_dir))
+
         # Create logs directory
         logs_dir = current_dir / 'logs'
         logs_dir.mkdir(exist_ok=True)
@@ -33,6 +38,7 @@ def setup_environment():
 
         logger = logging.getLogger(__name__)
         logger.info("Environment setup completed")
+        logger.info(f"Python path includes: {sys.path[:3]}...")  # Log first 3 paths
 
         return True
 
@@ -66,7 +72,7 @@ def check_dependencies():
             print("pip install -r requirements.txt")
             return False
 
-        print("All dependencies are installed ✓")
+        print("All dependencies are installed [OK]")
         return True
 
     except Exception as e:

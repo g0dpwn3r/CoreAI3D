@@ -1,10 +1,13 @@
 ﻿
 cmake_minimum_required(VERSION 3.16)
 project(CoreAI3D)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++20")
 
-# Paths for protobuf imports (relative to project root)
+set(GOOGLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../googleapis/google")
 set(GOOGLEAPIS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../googleapis")
-set(GOOGLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../google")
 
 # Zorg dat protoc beide dirs kan zien
 set(PROTOBUF_IMPORT_DIRS
@@ -13,8 +16,11 @@ set(PROTOBUF_IMPORT_DIRS
     ${GOOGLE_DIR}
 )
 # --- Find and Link Boost Components ---
-# Find all required Boost components using the CONFIG mode.
-find_package(Boost CONFIG REQUIRED)
+
+# Find Boost with required components
+message(STATUS "Looking for Boost with CONFIG mode...")
+find_package(Boost CONFIG REQUIRED COMPONENTS system filesystem regex program_options)
+message(STATUS "Boost found: ${Boost_VERSION}")
 find_package(unofficial-mysql-connector-cpp CONFIG REQUIRED)
 # Find Abseil (absl) - protobuf's dependency
 find_package(absl CONFIG REQUIRED)
@@ -32,11 +38,25 @@ find_package(zstd CONFIG REQUIRED)
 
 # Find protobuf (provides CMake targets via CONFIG)
 # Note: This is heuristically generated; you might need to adjust components
-# based on your specific protobuf usage (e.g., if you only need libprotobuf-lite).
-find_package(protobuf CONFIG REQUIRED)
+# based on your specific protobuf usage (e.g., if you only need libprotobuf-lite)
+find_package(protobuf REQUIRED)
+message(STATUS "CMake is using protoc at: ${Protobuf_PROTOC_EXECUTABLE}")
+
+# Find googleapis speech library
+find_package(google_cloud_cpp_speech REQUIRED)
 
 # Find nlohmann-json (provides CMake targets via CONFIG)
 find_package(nlohmann_json CONFIG REQUIRED)
+
+# Define the list of .proto files to be compiled
+file(GLOB_RECURSE PROTO_FILES "protos/*.proto")
+
+# Use the 'protobuf_generate_cpp' function provided by FindProtobuf.cmake.
+# It invokes protoc on the files, creating the .pb.h and .pb.cc files.
+# It also populates PROTO_SRCS and PROTO_HDRS lists with the generated files.
+protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+    cloud_speech.proto
+)
 
 
 # --- Define Executable and Link Libraries ---
@@ -46,21 +66,41 @@ find_package(nlohmann_json CONFIG REQUIRED)
 # 'main.cpp' is assumed to be in the same directory as this CMakeLists.txt.
 # Source files
 # Gebruik protobuf_generate_cpp (van FindProtobuf)
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cloud_speech.proto
-    IMPORT_DIRS ${PROTOBUF_IMPORT_DIRS}
+add_library(proto_objs STATIC
+    ${PROTO_SRCS}
+    ${PROTO_HDRS}
 )
 
-add_library(proto_objs ${PROTO_SRCS} ${PROTO_HDRS})
+# MSVC requires some additional code to select the correct runtime library
+if (VCPKG_TARGET_TRIPLET MATCHES "-static$")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+else ()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif ()
+
+protobuf_generate(TARGET proto_objs
+                  LANGUAGE cpp
+                  PROTOS ${CMAKE_CURRENT_SOURCE_DIR}/cloud_speech.proto
+                  IMPORT_DIRS ${PROTOBUF_IMPORT_DIRS})
 
 # Copy protobuf include directories to build directory for easier access
-add_custom_command(TARGET proto_objs PRE_BUILD
+add_custom_target(copy_protobuf_includes ALL
+    COMMAND ${CMAKE_COMMAND} -E echo "Source GOOGLE_DIR: ${GOOGLE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E echo "Source GOOGLEAPIS_DIR: ${GOOGLEAPIS_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E echo "Build directory: ${CMAKE_CURRENT_BINARY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/google 2>nul || ${CMAKE_COMMAND} -E echo "Directory exists"
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/googleapis 2>nul || ${CMAKE_COMMAND} -E echo "Directory exists"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${GOOGLE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/google
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${GOOGLEAPIS_DIR} ${CMAKE_CURRENT_BINARY_DIR}/googleapis
+    COMMAND ${CMAKE_COMMAND} -E echo "Protobuf includes copied successfully"
     COMMENT "Copying protobuf include directories to build directory"
 )
+
+
+# Make sure proto_objs depends on the copy
+add_dependencies(proto_objs copy_protobuf_includes)
 
 target_include_directories(proto_objs PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
@@ -68,6 +108,12 @@ target_include_directories(proto_objs PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}/googleapis
     ${PROTOBUF_INCLUDE_DIR}
 )
+
+target_link_libraries(proto_objs PRIVATE protobuf::libprotobuf)
+
+target_compile_features(proto_objs PRIVATE cxx_std_20)
+target_compile_options(proto_objs PRIVATE /std:c++20 /wd4068 /permissive- /Zc:__cplusplus)
+set_property(TARGET proto_objs PROPERTY CXX_STANDARD 20)
 
 set(SOURCE_FILES
     main.cpp
@@ -93,6 +139,9 @@ endif()
 
 add_executable(CoreAI3D ${PROTO_SRCS} ${PROTO_HDRS} ${SOURCE_FILES})
 
+# Make sure CoreAI3D depends on the protobuf includes copy
+add_dependencies(CoreAI3D copy_protobuf_includes)
+
 # Include directories for protobuf headers
 target_include_directories(CoreAI3D PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}  # Include current directory for main.cpp
@@ -105,16 +154,20 @@ target_include_directories(CoreAI3D PRIVATE
 )
 
 # Find protobuf library include directory
-find_path(PROTOBUF_INCLUDE_DIR google/protobuf/runtime_version.h
-    PATHS
-        "D:/code/vcpkg/installed/x64-windows/include"
-        "C:/vcpkg/installed/x64-windows/include"
-        "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
-        "$ENV{USERPROFILE}/vcpkg/installed/x64-windows/include"
-        "D:/vcpkg/installed/x64-windows/include"
-        "C:/Program Files/vcpkg/installed/x64-windows/include"
-    REQUIRED
-)
+find_path(PROTOBUF_INCLUDE_DIR google/protobuf/runtime_version.h REQUIRED)
+
+if(NOT PROTOBUF_INCLUDE_DIR)
+    # Try to get it from the protobuf target
+    get_target_property(PROTOBUF_INTERFACE_INCLUDE_DIRS protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
+    if(PROTOBUF_INTERFACE_INCLUDE_DIRS)
+        list(GET PROTOBUF_INTERFACE_INCLUDE_DIRS 0 PROTOBUF_INCLUDE_DIR)
+        message(STATUS "Found protobuf include dir from target: ${PROTOBUF_INCLUDE_DIR}")
+    else()
+        message(FATAL_ERROR "Could not find protobuf include directory. Please ensure protobuf is installed via vcpkg: vcpkg install protobuf")
+    endif()
+endif()
+
+message(STATUS "Using protobuf include directory: ${PROTOBUF_INCLUDE_DIR}")
 
 if(PROTOBUF_INCLUDE_DIR)
     target_include_directories(CoreAI3D PRIVATE ${PROTOBUF_INCLUDE_DIR})
@@ -124,7 +177,10 @@ else()
 endif()
 
 # Add protobuf include directories
-target_link_libraries(CoreAI3D PRIVATE protobuf::libprotobuf)
+target_link_libraries(CoreAI3D PRIVATE proto_objs              # The target holding your generated .pb.cc files
+    protobuf::libprotobuf   # The main Protobuf library
+    protobuf::libprotoc     # The Protoc compiler library (often needed)
+)
 
 # Define _WIN32_WINNT and WIN32_LEAN_AND_MEAN directly for this target.
 # _WIN32_WINNT=0x0A00 targets Windows 10.
@@ -139,12 +195,18 @@ if(WIN32)
         _WIN32_WINNT=0x0A00
         WIN32_LEAN_AND_MEAN
     )
+
+    # Add compiler flags for absolute paths in error messages
+    target_compile_options(CoreAI3D PRIVATE /FC /wd4068)
 endif()
 # Link your executable with all the required libraries.
 # The targets (e.g., Boost::program_options, ZLIB::ZLIB) are "imported targets"
 # provided by the respective find_package calls.
 target_link_libraries(CoreAI3D PRIVATE
-    Boost::boost
+    Boost::system
+    Boost::filesystem
+    Boost::regex
+    Boost::program_options
     absl::absl_check # Example Abseil targets, link what's needed by your code/protobuf
     absl::absl_log
     absl::algorithm
@@ -185,11 +247,13 @@ target_link_libraries(CoreAI3D PRIVATE
     ZLIB::ZLIB
     CURL::libcurl
     zstd::libzstd
+    proto_objs
     protobuf::libprotoc
     protobuf::libprotobuf
     protobuf::libprotobuf-lite
     unofficial::mysql-connector-cpp::connector
     nlohmann_json::nlohmann_json
+    google-cloud-cpp::speech
 )
 # If you have other source files in this subdirectory, add them to add_executable:
 # add_executable(CoreAI3D main.cpp another_file.cpp yet_another.cpp)

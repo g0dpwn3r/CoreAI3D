@@ -1,0 +1,33 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/CoreAI3D/include",
+                "${workspaceFolder}/out/build/windows-debug",
+                "${workspaceFolder}/out/build/windows-debug/CoreAI3D/google",
+                "${workspaceFolder}/out/build/windows-debug/CoreAI3D/googleapis",
+                "C:/vcpkg/installed/x64-windows/include",
+                "C:/vcpkg/installed/x64-windows/include/boost",
+                "C:/vcpkg/installed/x64-windows/include/google",
+                "C:/vcpkg/installed/x64-windows/include/nlohmann"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "WIN32",
+                "_WIN32",
+                "WIN32_LEAN_AND_MEAN",
+                "NOMINMAX",
+                "_WINSOCKAPI_"
+            ],
+            "compilerPath": "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/14.43.34808/bin/Hostx64/x64/cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

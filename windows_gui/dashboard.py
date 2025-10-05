@@ -46,6 +46,14 @@ from PyQt6.QtGui import (
 from coreai3d_client import CoreAI3DClient
 from automation_helper import AutomationHelper
 
+# Hugging Face imports
+try:
+    from huggingface_dataset_manager import HuggingFaceDatasetManager
+    HUGGINGFACE_AVAILABLE = True
+except ImportError:
+    HUGGINGFACE_AVAILABLE = False
+    print("Warning: Hugging Face integration not available. Install datasets and huggingface-hub")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -70,6 +78,7 @@ class DashboardConfig:
     max_connections: int = 10
     retry_attempts: int = 3
     connection_timeout: float = 30.0
+    hf_token: str = ""  # Hugging Face API token
 
 @dataclass
 class SystemMetrics:
@@ -346,16 +355,26 @@ class SandboxManager(QObject):
             logger.error(f"Error updating sandboxed processes: {str(e)}")
 
 class TrainingDataManager(QObject):
-    """Training data management"""
+    """Training data management with Hugging Face integration"""
 
     dataset_created = pyqtSignal(str, str)
     dataset_updated = pyqtSignal(str)
     file_added = pyqtSignal(str, str)
+    hf_dataset_downloaded = pyqtSignal(str, str)
 
     def __init__(self, config: DashboardConfig):
         super().__init__()
         self.config = config
         self.datasets: Dict[str, Dict[str, Any]] = {}
+
+        # Initialize Hugging Face manager
+        if HUGGINGFACE_AVAILABLE:
+            self.hf_manager = HuggingFaceDatasetManager(
+                data_dir=config.data_dir,
+                api_token=getattr(config, 'hf_token', None)
+            )
+        else:
+            self.hf_manager = None
 
     def create_dataset(self, name: str, description: str, data_type: str) -> bool:
         """Create new training dataset"""
@@ -430,6 +449,56 @@ class TrainingDataManager(QObject):
                 json.dump(self.datasets[dataset_name], f, indent=2)
         except Exception as e:
             logger.error(f"Error saving dataset metadata: {str(e)}")
+
+    def search_huggingface_datasets(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search Hugging Face datasets"""
+        if not self.hf_manager:
+            return []
+
+        try:
+            results = self.hf_manager.search_datasets(query, limit)
+            return [{
+                'name': r.name,
+                'description': r.description,
+                'size': r.size,
+                'downloads': r.downloads,
+                'likes': r.likes,
+                'tags': r.tags
+            } for r in results]
+        except Exception as e:
+            logger.error(f"Error searching HF datasets: {e}")
+            return []
+
+    def download_huggingface_dataset(self, dataset_name: str,
+                                   save_format: str = 'json') -> bool:
+        """Download Hugging Face dataset"""
+        if not self.hf_manager:
+            return False
+
+        try:
+            dataset_path = self.hf_manager.download_dataset(dataset_name, save_format=save_format)
+
+            # Convert to CoreAI3D format
+            coreai3d_path = self.hf_manager.convert_to_coreai3d_format(dataset_path)
+
+            # Load into dashboard
+            self._load_coreai3d_dataset(coreai3d_path)
+
+            self.hf_dataset_downloaded.emit(dataset_name, coreai3d_path)
+            logger.info(f"Downloaded and converted HF dataset: {dataset_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error downloading HF dataset {dataset_name}: {e}")
+            return False
+
+    def _load_coreai3d_dataset(self, dataset_path: str):
+        """Load CoreAI3D formatted dataset"""
+        metadata_file = Path(dataset_path) / 'metadata.json'
+        if metadata_file.exists():
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+                self.datasets[metadata['name']] = metadata
 
 class CodeDebugger(QObject):
     """Code debugging and testing utilities"""
@@ -598,6 +667,7 @@ class CoreAI3DDashboard(QMainWindow):
         config.sandbox_timeout = settings.value("sandbox_timeout", config.sandbox_timeout, type=int)
         config.log_level = settings.value("log_level", config.log_level)
         config.enable_diagnostics = settings.value("enable_diagnostics", config.enable_diagnostics, type=bool)
+        config.hf_token = settings.value("hf_token", config.hf_token)
 
         return config
 
@@ -612,6 +682,7 @@ class CoreAI3DDashboard(QMainWindow):
         settings.setValue("sandbox_timeout", self.config.sandbox_timeout)
         settings.setValue("log_level", self.config.log_level)
         settings.setValue("enable_diagnostics", self.config.enable_diagnostics)
+        settings.setValue("hf_token", self.config.hf_token)
 
     def setup_ui(self):
         """Setup main user interface"""
@@ -630,6 +701,7 @@ class CoreAI3DDashboard(QMainWindow):
         # Create tabs
         self.create_dashboard_tab()
         self.create_training_tab()
+        self.create_huggingface_tab()
         self.create_testing_tab()
         self.create_sandbox_tab()
         self.create_debugging_tab()
@@ -790,6 +862,119 @@ class CoreAI3DDashboard(QMainWindow):
         details_layout.addWidget(self.file_list)
 
         layout.addWidget(details_group)
+
+    def create_huggingface_tab(self):
+        """Create Hugging Face datasets tab"""
+        if not HUGGINGFACE_AVAILABLE:
+            # Create a simple message tab if HF not available
+            tab = QWidget()
+            self.tab_widget.addTab(tab, "Hugging Face")
+
+            layout = QVBoxLayout(tab)
+            message = QLabel("Hugging Face integration not available.\nInstall datasets and huggingface-hub packages.")
+            message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(message)
+            return
+
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Hugging Face")
+
+        layout = QVBoxLayout(tab)
+
+        # Search section
+        search_group = QGroupBox("Search Datasets")
+        search_layout = QHBoxLayout(search_group)
+
+        self.hf_search_input = QLineEdit()
+        self.hf_search_input.setPlaceholderText("Search Hugging Face datasets...")
+        search_layout.addWidget(self.hf_search_input)
+
+        search_btn = QPushButton("Search")
+        search_btn.clicked.connect(self.search_hf_datasets)
+        search_layout.addWidget(search_btn)
+
+        layout.addWidget(search_group)
+
+        # Results table
+        results_group = QGroupBox("Search Results")
+        results_layout = QVBoxLayout(results_group)
+
+        self.hf_results_table = QTableWidget(0, 4)
+        self.hf_results_table.setHorizontalHeaderLabels([
+            "Dataset", "Description", "Downloads", "Action"
+        ])
+        self.hf_results_table.horizontalHeader().setStretchLastSection(True)
+        results_layout.addWidget(self.hf_results_table)
+
+        layout.addWidget(results_group)
+
+        # Download section
+        download_group = QGroupBox("Download Options")
+        download_layout = QFormLayout(download_group)
+
+        self.hf_format_combo = QComboBox()
+        self.hf_format_combo.addItems(["json", "csv", "parquet"])
+        download_layout.addRow("Format:", self.hf_format_combo)
+
+        layout.addWidget(download_group)
+
+    def search_hf_datasets(self):
+        """Search Hugging Face datasets"""
+        query = self.hf_search_input.text().strip()
+        if not query:
+            QMessageBox.warning(self, "Search", "Please enter a search query")
+            return
+
+        try:
+            results = self.training_manager.search_huggingface_datasets(query)
+            if not results:
+                QMessageBox.information(self, "Search", "No datasets found")
+                return
+
+            self.hf_results_table.setRowCount(0)
+            for result in results:
+                row = self.hf_results_table.rowCount()
+                self.hf_results_table.insertRow(row)
+
+                self.hf_results_table.setItem(row, 0, QTableWidgetItem(result['name']))
+                self.hf_results_table.setItem(row, 1, QTableWidgetItem(result['description'][:100]))
+                self.hf_results_table.setItem(row, 2, QTableWidgetItem(str(result['downloads'])))
+
+                # Download button
+                download_btn = QPushButton("Download")
+                download_btn.clicked.connect(
+                    lambda checked, name=result['name']: self.download_hf_dataset(name)
+                )
+                self.hf_results_table.setCellWidget(row, 3, download_btn)
+
+        except Exception as e:
+            QMessageBox.warning(self, "Search Error", str(e))
+
+    def download_hf_dataset(self, dataset_name: str):
+        """Download Hugging Face dataset"""
+        format_choice = self.hf_format_combo.currentText()
+
+        # Show progress
+        progress = QProgressDialog("Downloading dataset...", "Cancel", 0, 0, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+        try:
+            success = self.training_manager.download_huggingface_dataset(
+                dataset_name, format_choice
+            )
+
+            if success:
+                QMessageBox.information(self, "Download Complete",
+                                      f"Dataset {dataset_name} downloaded successfully")
+                self.load_datasets()  # Refresh the training data tab
+            else:
+                QMessageBox.warning(self, "Download Failed",
+                                  f"Failed to download {dataset_name}")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Download Error", str(e))
+        finally:
+            progress.close()
 
     def create_testing_tab(self):
         """Create testing and debugging tab"""
@@ -2004,6 +2189,10 @@ if __name__ == "__main__":
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         api_layout.addRow("API Key:", self.api_key_edit)
 
+        self.hf_token_edit = QLineEdit(self.config.hf_token)
+        self.hf_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        api_layout.addRow("Hugging Face Token:", self.hf_token_edit)
+
         layout.addWidget(api_group)
 
         # Data Settings
@@ -2064,6 +2253,7 @@ if __name__ == "__main__":
         self.training_manager.dataset_created.connect(self.on_dataset_created)
         self.training_manager.dataset_updated.connect(self.on_dataset_updated)
         self.training_manager.file_added.connect(self.on_file_added)
+        self.training_manager.hf_dataset_downloaded.connect(self.on_hf_dataset_downloaded)
 
     def setup_timers(self):
         """Setup periodic update timers"""
@@ -2146,6 +2336,11 @@ if __name__ == "__main__":
     def on_file_added(self, dataset_name: str, filename: str):
         """Handle file added event"""
         self.status_bar.showMessage(f"Added {filename} to {dataset_name}")
+
+    def on_hf_dataset_downloaded(self, dataset_name: str, dataset_path: str):
+        """Handle Hugging Face dataset downloaded event"""
+        self.dataset_list.addItem(dataset_name)
+        self.status_bar.showMessage(f"Hugging Face dataset '{dataset_name}' downloaded successfully")
 
     # UI action methods
     def test_connection(self):
@@ -2559,6 +2754,7 @@ if __name__ == "__main__":
             self.config.api_url = self.api_url_edit.text()
             self.config.ws_url = self.ws_url_edit.text()
             self.config.api_key = self.api_key_edit.text()
+            self.config.hf_token = self.hf_token_edit.text()
             self.config.data_dir = self.data_dir_edit.text()
             self.config.sandbox_timeout = self.sandbox_timeout_edit.value()
             self.config.log_level = self.log_level_combo.currentText()

@@ -1,0 +1,20 @@
+^D:\CODE\COREAI3D\CMAKEFILES\F00AD962EE1F0F84723A64BFEEB1EBBE\CLOUD_SPEECH.PB.H.RULE
+setlocal
+..\vcpkg_installed\x64-windows\tools\protobuf\protoc.exe --cpp_out :D:/code/CoreAI3D/CoreAI3D -I D:/code/CoreAI3D/CoreAI3D -I D:/code/CoreAI3D/googleapis -I D:/code/CoreAI3D/googleapis/google D:/code/CoreAI3D/CoreAI3D/cloud_speech.proto
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\CODE\COREAI3D\COREAI3D\CMAKELISTS.TXT
+setlocal
+"D:\Program Files\Viual Studio\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SD:/code/CoreAI3D -BD:/code/CoreAI3D --check-stamp-file D:/code/CoreAI3D/CoreAI3D/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
