@@ -24,7 +24,6 @@
         {
             "name": "windows-debug",
             "displayName": "Windows Debug (VS 2022)",
-            "description": "Debug build for Windows using vcpkg",
             "inherits": "windows-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
@@ -33,7 +32,6 @@
         {
             "name": "windows-release",
             "displayName": "Windows Release (VS 2022)",
-            "description": "Release build for Windows using vcpkg",
             "inherits": "windows-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
@@ -52,12 +50,38 @@
             },
             "environment": {
                 "VCPKG_ROOT": "/home/h4x0r/vcpkg"
+            },
+            "vendor": {
+                "microsoft.com/VisualStudio/RemoteSettings/CMake/1.0": {
+                    "copySourcesOptions": {
+                        "exclusionList": [
+                            ".vs",
+                            ".git",
+                            ".vscode",
+                            "out",
+                            "build",
+                            "vcpkg",
+                            "vcpkg_installed",
+                            "windows_gui",
+                            "docker",
+                            "node_modules",
+                            "CMakeFiles",
+                            "CMakeCache.txt",
+                            "cmake_install.cmake",
+                            "compile_commands.json",
+                            "*.tmp",
+                            "*.sln",
+                            "*.vcxproj*",
+                            "logs",
+                            "mysql_data"
+                        ]
+                    }
+                }
             }
         },
         {
             "name": "wsl-debug",
             "displayName": "WSL Debug",
-            "description": "Debug build for WSL using vcpkg",
             "inherits": "wsl-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
@@ -66,10 +90,45 @@
         {
             "name": "wsl-release",
             "displayName": "WSL Release",
-            "description": "Release build for WSL using vcpkg",
             "inherits": "wsl-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "wsl-debug-dryrun",
+            "displayName": "WSL Debug (Dry Run)",
+            "inherits": "wsl-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            },
+            "vendor": {
+                "microsoft.com/VisualStudio/RemoteSettings/CMake/1.0": {
+                    "copySourcesOptions": {
+                        "exclusionList": [
+                            ".vs",
+                            ".git",
+                            ".vscode",
+                            "out",
+                            "build",
+                            "vcpkg",
+                            "vcpkg_installed",
+                            "windows_gui",
+                            "docker",
+                            "node_modules",
+                            "CMakeFiles",
+                            "CMakeCache.txt",
+                            "cmake_install.cmake",
+                            "compile_commands.json",
+                            "*.tmp",
+                            "*.sln",
+                            "*.vcxproj*",
+                            "logs",
+                            "mysql_data"
+                        ],
+                        "rsyncCommandArgs": "--dry-run"
+                    }
+                }
             }
         }
     ],
@@ -95,6 +154,11 @@
             "name": "wsl-release",
             "displayName": "WSL Release Build",
             "configurePreset": "wsl-release"
+        },
+        {
+            "name": "wsl-debug-dryrun",
+            "displayName": "WSL Debug Build (Dry Run)",
+            "configurePreset": "wsl-debug-dryrun"
         }
     ],
     "testPresets": [

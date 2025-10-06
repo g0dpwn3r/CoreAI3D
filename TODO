@@ -1,37 +1,203 @@
-Add ofline mode 
-Add loading datasets from database
-Add loadTarrgetcvs to save to database
-Remove populate fields 
-Add set Input and Output lenght dynamicly
-Add connectivity to gemini it should learn from it
-Add connectivity to chatgpt it should learn from it
-Add connectivity to bard it should learn from it
-add connectivity to bing it should learn from it
-Add connectivity to other ai models like llama2, qwen, v0 pentestgpt and grok
-Add a way to update the models
-Add Pathcing system 
-Add a way to add custom models
-Add a way to learn from browsing the internet 
-Add a way for it to learn from youtube and other video platforms
-Add a way for it to listen and learn from music
-Add a way for it to learn from books and documents from the web
-Add a way to search automatically for new data to learn from
-Add a personlity to the ai with peronality types and psychological profiles
-Add a way to make it learn from conversations with users
-I want to add a homepage with worpress for the ai 
-I want to create a wordpress plugin for the ai
-i want to create a discord bot for the ai
-I want to create a visual studio code extension for the ai so it can help with coding
-I want it to be able to hack computers and gain access to them
-I want a chat window in the dashboard for talking to the ai with audio and video device support
-I want it to be able to generate images and videos from text prompts
-I want it to be able to generate 3d models from text prompts
-I want it to be able to generate music from text prompts
-Add a way to test and develop programms and apps for all platforms
-it should be able to play video games
-it should be able to be trained by video games
-Creeer een private en incognito modus met tor
-Zorg er voor dat hij instances kan maken 
-zorg er voor dat hij op docker werkt met dezez instances
-Add neural network visualistion to dashbaord 
-add stop button to dashboard 
+## v1.0 - Core Setup and Basic Features
+- Add offline mode
+- Add loading datasets from database
+- Add loadTargetCsv to save to database
+- Remove populate fields
+- Add set Input and Output length dynamically
+- API Load configuration from file from APIServer initialize
+- MATH Load configuration from file
+
+## v2.2 - AI Model Integrations
+- Add connectivity to google
+- Add connectivity to gemini it should learn from it
+- Add connectivity to chatgpt it should learn from it
+- Add connectivity to bard it should learn from it
+- add connectivity to bing it should learn from it
+- Add connectivity to other ai models like llama2, qwen, v0 pentestgpt and grok
+- Add a way to update the models
+- Add Patching system
+- Add a way to add custom models
+- add a way to update the models from the dashboard
+- add a way to update the software from the dashboard
+
+## v2.3 - Learning Capabilities
+- Add kaggle datasets for learning to windows_gui
+- Add a way to learn from browsing the internet
+- Add a way for it to learn from youtube and other video platforms
+- Add a way for it to listen and learn from music
+- Add a way for it to learn from books and documents from the web
+- Add a way to search automatically for new data to learn from
+- Add personality to the ai with personality types and psychological profiles
+- Add a way to make it learn from conversations with users
+- AUDIO Implement audio dataset training
+- AUDIO Implement audio dataset loading
+- AUDIO Implement model fine-tuning
+
+## v3.0 - Extensions and Integrations
+- I want to add a homepage with wordpress for the ai
+- I want to create a wordpress plugin for the ai
+- i want to create a discord bot for the ai
+- I want to create a visual studio code extension for the ai so it can help with coding
+- I want it to be able to hack computers and gain access to them
+- Creeer een private en incognito modus met tor
+- Zorg er voor dat hij instances kan maken
+- zorg er voor dat hij op docker werkt met dezez instances
+
+## v3.5 - Dashboard and UI
+- I want a chat window in the dashboard for talking to the ai with audio and video device support
+- Add neural network visualisation to dashboard
+- add stop button to dashboard
+- add a benchmarking tool to dashboard
+- add a testing tool to dashboard
+- add benchmarking to server side
+- add GPU and Metrics monitoring to dashboard
+- add GPU System info to dashboard
+
+## v4.0 - Hardware Support
+- add GPU Support of CoreAI3D for opencl and vulkan
+- add CPU Support of CoreAI3D for opencl and vulkan
+- add RAM Support of CoreAI3D for opencl and vulkan
+- add DISK Support of CoreAI3D for opencl and vulkan
+- add NETWORK Support of CoreAI3D for opencl and vulkan
+- add GPU Support for nvidia cuda
+
+## v4.1 - Generation Capabilities
+- I want it to be able to generate images and videos from text prompts
+- I want it to be able to generate 3d models from text prompts
+- I want it to be able to generate music from text prompts
+- AUDIO Implement text-to-speech
+
+## v4.2 - Development and Gaming
+- Add a way to test and develop programs and apps for all platforms
+- it should be able to play video games
+- it should be able to be trained by video games
+- It should be able to code in all programming languages
+
+## v4.5 - Audio Processing
+- Implement CoreAI processing for audio features
+- AUDIO Implement proper Mel filterbank
+- AUDIO Implement DCT
+- AUDIO Implement continuous speech recognition
+- AUDIO Implement proper pitch shifting using phase vocoder
+- AUDIO Implement proper time stretching using phase vocoder
+- AUDIO Implement reverb effect
+- AUDIO Implement echo effect
+- AUDIO Implement equalizer effect
+- AUDIO Implement chorus effect
+- AUDIO Implement pink noise generation
+- AUDIO Implement proper sample rate conversion
+- AUDIO Implement audio file format support (WAV, MP3, FLAC, etc.)
+- AUDIO Implement audio input/output device support
+- AUDIO Implement proper channel conversion
+- AUDIO Implement audio normalization
+- AUDIO Implement audio compression (dynamic range compression)
+- AUDIO Implement audio denoising
+- AUDIO Implement audio visualization (waveform, spectrogram)
+- AUDIO Implement speaker identification
+- AUDIO add emotion recognition
+- AUDIO add language identification
+- AUDIO Implement speaker identification from data
+- AUDIO Implement speaker comparison
+- AUDIO Implement music analysis
+- AUDIO Implement beat detection
+- AUDIO Implement music analysis from data
+- AUDIO Implement real-time audio processing initialization
+- AUDIO Implement real-time input processing
+- AUDIO Implement real-time processing stop
+- AUDIO Implement real-time output processing
+- AUDIO Implement proper audio file loading
+- AUDIO Implement proper audio file saving
+- AUDIO Implement audio streaming
+- AUDIO Implement audio stream stop
+- AUDIO Implement streaming status check
+
+## v5.0 - Database
+- DATABASE store video data
+- DATABASE store audio data
+- DATABASE store image data
+- DATABASE store text data
+- DATABASE store 3d model data
+- DATABASE store music data
+- DATABASE store user data
+- DATABASE store configuration data
+- DATABASE store usage data
+- DATABASE Implement database connection pooling
+- DATABASE Implement database backup and restore
+- DATABASE Implement database migration
+- DATABASE Implement database indexing for performance
+- DATABASE Implement database sharding for scalability
+- DATABASE Implement database replication for high availability
+- DATABASE Implement database encryption for security
+- DATABASE Implement database auditing for compliance
+- DATABASE Implement database monitoring for performance
+- DATABASE Implement database caching for performance
+- DATABASE Implement database connection retry logic
+- DATABASE Implement database connection timeout handling
+- DATABASE Implement database connection error handling
+- DATABASE Implement database connection logging
+- DATABASE Implement database connection configuration
+- DATABASE Implement database connection testing
+- DATABASE Implement database connection pooling configuration
+
+## v5.1 - Linux Support
+- Linux add all linux commands
+- Linux add support for all linux distros
+- Linux add support for all linux filesystems
+- Linux add support for all linux desktop environments
+- Linux add support for all linux package managers
+- Linux add support for all linux init systems
+
+## v5.2 - Math Operations
+- MATH Implement matrix operations
+- MATH Implement vector operations
+- MATH Implement linear system solver
+- MATH Implement symbolic integration
+- MATH Implement symbolic differentiation
+- MATH Implement ODE solver
+- MATH Implement PDE solver
+- MATH Implement optimization
+- MATH Implement numerical integration
+- MATH Implement distribution fitting
+- MATH Implement hypothesis testing
+- MATH Implement error function
+- MATH Implement gamma function
+- MATH Implement Bessel functions
+- MATH Implement complementary error function
+- MATH Implement hypergeometric functions
+- MATH Implement mathematical modeling
+- MATH Implement Monte Carlo simulation
+- MATH Implement model fitting
+- MATH Implement statistical analysis
+- MATH Implement time series analysis
+- MATH Implement Fourier analysis
+- MATH Implement model evaluation
+- MATH Implement mathematical visualization
+- MATH Implement amortization calculation
+- MATH Implement hashing
+- MATH Implement encryption
+- MATH Implement decryption
+- MATH Implement random number generation
+- MATH Implement prime number generation
+- MATH Implement GCD calculation
+- MATH Implement LCM calculation
+- MATH Implement combinatorial functions
+- MATH Implement number theory functions
+- MATH Implement graph theory functions
+- MATH Implement game theory functions
+- MATH Implement general determinant calculation
+- MATH Implement matrix inversion
+- MATH Implement expression simplification
+- MATH Implement polynomial operations
+- MATH Implement rational function operations
+- MATH Implement special matrix types (sparse, diagonal, etc.)
+- MATH Implement tensor operations
+- MATH Implement mathematical constants
+- MATH Implement mathematical sequences
+- MATH Implement mathematical series
+- MATH Implement mathematical inequalities
+- MATH Implement mathematical proofs
+- MATH Implement mathematical logic
+- MATH Implement mathematical set operations
+- MATH Implement mathematical relations
+- MATH Implement expression expansion
+- MATH Implement expression factoring

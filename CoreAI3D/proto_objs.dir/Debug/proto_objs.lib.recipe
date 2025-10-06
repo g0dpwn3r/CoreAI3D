@@ -4,6 +4,9 @@
     <ProjectOutput>
       <FullPath>D:\code\CoreAI3D\x64\Debug\ZERO_CHECK</FullPath>
     </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>D:\code\CoreAI3D\x64\Debug\copy_protobuf_includes</FullPath>
+    </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />
   <SatelliteDlls />
