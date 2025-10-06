@@ -93,8 +93,6 @@ mysql-connector-cpp
 protobuf
 argparse
 fastText
-googleapiscd
-googleapiscd
 # External dependencies (like mysql-connector-cpp if managed by vcpkg)
 /ChatGPT-Cpp
 /windows_gui/.env*
