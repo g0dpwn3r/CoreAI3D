@@ -1,0 +1,5 @@
+if(EXISTS "D:/code/CoreAI3D/tests/CoreAI3D_Catch2Tests-b12d07c_tests.cmake")
+  include("D:/code/CoreAI3D/tests/CoreAI3D_Catch2Tests-b12d07c_tests.cmake")
+else()
+  add_test(CoreAI3D_Catch2Tests_NOT_BUILT-b12d07c CoreAI3D_Catch2Tests_NOT_BUILT-b12d07c)
+endif()

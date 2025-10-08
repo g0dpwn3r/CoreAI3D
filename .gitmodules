@@ -1,3 +1,0 @@
-[submodule "CoreAI3D/googleapis"]
-	path = CoreAI3D/googleapis
-	url = https://github.com/googleapis/googleapis.git

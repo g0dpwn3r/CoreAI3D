@@ -7,6 +7,22 @@
 - API Load configuration from file from APIServer initialize
 - MATH Load configuration from file
 
+## v2.1 - Testing and Optimization
+- Add a way to test the ai
+- Dashboard stream live metrics
+- Dashboard show visual representation of the neural network
+- Optimize the ai for speed and performance
+- Optimize the ai for memory usage
+- Optimize the ai for accuracy
+- Add a way to benchmark the ai
+- Add Valgrind support
+- Cross-validate Transforms
+- Cross-validate Datasets
+- Cross-validate Models
+- Cross-validate Training
+- Cross-validate Inference
+- add write training metrics to a CSV or JSON file
+
 ## v2.2 - AI Model Integrations
 - Add connectivity to google
 - Add connectivity to gemini it should learn from it

@@ -30,8 +30,20 @@
           "value": "ON"
         },
         {
-          "name": "VCPKG_INSTALL_PREFIX",
-          "value": "D:/code/CoreAI3D/out/build/windows-debug/vcpkg_installed"
+            "name": "VCPKG_INSTALL_PREFIX",
+            "value": "D:/code/CoreAI3D/out/build/windows-debug/vcpkg_installed"
+        },
+        {
+            "name": "CMAKE_EXPORT_COMPILE_COMMANDS",
+            "value": "ON"
+        },
+        {
+            "name": "CMAKE_INSTALL_PREFIX",
+            "value": "D:/code/CoreAI3D/out/install/${name}"
+        },
+        {
+            "name": "VCPKG_ROOT",
+            "value": "D:/code/CoreAI3D/vcpkg"
         }
       ]
     }
