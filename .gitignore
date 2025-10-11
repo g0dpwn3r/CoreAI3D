@@ -103,3 +103,4 @@ fastText
 *.swp
 .DS_Store
 data.sql
+windows_gui/__pycache__/
