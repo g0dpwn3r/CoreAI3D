@@ -1,4 +1,4 @@
-#include "APIServer.hpp"
+R#include "APIServer.hpp"
 #include "MathModule.hpp"
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -233,6 +233,9 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "orchestrator") {
             return handleOrchestratorAPI(action, requestData);
         }
+        else if (module == "neural") {
+            return handleNeuralAPI(action, requestData);
+        }
         else {
             return createErrorResponse("Unknown module: " + module, 404);
         }
@@ -349,6 +352,27 @@ json APIServer::handleOrchestratorAPI(const std::string& action, const json& par
     }
     catch (const std::exception& e) {
         return createErrorResponse("Orchestrator API error: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::handleNeuralAPI(const std::string& action, const json& parameters) {
+    try {
+        if (!trainingModule) {
+            return createErrorResponse("Training module not available", 503);
+        }
+
+        if (action == "topology") {
+            return trainingModule->getNetworkTopology();
+        }
+        else if (action == "activity") {
+            return trainingModule->getNetworkActivity();
+        }
+        else {
+            return createErrorResponse("Unknown neural action: " + action, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Neural API error: " + std::string(e.what()), 500);
     }
 }
 
@@ -769,6 +793,21 @@ json APIServer::orchestratorProcessMultiModal(const std::string& sessionId, cons
     return result;
 }
 
+// Neural API implementations
+json APIServer::neuralGetTopology(const std::string& sessionId) {
+    if (!validateSession(sessionId)) {
+        return createErrorResponse("Invalid session", 401);
+    }
+    return handleNeuralAPI("topology", json::object());
+}
+
+json APIServer::neuralGetActivity(const std::string& sessionId) {
+    if (!validateSession(sessionId)) {
+        return createErrorResponse("Invalid session", 401);
+    }
+    return handleNeuralAPI("activity", json::object());
+}
+
 // Batch processing
 json APIServer::batchProcess(const std::string& sessionId, const std::vector<json>& requests) {
     json result = {
@@ -1037,4 +1076,8 @@ bool APIServer::addWebModule(const std::string& name, std::unique_ptr<WebModule>
 bool APIServer::addMathModule(const std::string& name, std::unique_ptr<MathModule> module) {
     // TODO: Implement module registration
     return true;
+}
+
+void APIServer::setTrainingModule(std::unique_ptr<Training> training) {
+    trainingModule = std::move(training);
 }

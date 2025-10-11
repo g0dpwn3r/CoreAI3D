@@ -33,6 +33,15 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QInputDialog, QMenuBar, QMenu, QStatusBar,
     QDialog, QDialogButtonBox, QTreeWidget, QTreeWidgetItem, QPlainTextEdit
 )
+
+# Matplotlib imports for neural network visualization
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
 from PyQt6.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QObject, QSize, QRect,
     QSettings, QStandardPaths, QDir, QFileSystemWatcher, QUrl
@@ -649,6 +658,9 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_sandbox_tab()
         self.create_debugging_tab()
         self.create_linux_sandbox_tab()
+        self.create_model_downloads_tab()
+        self.create_chat_tab()
+        self.create_neural_tab()
         self.create_settings_tab()
 
         # Create status bar
@@ -1998,6 +2010,76 @@ if __name__ == "__main__":
         }
         return extensions.get(language, "txt")
 
+    def create_chat_tab(self):
+        """Create chat tab for AI interaction"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Chat")
+
+        layout = QVBoxLayout(tab)
+
+        # Chat history
+        self.chat_history = QTextEdit()
+        self.chat_history.setReadOnly(True)
+        layout.addWidget(self.chat_history)
+
+        # Input area
+        input_layout = QHBoxLayout()
+
+        self.chat_input = QLineEdit()
+        self.chat_input.setPlaceholderText("Type your message...")
+        self.chat_input.returnPressed.connect(self.send_chat_message)
+        input_layout.addWidget(self.chat_input)
+
+        send_btn = QPushButton("Send")
+        send_btn.clicked.connect(self.send_chat_message)
+        input_layout.addWidget(send_btn)
+
+        clear_btn = QPushButton("Clear")
+        clear_btn.clicked.connect(self.clear_chat_history)
+        input_layout.addWidget(clear_btn)
+
+        layout.addLayout(input_layout)
+
+    def create_neural_tab(self):
+        """Create neural network visualization tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Neural Network")
+
+        layout = QVBoxLayout(tab)
+
+        # Controls
+        controls_layout = QHBoxLayout()
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh_neural_data)
+        controls_layout.addWidget(refresh_btn)
+
+        layout.addLayout(controls_layout)
+
+        # Topology display
+        topology_group = QGroupBox("Network Topology")
+        topology_layout = QVBoxLayout(topology_group)
+
+        self.topology_text = QTextEdit()
+        self.topology_text.setReadOnly(True)
+        topology_layout.addWidget(self.topology_text)
+
+        layout.addWidget(topology_group)
+
+        # Activity visualization
+        activity_group = QGroupBox("Network Activity")
+        activity_layout = QVBoxLayout(activity_group)
+
+        if MATPLOTLIB_AVAILABLE:
+            self.activity_canvas = FigureCanvas(Figure())
+            activity_layout.addWidget(self.activity_canvas)
+        else:
+            self.activity_text = QTextEdit()
+            self.activity_text.setReadOnly(True)
+            activity_layout.addWidget(self.activity_text)
+
+        layout.addWidget(activity_group)
+
     def create_settings_tab(self):
         """Create settings configuration tab"""
         tab = QWidget()
@@ -2621,6 +2703,110 @@ if __name__ == "__main__":
             "using Linux containers.\n\n"
             "Built with PyQt6 and CoreAI3D Python Client"
         )
+
+    def send_chat_message(self):
+        """Send chat message to AI"""
+        if not self.client:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                return
+
+        message = self.chat_input.text().strip()
+        if not message:
+            return
+
+        # Add user message to history
+        self.chat_history.append(f"You: {message}")
+        self.chat_input.clear()
+
+        try:
+            async def send_message():
+                try:
+                    result = await self.client.send_chat_message(message)
+
+                    if result.success:
+                        response = result.data.get('response', 'No response')
+                        self.chat_history.append(f"AI: {response}")
+                    else:
+                        self.chat_history.append(f"Error: {result.data.get('error', 'Unknown error')}")
+
+                except Exception as e:
+                    self.chat_history.append(f"Error: {str(e)}")
+
+            asyncio.create_task(send_message())
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to send message: {str(e)}")
+
+    def clear_chat_history(self):
+        """Clear chat history"""
+        self.chat_history.clear()
+
+    def refresh_neural_data(self):
+        """Refresh neural network data"""
+        if not self.client:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                return
+
+        try:
+            async def refresh_data():
+                try:
+                    # Get topology
+                    topology_result = await self.client.get_neural_topology()
+                    if topology_result.success:
+                        topology = json.dumps(topology_result.data, indent=2)
+                        self.topology_text.setPlainText(topology)
+                    else:
+                        self.topology_text.setPlainText(f"Error: {topology_result.data.get('error', 'Unknown error')}")
+
+                    # Get activity
+                    activity_result = await self.client.get_neural_activity()
+                    if activity_result.success:
+                        if MATPLOTLIB_AVAILABLE:
+                            self.update_neural_plot(activity_result.data)
+                        else:
+                            activity = json.dumps(activity_result.data, indent=2)
+                            self.activity_text.setPlainText(activity)
+                    else:
+                        if MATPLOTLIB_AVAILABLE:
+                            self.activity_canvas.figure.clear()
+                            self.activity_canvas.draw()
+                        else:
+                            self.activity_text.setPlainText(f"Error: {activity_result.data.get('error', 'Unknown error')}")
+
+                except Exception as e:
+                    error_msg = f"Error refreshing neural data: {str(e)}"
+                    self.topology_text.setPlainText(error_msg)
+                    if MATPLOTLIB_AVAILABLE:
+                        self.activity_canvas.figure.clear()
+                        self.activity_canvas.draw()
+                    else:
+                        self.activity_text.setPlainText(error_msg)
+
+            asyncio.create_task(refresh_data())
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to refresh neural data: {str(e)}")
+
+    def update_neural_plot(self, activity_data):
+        """Update neural network activity plot"""
+        if not MATPLOTLIB_AVAILABLE:
+            return
+
+        self.activity_canvas.figure.clear()
+        ax = self.activity_canvas.figure.add_subplot(111)
+
+        # Simple bar plot of activations (placeholder)
+        if 'activations' in activity_data:
+            activations = activity_data['activations']
+            if isinstance(activations, list) and activations:
+                ax.bar(range(len(activations)), activations)
+                ax.set_xlabel('Neuron')
+                ax.set_ylabel('Activation')
+                ax.set_title('Neural Network Activity')
+
+        self.activity_canvas.draw()
 
     def closeEvent(self, event):
         """Handle application close event"""

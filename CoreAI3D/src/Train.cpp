@@ -1241,3 +1241,30 @@ bool Training::loadTextCSV(const std::string& filename, int maxSeqLen, int embed
     std::cout << "Loaded " << numSamples << " text samples from " << filename << std::endl;
     return !inputs.empty();
 }
+
+nlohmann::json Training::getNetworkTopology() {
+    nlohmann::json topology;
+    if (!core) {
+        topology["error"] = "CoreAI not initialized";
+        return topology;
+    }
+    topology["inputSize"] = inputSize;
+    topology["outputSize"] = outputSize;
+    topology["layers"] = layers;
+    topology["neurons"] = neurons;
+    return topology;
+}
+
+nlohmann::json Training::getNetworkActivity() {
+    nlohmann::json activity;
+    if (!core) {
+        activity["error"] = "CoreAI not initialized";
+        return activity;
+    }
+    // Get current hidden layer activations
+    auto hiddenData = core->getHiddenData();
+    auto hiddenOutputData = core->getHiddenOutputData();
+    activity["hidden"] = hiddenData;
+    activity["hiddenOutput"] = hiddenOutputData;
+    return activity;
+}
