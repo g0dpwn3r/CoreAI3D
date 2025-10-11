@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CoreAI3D Windows GUI Dashboard
+CoreAI3D Linux GUI Dashboard
 A comprehensive desktop application for managing AI training data, testing, debugging,
-and safely testing OS control operations using Windows Sandbox.
+and safely testing OS control operations using Linux containers.
 
 Author: CoreAI3D Development Team
 Version: 1.3.0
@@ -95,7 +95,7 @@ class TestResult:
     timestamp: float = field(default_factory=time.time)
 
 class SandboxManager(QObject):
-    """Sandboxie management"""
+    """Docker container management"""
 
     sandbox_started = pyqtSignal(str)
     sandbox_stopped = pyqtSignal(str)
@@ -110,240 +110,255 @@ class SandboxManager(QObject):
         self.sandbox_name = "CoreAI3D_Sandbox"
 
     def create_sandbox_config(self, config: Dict[str, Any]) -> bool:
-        """Create Sandboxie configuration"""
+        """Create Docker container configuration"""
         try:
-            # Sandboxie uses registry-based configuration or INI files
-            # For this implementation, we'll use command-line options
+            # Docker uses command-line options and container configurations
             self.sandbox_config = {
-                'sandbox_name': self.sandbox_name,
-                'host_folder': config.get('host_folder', 'C:\\'),
-                'startup_command': config.get('startup_command', 'echo Sandbox started'),
+                'container_name': self.sandbox_name,
+                'image': config.get('image', 'ubuntu:latest'),
+                'host_folder': config.get('host_folder', '/tmp'),
+                'startup_command': config.get('startup_command', 'echo "Container started"'),
                 'networking': config.get('networking', 'enable'),
-                'drop_rights': config.get('drop_rights', True),
-                'fake_admin': config.get('fake_admin', False)
+                'privileged': config.get('privileged', False),
+                'detach': True
             }
             return True
 
         except Exception as e:
-            logger.error(f"Error creating sandbox config: {str(e)}")
+            logger.error(f"Error creating container config: {str(e)}")
             return False
 
     def start_sandbox(self, config: Dict[str, Any]) -> bool:
-        """Start Sandboxie sandbox with configuration"""
+        """Start Docker container with configuration"""
         try:
             if self.is_running:
-                logger.warning("Sandbox already running")
+                logger.warning("Container already running")
                 return False
 
             if not self.create_sandbox_config(config):
                 return False
 
-            # Check if Sandboxie is installed
-            if not self._is_sandboxie_installed():
-                error_msg = "Sandboxie is not installed or not found in PATH"
+            # Check if Docker is installed
+            if not self._is_docker_installed():
+                error_msg = "Docker is not installed or not found in PATH"
                 logger.error(error_msg)
                 self.sandbox_error.emit("Installation Error", error_msg)
                 return False
 
-            # Start sandbox using Sandboxie
-            success = self._start_sandboxie_sandbox()
+            # Start container using Docker
+            success = self._start_docker_container()
             if not success:
                 return False
 
             self.is_running = True
-            self.sandbox_started.emit("Sandboxie sandbox started successfully")
-            logger.info("Sandboxie sandbox started")
+            self.sandbox_started.emit("Docker container started successfully")
+            logger.info("Docker container started")
 
-            # Monitor sandbox processes
-            threading.Thread(target=self._monitor_sandbox, daemon=True).start()
+            # Monitor container
+            threading.Thread(target=self._monitor_container, daemon=True).start()
 
             return True
 
         except Exception as e:
-            error_msg = f"Failed to start sandbox: {str(e)}"
+            error_msg = f"Failed to start container: {str(e)}"
             logger.error(error_msg)
             self.sandbox_error.emit("Start Error", error_msg)
             return False
 
     def stop_sandbox(self) -> bool:
-        """Stop Sandboxie sandbox"""
+        """Stop Docker container"""
         try:
             if not self.is_running:
                 return True
 
-            # Terminate all sandboxed processes
-            success = self._terminate_sandboxie_sandbox()
+            # Stop the container
+            success = self._terminate_docker_container()
 
             self.is_running = False
             if success:
-                self.sandbox_stopped.emit("Sandboxie sandbox stopped successfully")
-                logger.info("Sandboxie sandbox stopped")
+                self.sandbox_stopped.emit("Docker container stopped successfully")
+                logger.info("Docker container stopped")
             else:
-                self.sandbox_stopped.emit("Sandboxie sandbox stopped with warnings")
-                logger.warning("Sandboxie sandbox stopped with some issues")
+                self.sandbox_stopped.emit("Docker container stopped with warnings")
+                logger.warning("Docker container stopped with some issues")
 
             return success
 
         except Exception as e:
-            logger.error(f"Error stopping sandbox: {str(e)}")
+            logger.error(f"Error stopping container: {str(e)}")
             return False
 
-    def _is_sandboxie_installed(self) -> bool:
-        """Check if Sandboxie is installed"""
+    def _is_docker_installed(self) -> bool:
+        """Check if Docker is installed"""
         try:
-            # Check for Sandboxie installation
+            # Check for Docker installation
             result = subprocess.run(
-                ['where', 'Sandboxie-Plus.exe'],
+                ['docker', '--version'],
                 capture_output=True,
-                text=True,
-                shell=True
-            )
-
-            if result.returncode == 0:
-                return True
-
-            # Also check for older Sandboxie
-            result = subprocess.run(
-                ['where', 'SbieCtrl.exe'],
-                capture_output=True,
-                text=True,
-                shell=True
+                text=True
             )
 
             return result.returncode == 0
 
         except Exception as e:
-            logger.error(f"Error checking Sandboxie installation: {str(e)}")
+            logger.error(f"Error checking Docker installation: {str(e)}")
             return False
 
-    def _start_sandboxie_sandbox(self) -> bool:
-        """Start Sandboxie sandbox"""
+    def _start_docker_container(self) -> bool:
+        """Start Docker container"""
         try:
-            # Create sandbox if it doesn't exist
-            self._create_sandbox()
+            # Pull the image if needed
+            self._pull_image()
 
-            # Start a sandboxed command prompt or specified application
+            # Start the container
             cmd = [
-                'Sandboxie-Plus.exe',
-                '/box:' + self.sandbox_name,
-                'cmd.exe',
-                '/c',
-                self.sandbox_config['startup_command']
+                'docker', 'run',
+                '--name', self.sandbox_config['container_name'],
+                '--rm'  # Remove container when stopped
             ]
 
-            # Add Sandboxie options
+            # Add networking option
             if self.sandbox_config.get('networking') == 'disable':
-                cmd.insert(1, '/nointernet')
+                cmd.append('--network')
+                cmd.append('none')
 
-            if self.sandbox_config.get('drop_rights'):
-                cmd.insert(1, '/drop')
+            # Add privileged option (opposite of drop_rights)
+            if not self.sandbox_config.get('privileged', False):
+                cmd.append('--user')
+                cmd.append('1000:1000')  # Non-root user
 
-            if self.sandbox_config.get('fake_admin'):
-                cmd.insert(1, '/elevate')
+            # Add detach
+            if self.sandbox_config.get('detach', True):
+                cmd.append('-d')
+
+            # Add image and command
+            cmd.append(self.sandbox_config['image'])
+            cmd.extend(['/bin/bash', '-c', self.sandbox_config['startup_command']])
 
             self.sandbox_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                creationflags=subprocess.CREATE_NEW_CONSOLE
+                text=True
             )
 
-            return True
+            # Wait a bit for container to start
+            time.sleep(2)
+
+            # Check if container is running
+            result = subprocess.run(
+                ['docker', 'ps', '--filter', f'name={self.sandbox_config["container_name"]}', '--format', '{{.Names}}'],
+                capture_output=True,
+                text=True
+            )
+
+            return self.sandbox_config['container_name'] in result.stdout
 
         except Exception as e:
-            logger.error(f"Error starting Sandboxie sandbox: {str(e)}")
+            logger.error(f"Error starting Docker container: {str(e)}")
             return False
 
-    def _create_sandbox(self):
-        """Create Sandboxie sandbox if it doesn't exist"""
+    def _pull_image(self):
+        """Pull Docker image if needed"""
         try:
-            # Check if sandbox exists
+            image = self.sandbox_config['image']
+            # Check if image exists locally
             result = subprocess.run(
-                ['Sandboxie-Plus.exe', '/box:' + self.sandbox_name, '/query'],
+                ['docker', 'images', '-q', image],
                 capture_output=True,
-                text=True,
-                shell=True
+                text=True
             )
 
-            if result.returncode != 0:
-                # Create new sandbox
+            if not result.stdout.strip():
+                # Pull the image
+                logger.info(f"Pulling Docker image: {image}")
                 subprocess.run(
-                    ['Sandboxie-Plus.exe', '/create', self.sandbox_name],
+                    ['docker', 'pull', image],
                     capture_output=True,
-                    shell=True
+                    text=True
                 )
 
         except Exception as e:
-            logger.error(f"Error creating sandbox: {str(e)}")
+            logger.error(f"Error pulling Docker image: {str(e)}")
 
-    def _terminate_sandboxie_sandbox(self) -> bool:
-        """Terminate Sandboxie sandbox"""
+    def _terminate_docker_container(self) -> bool:
+        """Terminate Docker container"""
         try:
             success = True
 
-            # Terminate sandboxed processes
+            # Stop the container
+            try:
+                subprocess.run(
+                    ['docker', 'stop', self.sandbox_config['container_name']],
+                    capture_output=True,
+                    timeout=30,
+                    text=True
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("Docker container stop timed out")
+                # Force kill if needed
+                try:
+                    subprocess.run(
+                        ['docker', 'kill', self.sandbox_config['container_name']],
+                        capture_output=True,
+                        timeout=10,
+                        text=True
+                    )
+                except subprocess.TimeoutExpired:
+                    success = False
+
+            # Clean up the subprocess if still running
             if self.sandbox_process and self.sandbox_process.poll() is None:
                 self.sandbox_process.terminate()
                 try:
-                    self.sandbox_process.wait(timeout=10)
+                    self.sandbox_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.sandbox_process.kill()
-                    success = False
-
-            # Terminate the sandbox
-            try:
-                subprocess.run(
-                    ['Sandboxie-Plus.exe', '/terminate', self.sandbox_name],
-                    capture_output=True,
-                    timeout=30,
-                    shell=True
-                )
-            except subprocess.TimeoutExpired:
-                logger.warning("Sandboxie termination timed out")
-                success = False
 
             return success
 
         except Exception as e:
-            logger.error(f"Error terminating sandbox: {str(e)}")
+            logger.error(f"Error terminating container: {str(e)}")
             return False
 
-    def _monitor_sandbox(self):
-        """Monitor sandbox processes in background"""
+    def _monitor_container(self):
+        """Monitor container in background"""
         try:
             while self.is_running:
-                if self.sandbox_process and self.sandbox_process.poll() is not None:
-                    # Main sandbox process has terminated
-                    self.is_running = False
-                    self.sandbox_stopped.emit("Sandboxie sandbox process terminated")
-                    break
+                # Check if container is still running
+                result = subprocess.run(
+                    ['docker', 'ps', '--filter', f'name={self.sandbox_config["container_name"]}', '--format', '{{.Names}}'],
+                    capture_output=True,
+                    text=True
+                )
 
-                # Check for other sandboxed processes
-                self._update_sandboxed_processes()
+                if self.sandbox_config['container_name'] not in result.stdout:
+                    # Container has stopped
+                    self.is_running = False
+                    self.sandbox_stopped.emit("Docker container terminated")
+                    break
 
                 time.sleep(2)
         except Exception as e:
-            logger.error(f"Error monitoring sandbox: {str(e)}")
+            logger.error(f"Error monitoring container: {str(e)}")
 
-    def _update_sandboxed_processes(self):
-        """Update list of sandboxed processes"""
+    def _update_container_processes(self):
+        """Update list of container processes"""
         try:
-            # Query Sandboxie for running processes in our sandbox
+            # Query Docker for running processes in our container
             result = subprocess.run(
-                ['Sandboxie-Plus.exe', '/box:' + self.sandbox_name, '/listp'],
+                ['docker', 'exec', self.sandbox_config['container_name'], 'ps', 'aux'],
                 capture_output=True,
-                text=True,
-                shell=True
+                text=True
             )
 
             if result.returncode == 0:
                 # Parse output to get process list
-                # This is a simplified version - actual parsing would depend on Sandboxie output format
-                pass
+                # This is a simplified version
+                self.sandboxed_processes = result.stdout.split('\n')[1:]  # Skip header
 
         except Exception as e:
-            logger.error(f"Error updating sandboxed processes: {str(e)}")
+            logger.error(f"Error updating container processes: {str(e)}")
 
 class TrainingDataManager(QObject):
     """Training data management"""
@@ -615,7 +630,7 @@ class CoreAI3DDashboard(QMainWindow):
 
     def setup_ui(self):
         """Setup main user interface"""
-        self.setWindowTitle("CoreAI3D Dashboard")
+        self.setWindowTitle("CoreAI3D Linux Dashboard")
         self.setGeometry(100, 100, 1400, 900)
 
         # Create central widget and layout
@@ -851,34 +866,34 @@ class CoreAI3DDashboard(QMainWindow):
         layout.addWidget(results_group)
 
     def create_sandbox_tab(self):
-        """Create Sandboxie testing tab"""
+        """Create Docker sandbox testing tab"""
         tab = QWidget()
-        self.tab_widget.addTab(tab, "Sandboxie Testing")
+        self.tab_widget.addTab(tab, "Docker Sandbox")
 
         layout = QVBoxLayout(tab)
 
         # Sandbox status
-        status_group = QGroupBox("Sandboxie Status")
+        status_group = QGroupBox("Docker Status")
         status_layout = QVBoxLayout(status_group)
 
-        self.sandbox_status_label = QLabel("Sandboxie: Not Running")
+        self.sandbox_status_label = QLabel("Docker: Not Running")
         status_layout.addWidget(self.sandbox_status_label)
 
-        # Sandboxie info
-        info_label = QLabel("Sandboxie provides application-level sandboxing with file/registry virtualization")
+        # Docker info
+        info_label = QLabel("Docker provides container-based isolation with process and filesystem sandboxing")
         info_label.setWordWrap(True)
         status_layout.addWidget(info_label)
 
         layout.addWidget(status_group)
 
         # Sandbox configuration
-        config_group = QGroupBox("Sandboxie Configuration")
+        config_group = QGroupBox("Docker Configuration")
         config_layout = QFormLayout(config_group)
 
-        self.sandbox_name_edit = QLineEdit("CoreAI3D_Sandbox")
-        config_layout.addRow("Sandbox Name:", self.sandbox_name_edit)
+        self.sandbox_name_edit = QLineEdit("coreai3d_container")
+        config_layout.addRow("Container Name:", self.sandbox_name_edit)
 
-        self.startup_command_edit = QLineEdit("echo 'Sandboxie sandbox started'")
+        self.startup_command_edit = QLineEdit("echo 'Docker container started'")
         config_layout.addRow("Startup Command:", self.startup_command_edit)
 
         self.networking_combo = QComboBox()
@@ -886,7 +901,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.networking_combo.setCurrentText("Enable")
         config_layout.addRow("Networking:", self.networking_combo)
 
-        self.drop_rights_check = QCheckBox("Drop Administrative Rights")
+        self.drop_rights_check = QCheckBox("Run as Non-Root User")
         self.drop_rights_check.setChecked(True)
         config_layout.addWidget(self.drop_rights_check)
 
@@ -895,18 +910,18 @@ class CoreAI3DDashboard(QMainWindow):
         # Sandbox controls
         controls_layout = QHBoxLayout()
 
-        start_sandbox_btn = QPushButton("Start Sandboxie")
+        start_sandbox_btn = QPushButton("Start Container")
         start_sandbox_btn.clicked.connect(self.start_sandbox)
         controls_layout.addWidget(start_sandbox_btn)
 
-        stop_sandbox_btn = QPushButton("Stop Sandboxie")
+        stop_sandbox_btn = QPushButton("Stop Container")
         stop_sandbox_btn.clicked.connect(self.stop_sandbox)
         controls_layout.addWidget(stop_sandbox_btn)
 
         layout.addLayout(controls_layout)
 
         # Sandbox logs
-        logs_group = QGroupBox("Sandboxie Logs")
+        logs_group = QGroupBox("Docker Logs")
         logs_layout = QVBoxLayout(logs_group)
 
         self.sandbox_logs = QPlainTextEdit()
@@ -2447,7 +2462,7 @@ if __name__ == "__main__":
             info.append(f"PyQt6 Version: {PyQt6.QtCore.PYQT_VERSION_STR}")
             info.append(f"Current Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             info.append(f"Working Directory: {os.getcwd()}")
-            info.append(f"User: {os.environ.get('USERNAME', 'Unknown')}")
+            info.append(f"User: {os.environ.get('USER', 'Unknown')}")
 
             self.system_info.setPlainText("\n".join(info))
 
@@ -2590,7 +2605,7 @@ if __name__ == "__main__":
         QMessageBox.information(
             self, "Documentation",
             "For detailed documentation, please see:\n\n"
-            "windows_gui/README.md\n\n"
+            "README.md\n\n"
             "This file contains comprehensive usage instructions, "
             "configuration details, and troubleshooting information."
         )
@@ -2599,11 +2614,11 @@ if __name__ == "__main__":
         """Show about dialog"""
         QMessageBox.about(
             self, "About CoreAI3D Dashboard",
-            "CoreAI3D Windows GUI Dashboard\n\n"
+            "CoreAI3D Linux GUI Dashboard\n\n"
             "Version 1.3.0\n\n"
             "A comprehensive desktop application for managing AI training data, "
             "testing, debugging, and safely testing OS control operations "
-            "using Windows Sandbox.\n\n"
+            "using Linux containers.\n\n"
             "Built with PyQt6 and CoreAI3D Python Client"
         )
 
@@ -2638,7 +2653,7 @@ def main():
         app = QApplication(sys.argv)
 
         # Set application properties
-        app.setApplicationName("CoreAI3D Dashboard")
+        app.setApplicationName("CoreAI3D Linux Dashboard")
         app.setApplicationVersion("1.3.0")
         app.setOrganizationName("CoreAI3D")
 

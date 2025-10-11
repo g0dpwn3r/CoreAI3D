@@ -3,87 +3,71 @@
     "configurePresets": [
         {
             "name": "windows-debug",
-            "displayName": "Windows Debug",
-            "description": "Debug build for Windows using vcpkg",
-            "generator": "Visual Studio 17 2022",
-            "architecture": "x64",
+            "displayName": "Window Debug",
+            "description": "Using compilers: C = C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.36.32532/bin/Hostx64/x64/cl.exe",
+            "generator": "Ninja",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
-                "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "VCPKG_INSTALL_PREFIX": "${sourceDir}/out/build/${presetName}/vcpkg_installed",
-                "VCPKG_VERBOSE": "ON",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_BUILD_TYPE": "Debug"
             },
             "environment": {
-                "VCPKG_ROOT": "D:/code/CoreAI3D/vcpkg"
+                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
             }
         },
         {
             "name": "windows-release",
             "displayName": "Windows Release",
-            "description": "Debug build for Windows using vcpkg",
-            "generator": "Visual Studio 17 2022",
-            "architecture": "x64",
+            "description": "Using compilers: C = C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.36.32532/bin/Hostx64/x64/cl.exe",
+            "generator": "Ninja",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
-                "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
-                "VCPKG_INSTALL_PREFIX": "${sourceDir}/out/build/${presetName}/vcpkg_installed",
-                "VCPKG_VERBOSE": "ON",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_BUILD_TYPE": "Release"
             },
             "environment": {
-                "VCPKG_ROOT": "D:/code/CoreAI3D/vcpkg"
+                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
             }
         },
         {
-            "name": "wsl-debug",
-            "displayName": "WSL Debug",
-            "description": "Debug build for WSL using vcpkg",
-            "generator": "Ninja",
+            "name": "linux-debug",
+            "displayName": "Linux Debug",
+            "description": "Using compilers: C = /usr/bin/gcc",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_TOOLCHAIN_FILE": "/home/h4x0r/vcpkg/scripts/buildsystems/vcpkg.cmake",
-                "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/gcc",
+                "CMAKE_BUILD_TYPE": "Debug"
             },
             "environment": {
-                "VCPKG_ROOT": "/home/h4x0r/vcpkg"
+                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
             }
         },
         {
-            "name": "wsl-release",
-            "displayName": "WSL Debug",
-            "description": "Debug build for WSL using vcpkg",
-            "generator": "Ninja",
+            "name": "linux-release",
+            "displayName": "Linux Release",
+            "description": "Using compilers: C = /usr/bin/gcc",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_TOOLCHAIN_FILE": "/home/h4x0r/vcpkg/scripts/buildsystems/vcpkg.cmake",
-                "VCPKG_TARGET_TRIPLET": "x64-linux",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/gcc",
+                "CMAKE_BUILD_TYPE": "Release"
             },
             "environment": {
-                "VCPKG_ROOT": "/home/h4x0r/vcpkg"
+                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
             }
         }
     ],
     "buildPresets": [
         {
             "name": "build-release-linux",
-            "configurePreset": "wsl-release",
+            "configurePreset": "linux-release",
             "description": "Builds optimized Linux/WSL release binary",
             "jobs": 8
         },
         {
             "name": "build-debug-linux",
-            "configurePreset": "wsl-debug",
+            "configurePreset": "linux-debug",
             "description": "Builds debug Linux/WSL binary",
             "jobs": 8
         },
@@ -105,17 +89,16 @@
             "configurePreset": "windows-debug"
         },
         {
-            "name": "wsl-debug",
-            "displayName": "WSL Debug",
-            "configurePreset": "wsl-debug"
+            "name": "linux-debug",
+            "displayName": "Linux Debug",
+            "configurePreset": "linux-debug"
         }
     ],
     "packagePresets": [
         {
             "name": "package-release-linux",
-            "configurePreset": "wsl-release",
-            "description": "Package CoreAI3D as .deb (Linux/WSL)"
-            
+            "configurePreset": "linux-release",
+            "description": "Package CoreAI3D as .deb (Linux)"
         },
         {
             "name": "package-release-windows",

@@ -8,6 +8,13 @@
 - MATH Load configuration from file
 
 ## v2.1 - Testing and Optimization
+- Add matrix multiplication Moosbauwer poole algorithm
+- Add matrix multiplication Strassen algorithm
+- Add matrix multiplication Coppersmith-Winograd algorithm
+- Add matrix multiplication naive algorithm
+- Add matrix multiplication vinograd algorithm
+- Add matrix multiplication optimized vinograd algorithm
+- Add a way to benchmark the ai
 - Add a way to test the ai
 - Dashboard stream live metrics
 - Dashboard show visual representation of the neural network
