@@ -8,6 +8,7 @@
 #include "SystemModule.hpp"
 #include "WebModule.hpp"
 #include "MathModule.hpp"
+#include "Train.hpp"
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
@@ -27,6 +28,7 @@ using json = nlohmann::json;
 class APIServer {
 private:
     std::unique_ptr<ModuleOrchestrator> orchestrator;
+    std::unique_ptr<Training> trainingModule;
     std::string serverName;
     bool isInitialized;
     std::atomic<bool> isRunning;
@@ -62,6 +64,7 @@ protected:
     virtual json handleSystemAPI(const std::string& action, const json& parameters);
     virtual json handleWebAPI(const std::string& action, const json& parameters);
     virtual json handleMathAPI(const std::string& action, const json& parameters);
+    virtual json handleNeuralAPI(const std::string& action, const json& parameters);
     virtual json handleOrchestratorAPI(const std::string& action, const json& parameters);
 
     // HTTP request handling
@@ -113,6 +116,7 @@ public:
     bool addSystemModule(const std::string& name, std::unique_ptr<SystemModule> module);
     bool addWebModule(const std::string& name, std::unique_ptr<WebModule> module);
     bool addMathModule(const std::string& name, std::unique_ptr<MathModule> module);
+    void setTrainingModule(std::unique_ptr<Training> training);
 
     // API endpoints
     struct APIEndpoint {
@@ -156,6 +160,10 @@ public:
     json mathOptimize(const std::string& sessionId, const std::string& objective, const std::vector<float>& initialGuess);
     json mathStatistics(const std::string& sessionId, const std::vector<float>& data);
     json mathMatrixOperation(const std::string& sessionId, const std::string& operation, const std::string& matrixName, const json& parameters);
+
+    // Neural API endpoints
+    json neuralGetTopology(const std::string& sessionId);
+    json neuralGetActivity(const std::string& sessionId);
 
     // Orchestrator API endpoints
     json orchestratorSubmitTask(const std::string& sessionId, const std::string& taskType, const std::string& description, const json& parameters);

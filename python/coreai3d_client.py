@@ -465,6 +465,13 @@ class CoreAI3DClient:
         endpoint = f'/status/modules{ f"/{module_name}" if module_name else ""}'
         return await self.get(endpoint)
 
+    # Neural Network API
+    async def get_neural_topology(self) -> APIResponse:
+        return await self.get('/neural/topology')
+
+    async def get_neural_activity(self) -> APIResponse:
+        return await self.get('/neural/activity')
+
     # Utility Methods
     async def wait_for_ready(self, timeout: float = 30.0) -> bool:
         start_time = time.time()

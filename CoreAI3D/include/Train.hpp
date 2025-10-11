@@ -6,6 +6,7 @@
 #include "Core.hpp"
 #include "Database.hpp"
 #include "Language.hpp"
+#include <nlohmann/json.hpp>
 
 class Language;
 class CoreAI;
@@ -58,6 +59,8 @@ public:
 
     CoreAI* getCore();
     Language* getLanguage();
+    nlohmann::json getNetworkTopology();
+    nlohmann::json getNetworkActivity();
     // Database interaction methods
     bool saveModel(int& datasetId);
     bool loadModel(int& datasetId);
