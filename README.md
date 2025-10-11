@@ -1,132 +1,173 @@
-# CoreAI3D
+# CoreAI3D: Multimodal AI Platform
 
-CoreAI3D is a C++ neural core engine and tooling stack for training and serving AI models. The project uses CMake for cross-platform builds, targets C++20, and is designed to build on Windows (Visual Studio) and Linux/WSL (Ninja). Protobuf, Abseil, Boost, MySQL connector and other libraries are consumed via `vcpkg`.
+CoreAI3D is a powerful multimodal AI platform that combines computer vision, natural language processing, audio processing, and neural network capabilities into a single, easy-to-use system. Whether you're building intelligent applications, analyzing data, or creating interactive AI experiences, CoreAI3D provides the tools you need to harness the power of machine learning across multiple modalities.
 
-Highlights
-- C++20 codebase
-- CMake-based build (minimum CMake 3.20; tested with 3.31.x)
-- Supports Visual Studio 2022 and Ninja generators
-- Uses `vcpkg` for dependency management
-- Protobuf code generation integrated into the build
-- Packaging with CPack (NSIS / DEB) and a Dockerfile for Linux builds
-- Tests: GTest and Boost.Test may be present in the tree
+## Key Features
 
-Getting started
+- **Multimodal AI Capabilities**: Seamlessly integrate vision, audio, language, and neural network processing
+- **Computer Vision**: Object detection, image classification, OCR, facial recognition, and medical imaging analysis
+- **Natural Language Processing**: Text encoding, chat interfaces, and language detection with embedding support
+- **Audio Processing**: Speech recognition, audio analysis, synthesis, music analysis, and speaker identification
+- **Neural Networks**: Customizable neural network training and prediction with flexible architecture
+- **Multiple Interfaces**: Command-line interface, REST API server, and graphical user interfaces
+- **Database Integration**: MySQL support for data persistence and model storage
+- **Cross-Platform**: Built with C++ for Windows and Linux compatibility
+- **Extensible Architecture**: Modular design for easy integration and customization
 
-Prerequisites
-- Windows: Visual Studio 2022 ("Desktop development with C++" workload) or install the MSVC toolchain and CMake
-- Linux / WSL: build-essential, cmake, git and required libs (see `Dockerfile` for a sample apt install list)
-- CMake >= 3.20 (3.31 recommended)
-- vcpkg (optional but recommended) — set `VCPKG_ROOT` env var or place vcpkg next to the repo
+## How It Works
 
-Clone
+CoreAI3D operates through specialized modules that handle different AI tasks:
 
+- **Vision Module**: Processes images and videos using neural networks for tasks like object detection and classification
+- **Audio Module**: Analyzes and synthesizes audio, including speech recognition and music analysis
+- **Language Module**: Handles text processing with word embeddings and conversational AI capabilities
+- **Core AI Engine**: Provides the underlying neural network infrastructure for training and inference
+- **API Server**: Exposes functionality through HTTP endpoints for easy integration
+- **Database Layer**: Manages data storage and retrieval for models and results
+
+The system uses a modular orchestrator to coordinate between different AI capabilities, allowing you to combine vision, audio, and language processing in powerful ways.
+
+## Getting Started
+
+### Prerequisites
+
+- **Operating System**: Windows (Visual Studio 2022) or Linux/WSL
+- **Build Tools**: CMake 3.20+, C++20 compiler
+- **Dependencies**: vcpkg for dependency management (recommended)
+- **Database**: MySQL server (optional, for data persistence)
+
+### Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/g0dpwn3r/CoreAI3D.git
+   cd CoreAI3D
+   ```
+
+2. **Install dependencies with vcpkg**:
+   ```bash
+   # Set VCPKG_ROOT environment variable or place vcpkg in repo root
+   cmake -S . -B out/build -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+   ```
+
+3. **Build the project**:
+
+   **Linux/WSL**:
+   ```bash
+   mkdir -p out/build/linux
+   cd out/build/linux
+   cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ../.. -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+   cmake --build . --config Release
+   ```
+
+   **Windows (Visual Studio)**:
+   ```powershell
+   cmake -S . -B out/build/vs -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
+   cmake --build out/build/vs --config Release
+   ```
+
+4. **Optional: Set up MySQL database**:
+   - Install MySQL server
+   - Create a database for CoreAI3D
+   - Configure connection settings in your application
+
+## Usage
+
+CoreAI3D supports multiple interaction modes to fit your workflow:
+
+### Command Line Interface
+
+#### Chat Mode
+Start an interactive AI chat session:
 ```bash
-git clone https://github.com/g0dpwn3r/CoreAI3D.git
-cd CoreAI3D
+./CoreAI3D --start-chat --language en --embedding-file en_embeddings.csv --db-host localhost --db-user your_user --db-password your_password
 ```
 
-Using vcpkg
-
-If you use `vcpkg` place it in the repo root or set `VCPKG_ROOT` and pass the toolchain to CMake:
-
+#### Prediction Mode
+Train and predict on CSV data:
 ```bash
-cmake -S . -B out/build -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+./CoreAI3D --start-predict --input-file data.csv --output-csv predictions.csv --layers 3 --neurons 25 --epochs 100 --learning-rate 0.01
 ```
 
-Build (Linux / WSL, Ninja)
-
+#### API Server Mode
+Start the HTTP API server:
 ```bash
-mkdir -p out/build/linux
-cd out/build/linux
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug ../.. \
-  -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build . --config Debug
+./CoreAI3D --api-port 8080
 ```
 
-Build (Windows Visual Studio)
+### Python Client
+Use the included Python client for easy integration:
+```python
+from python.coreai3d_client import CoreAI3DClient
 
-Open a "x64 Native Tools Command Prompt for VS 2022" or use Visual Studio UI:
-
-CLI (VS generator):
-
-```powershell
-cmake -S . -B out/build/vs -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake
-cmake --build out/build/vs --config Debug
+client = CoreAI3DClient('http://localhost:8080')
+result = client.predict(data)
 ```
 
-Tip: the workspace also includes `CMakeSettings.json` which defines `Windows-Debug` and `WSL-Debug` configurations for Visual Studio.
-
-Troubleshooting
-
-- "Could not find specified instance of Visual Studio"
-  - This commonly occurs when a cached CMake variable such as `CMAKE_GENERATOR_INSTANCE` contains a bad path (typo like `Viual Studio`). Fix:
-    - Delete the CMake cache (`CMakeCache.txt` and `CMakeFiles/`) and reconfigure.
-    - Ensure Visual Studio 2022 is installed and registered in the Visual Studio Installer.
-    - Avoid forcing the generator from inside `CMakeLists.txt`; let the caller/IDE select the generator.
-
-- MSBuild `GetOutOfDateItems` OutOfMemoryException ("System.OutOfMemoryException")
-  - Cause: extremely large command-line / huge inline file lists passed to `add_executable` (for example thousands of generated protobuf sources) cause MSBuild tasks to assemble very large strings and exhaust process memory.
-  - Mitigations:
-    - Use an intermediate library target for generated sources (`add_library(proto_objs ...)`) and `target_link_libraries` the library into the executable. This avoids embedding huge file lists on the linker command line.
-    - Use the Ninja generator for heavy code-generation builds (Ninja uses less MSBuild machinery and avoids MSBuild OOM issues).
-    - Increase machine RAM / pagefile while building.
-    - Split generated sources into smaller logical libraries if possible.
-
-- CMake cache / bad generator selection
-  - If you suspect a cached bad generator instance, remove cache files and re-run CMake with the generator you want. Example:
-
+### Web Interface
+Access the web-based GUI by opening `web/gui.jsx` in a modern browser or use the Windows dashboard:
 ```bash
-rm -rf out/build/* CMakeCache.txt CMakeFiles
-cmake -S . -B out/build -G "Visual Studio 17 2022" -A x64
+python windows_gui/run_dashboard.py
 ```
 
-Testing
-
-If the repository contains tests (GTest / Boost.Test), configure and build tests and run them with CTest:
-
-```bash
-cmake -S . -B out/build -DBUILD_TESTING=ON
-cmake --build out/build --target RUN_TESTS
-# or
-ctest --test-dir out/build -C Debug -V
-```
-
-Packaging
-
-CPack is configured in the top-level `CMakeLists.txt`. Example generators include NSIS (Windows) and DEB (Linux). After a successful build:
-
-```bash
-cd out/build
-cpack
-```
-
-Docker
-
-A sample `Dockerfile` is included to create a Linux build environment. Build and run:
-
+### Docker
+Run CoreAI3D in a containerized environment:
 ```bash
 docker build -t coreai3d:latest .
-docker run --rm coreai3d:latest
+docker run -p 8080:8080 coreai3d:latest
 ```
 
-Developer notes
+## API Reference
 
-- The top-level `CMakeLists.txt` was adjusted to avoid forcing a Visual Studio generator from inside CMake and to detect/unset a cached `CMAKE_GENERATOR_INSTANCE` that contains obvious typos. If you maintain custom IDE integration, prefer setting the generator from your tooling rather than from the project file.
-- Generated Protobuf sources are collected into `proto_objs` and linked into the main target to reduce command-line length and MSBuild memory pressure.
+CoreAI3D provides a REST API for programmatic access to AI capabilities:
 
-Contributing
+### Core Endpoints
 
-Please open issues or pull requests on the upstream repository. When contributing changes that affect build or packaging, include platform-specific verification steps (Windows/Ninja/WSL).
+- `POST /api/predict` - Neural network prediction
+- `POST /api/train` - Train models on data
+- `POST /api/chat` - Interactive chat with AI
+- `GET /api/models` - List available models
 
-License
+### Vision Endpoints
 
-See the `LICENSE` file at the repository root for license details.
+- `POST /api/vision/detect` - Object detection in images
+- `POST /api/vision/classify` - Image classification
+- `POST /api/vision/ocr` - Optical character recognition
 
-Contact
+### Audio Endpoints
 
-Project maintainer: Carlon <carlonvanspijker@gmail.com>
+- `POST /api/audio/recognize` - Speech-to-text
+- `POST /api/audio/analyze` - Audio analysis
+- `POST /api/audio/synthesize` - Text-to-speech
+
+### Language Endpoints
+
+- `POST /api/language/encode` - Text encoding with embeddings
+- `POST /api/language/detect` - Language detection
+
+For detailed API documentation, see the [API Documentation](api-docs.md) or explore the endpoints interactively when the server is running.
+
+## Contributing
+
+We welcome contributions to CoreAI3D! Here's how you can help:
+
+1. **Report Issues**: Found a bug? Open an issue on GitHub
+2. **Feature Requests**: Have an idea? Let us know in the issues
+3. **Code Contributions**: Fork the repo, make changes, and submit a pull request
+4. **Documentation**: Help improve documentation and examples
+
+### Development Setup
+
+1. Follow the installation steps above
+2. Enable testing: `cmake -S . -B out/build -DBUILD_TESTING=ON`
+3. Run tests: `ctest --test-dir out/build -C Debug -V`
+
+## License
+
+CoreAI3D is licensed under the terms specified in the [LICENSE](LICENSE) file.
 
 ---
 
-If you want, I can add a short `DEVELOPMENT.md` with detailed instructions for common dev flows (proto generation, vcpkg bootstrap, helping Visual Studio detect instances).
+**Built with ❤️ using C++20, CMake, and modern AI techniques**
+
+*Experience the future of multimodal AI with CoreAI3D - where vision, voice, and language come together seamlessly.*

@@ -125,5 +125,5 @@ set(CPACK_NSIS_MODIFY_PATH ON)
 set(CPACK_GENERATOR "DEB;NSIS")
 
 message(STATUS "CPack configured for generators: ${CPACK_GENERATOR}")
-#nable_testing()
-#add_subdirectory(tests)
+enable_testing()
+add_subdirectory(tests)

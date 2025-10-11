@@ -24,17 +24,5 @@ RUN git clone https://github.com/g0dpwn3r/vcpkg && \
     ./bootstrap-vcpkg.sh && \
     ./vcpkg integrate install
 
-# Copy source code
-COPY . /app
-
-# Build the application
-RUN mkdir -p build && \
-    cd build && \
-    cmake -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    cmake --build . --config Release
-
-# Make executable
-RUN chmod +x /app/build/CoreAI3D
-
 # Default command
 CMD ["/app/build/CoreAI3D"]

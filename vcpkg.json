@@ -6,8 +6,6 @@
         "utf8-range",
         "vcpkg-cmake",
         "vcpkg-cmake-config",
-        "boost",
-        "boost-core",
         "boost-filesystem",
         "boost-system",
         "boost-regex",
