@@ -183,23 +183,23 @@ int main(int argc, char* argv[]) {
     std::string bool_str;
 
     // Map string to mysqlx::SSLMode enum
-    mysqlx::SSLMode ssl = mysqlx::SSLMode::DISABLED; // Default
+    SSLMode ssl = SSLMode::DISABLED; // Default
     if (sslModeStr == "DISABLED") {
-        ssl = mysqlx::SSLMode::DISABLED;
+        ssl = SSLMode::DISABLED;
     }
     else if (sslModeStr == "REQUIRED") {
-        ssl = mysqlx::SSLMode::REQUIRED;
+        ssl = SSLMode::REQUIRED;
     }
     else if (sslModeStr == "VERIFY_CA") {
-        ssl = mysqlx::SSLMode::VERIFY_CA;
+        ssl = SSLMode::VERIFY_CA;
     }
     else if (sslModeStr == "VERIFY_IDENTITY") {
-        ssl = mysqlx::SSLMode::VERIFY_IDENTITY;
+        ssl = SSLMode::VERIFY_IDENTITY;
     }
     else {
         std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
             << "'. Defaulting to DISABLED." << std::endl;
-        ssl = mysqlx::SSLMode::DISABLED; // Ensure ssl is set to a valid default
+        ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
     }
 
     // --- Interactive Mode Check ---
@@ -284,21 +284,21 @@ int main(int argc, char* argv[]) {
                 std::getline(std::cin, sslModeStr);
                 // Re-evaluate SSL mode after interactive input
                 if (sslModeStr == "DISABLED") {
-                    ssl = mysqlx::SSLMode::DISABLED;
+                    ssl = SSLMode::DISABLED;
                 }
                 else if (sslModeStr == "REQUIRED") {
-                    ssl = mysqlx::SSLMode::REQUIRED;
+                    ssl = SSLMode::REQUIRED;
                 }
                 else if (sslModeStr == "VERIFY_CA") {
-                    ssl = mysqlx::SSLMode::VERIFY_CA;
+                    ssl = SSLMode::VERIFY_CA;
                 }
                 else if (sslModeStr == "VERIFY_IDENTITY") {
-                    ssl = mysqlx::SSLMode::VERIFY_IDENTITY;
+                    ssl = SSLMode::VERIFY_IDENTITY;
                 }
                 else {
                     std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
                         << "'. Defaulting to DISABLED." << std::endl;
-                    ssl = mysqlx::SSLMode::DISABLED;
+                    ssl = SSLMode::DISABLED;
                 }
             }
             if (!vm.count("layers")) {
@@ -396,7 +396,7 @@ int main(int argc, char* argv[]) {
             // Assuming embedding dimension is fixed or passed as an argument.
             // For this example, let's assume it's 100 as per previous context.
             int embeddingDimension = 100; // This should match your embedding file's dimension.
-            Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, language, inputSize, outputSize, layers, neurons);
+            Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
 
             // Load embeddings for the specified language.
             std::string actualEmbeddingFile = embeddingFile.empty()
@@ -479,21 +479,21 @@ int main(int argc, char* argv[]) {
                     std::getline(std::cin, sslModeStr);
                     // Re-evaluate SSL mode after interactive input
                     if (sslModeStr == "DISABLED") {
-                        ssl = mysqlx::SSLMode::DISABLED;
+                        ssl = SSLMode::DISABLED;
                     }
                     else if (sslModeStr == "REQUIRED") {
-                        ssl = mysqlx::SSLMode::REQUIRED;
+                        ssl = SSLMode::REQUIRED;
                     }
                     else if (sslModeStr == "VERIFY_CA") {
-                        ssl = mysqlx::SSLMode::VERIFY_CA;
+                        ssl = SSLMode::VERIFY_CA;
                     }
                     else if (sslModeStr == "VERIFY_IDENTITY") {
-                        ssl = mysqlx::SSLMode::VERIFY_IDENTITY;
+                        ssl = SSLMode::VERIFY_IDENTITY;
                     }
                     else {
                         std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
                             << "'. Defaulting to DISABLED." << std::endl;
-                        ssl = mysqlx::SSLMode::DISABLED;
+                        ssl = SSLMode::DISABLED;
                     }
                 }
                 if (!vm.count("dataset-name")) {
@@ -691,7 +691,7 @@ int main(int argc, char* argv[]) {
             Training trainer = isOfflineMode
                 ? Training(true)
                 : Training(dbHost, dbPort, dbUser, dbPassword,
-                    dbSchema, ssl, createTables);
+                    dbSchema, 0, createTables);
             std::cout << "[PREDICT MODE] Training object initialized.\n";
 
             // Set training parameters (important for model structure if loading from DB)
@@ -711,7 +711,7 @@ int main(int argc, char* argv[]) {
             {
                 int embeddingDimension = 100; // Define or derive
                 std::cout << "[PREDICT MODE] Initializing Language processor...\n";
-                trainer.initializeLanguageProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, language, inputSize, outputSize, layers, neurons);
+                trainer.initializeLanguageProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
                 std::cout << "[PREDICT MODE] Language processor initialized. Note: 'contains-text' is true.\n";
             }
 
@@ -792,7 +792,7 @@ int main(int argc, char* argv[]) {
             Training trainer = isOfflineMode
                 ? Training(true)
                 : Training(dbHost, dbPort, dbUser, dbPassword,
-                    dbSchema, ssl, createTables);
+                    dbSchema, 0, createTables);
             std::cout << "[API MODE] Training object initialized.\n";
 
 
@@ -839,11 +839,6 @@ int main(int argc, char* argv[]) {
 
             std::cout << "Application gracefully exited.\n";
         }
-    }
-    catch (const mysqlx::Error& err)
-    {
-        std::cerr << "MySQL Error caught: " << err.what() << std::endl;
-        return 1;
     }
     catch (const std::runtime_error& err)
     {

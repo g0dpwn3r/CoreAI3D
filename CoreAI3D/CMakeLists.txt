@@ -64,15 +64,15 @@ if(EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
 endif()
 
 # --- Find and Link Boost Components ---
-# Use FindBoost (module mode) requesting compiled components; asio/beast are header-only so not requested here.
-find_package(Boost REQUIRED COMPONENTS program_options filesystem system regex)
+# Use Boost CONFIG mode
+find_package(Boost CONFIG REQUIRED COMPONENTS program_options filesystem system regex)
 if(Boost_FOUND)
     message(STATUS "Found Boost include dirs: ${Boost_INCLUDE_DIRS}")
 else()
     message(WARNING "Boost not found. Install Boost via vcpkg (e.g. 'vcpkg install boost-program-options boost-filesystem boost-system boost-regex') and ensure the vcpkg toolchain is used.")
 endif()
 
-find_package(unofficial-mysql-connector-cpp CONFIG REQUIRED)
+# find_package(mysql-concpp CONFIG REQUIRED)
 find_package(absl CONFIG REQUIRED)
 find_package(utf8_range CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
@@ -81,6 +81,8 @@ find_package(zstd CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
+find_package(google_cloud_cpp_speech CONFIG REQUIRED)
+find_package(google_cloud_cpp_common CONFIG REQUIRED)
 
 # Prefer Protobuf include dir provided by the CMake package
 if(NOT DEFINED PROTOBUF_INCLUDE_DIR OR NOT PROTOBUF_INCLUDE_DIR)
@@ -121,6 +123,15 @@ if(PROTOBUF_INCLUDE_DIR)
     list(APPEND PROTOBUF_IMPORT_DIRS ${PROTOBUF_INCLUDE_DIR}/google ${PROTOBUF_INCLUDE_DIR}/googleapis)
 else()
     message(WARNING "Could not find protobuf include directory; proto import may fail if google/googleapis are not available. Install protobuf via vcpkg and ensure the vcpkg toolchain is used.")
+endif()
+
+# Find google-cloud-cpp include dirs
+if(TARGET google-cloud-cpp::speech)
+    get_target_property(GOOGLE_CLOUD_CPP_INCLUDE_DIRS google-cloud-cpp::speech INTERFACE_INCLUDE_DIRECTORIES)
+    if(GOOGLE_CLOUD_CPP_INCLUDE_DIRS)
+        message(STATUS "Found google-cloud-cpp include dirs: ${GOOGLE_CLOUD_CPP_INCLUDE_DIRS}")
+        list(APPEND IMPORT_DIRS_FOR_PROTO ${GOOGLE_CLOUD_CPP_INCLUDE_DIRS})
+    endif()
 endif()
 
 # Build explicit import dirs list with preferred order (local googleapis first)
@@ -212,31 +223,35 @@ if(NOT WIN32)
     list(APPEND SOURCE_FILES src/LinuxModule.cpp)
 endif()
 
-add_executable(CoreAI3D ${PROTO_SRCS} ${PROTO_HDRS} ${SOURCE_FILES})
+# Create library source files (exclude main.cpp)
+set(LIB_SOURCE_FILES ${SOURCE_FILES})
+list(REMOVE_ITEM LIB_SOURCE_FILES main.cpp)
 
-# Include directories for protobuf headers
-target_include_directories(CoreAI3D PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}  # Include current directory for main.cpp
-    include  # Include directory for your project headers
-    ${CMAKE_CURRENT_BINARY_DIR}  # Include generated protobuf headers
+# Create CoreAI3DLib library
+add_library(CoreAI3DLib ${LIB_SOURCE_FILES})
+
+# Set include directories for CoreAI3DLib
+target_include_directories(CoreAI3DLib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 # If we copied local google/googleapis into the build tree, include them too
 if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
-    target_include_directories(CoreAI3D PRIVATE
+    target_include_directories(CoreAI3DLib PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}/google
         ${CMAKE_CURRENT_BINARY_DIR}/googleapis
     )
 else()
     # Otherwise include protobuf include dir detected earlier (from vcpkg/system)
     if(PROTOBUF_INCLUDE_DIR)
-        target_include_directories(CoreAI3D PRIVATE ${PROTOBUF_INCLUDE_DIR})
+        target_include_directories(CoreAI3DLib PUBLIC ${PROTOBUF_INCLUDE_DIR})
     endif()
 endif()
 
 # Also add the generic protobuf include if we have it
 if(PROTOBUF_INCLUDE_DIR)
-    target_include_directories(CoreAI3D PRIVATE ${PROTOBUF_INCLUDE_DIR})
+    target_include_directories(CoreAI3DLib PUBLIC ${PROTOBUF_INCLUDE_DIR})
 endif()
 
 # Build library list conditionally to avoid referencing missing Boost targets
@@ -251,8 +266,9 @@ if(TARGET Boost::system)
     list(APPEND PROJECT_LIBS Boost::system)
 endif()
 
-# Add protobuf include directories
-target_link_libraries(CoreAI3D PRIVATE
+# Link libraries to CoreAI3DLib
+target_link_libraries(CoreAI3DLib PUBLIC
+    proto_objs
     ${PROJECT_LIBS}
     absl::absl_check # Example Abseil targets, link what's needed by your code/protobuf
     absl::absl_log
@@ -298,9 +314,22 @@ target_link_libraries(CoreAI3D PRIVATE
     protobuf::libprotoc
     protobuf::libprotobuf
     protobuf::libprotobuf-lite
-    unofficial::mysql-connector-cpp::connector
     nlohmann_json::nlohmann_json
+    google-cloud-cpp::speech
+    google-cloud-cpp::common
 )
+
+add_executable(CoreAI3D main.cpp)
+
+# Include directories for the executable
+target_include_directories(CoreAI3D PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}  # Include current directory for main.cpp
+    include  # Include directory for your project headers
+    ${CMAKE_CURRENT_BINARY_DIR}  # Include generated protobuf headers
+)
+
+# Link the executable against CoreAI3DLib
+target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib)
 
 # After computing VALID_PROTOBUF_IMPORT_DIRS, print them for diagnostics
 message(STATUS "Proto import dirs used for generation: ${VALID_PROTOBUF_IMPORT_DIRS}")

@@ -1,7 +1,7 @@
 #ifndef MODULE_ORCHESTRATOR_HPP
 #define MODULE_ORCHESTRATOR_HPP
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 #include "Core.hpp"
 #include "VisionModule.hpp"
 #include "AudioModule.hpp"

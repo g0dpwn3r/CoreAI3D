@@ -1,7 +1,8 @@
 #ifndef WEBSOCKET_SERVER_HPP
 #define WEBSOCKET_SERVER_HPP
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
+
 #include "ModuleOrchestrator.hpp"
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>

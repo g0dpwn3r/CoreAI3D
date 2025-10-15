@@ -1,8 +1,8 @@
 ﻿#include "Train.hpp"
 // Constructor for online mode (with database)
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
-    const std::string dbPassword, const std::string& dbSchema, mysqlx::SSLMode ssl, bool createTables)
-    : dbManager(std::make_unique<Database>(dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl)),
+    const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables)
+    : dbManager(std::make_unique<Database>(dbHost, dbPort, dbUser, dbPassword, dbSchema, SSLMode::DISABLED)),
     isOfflineMode(false), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
@@ -28,8 +28,8 @@ Training::Training(bool isOffline)
 
 // Helper to initialize Language processor (called from main.cpp)
 void Training::initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort,
-    std::string& dbUser, std::string& dbPassword, std::string& dbSchema, mysqlx::SSLMode ssl, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons) {
-    this->langProc = std::make_unique<Language>(embedingFile, embeddingDim, dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, lang, inputSize, outputSize, layers, neurons);
+    std::string& dbUser, std::string& dbPassword, std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons) {
+    this->langProc = std::make_unique<Language>(embedingFile, embeddingDim, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, lang, inputSize, outputSize, layers, neurons);
     // After initialization, you might want to load the embeddings here.
     if (this->langProc) {
         this->langProc->loadWordEmbeddingsFromFile(embedingFile, embeddingDim);
@@ -296,7 +296,7 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             }
             std::cout << "All dataset records added to database for dataset ID: " << currentDatasetId << std::endl;
         }
-        catch (const mysqlx::Error& err) {
+        catch (const std::exception& err) {
             std::cerr << "Database error during CSV loading: " << err.what() << std::endl; return false;
         }
         catch (const std::runtime_error& err) {
@@ -442,7 +442,7 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
             }
             std::cout << "All target records updated in database for dataset ID: " << datasetId << std::endl;
         }
-        catch (const mysqlx::Error& err) {
+        catch (const std::exception& err) {
             std::cerr << "Database error during target CSV loading/saving: " << err.what() << std::endl; return false;
         }
         catch (const std::runtime_error& err) {
@@ -506,7 +506,7 @@ bool Training::loadDatasetFromDB(int& datasetId) {
             << "' (ID: " << this->currentDatasetId << ") from database.\n";
         return true;
     }
-    catch (const mysqlx::Error& err) {
+    catch (const std::exception& err) {
         std::cerr << "Database error loading dataset: " << err.what() << std::endl; return false;
     }
     catch (const std::runtime_error& err) {

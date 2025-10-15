@@ -1,4 +1,4 @@
-R#include "APIServer.hpp"
+#include "APIServer.hpp"
 #include "MathModule.hpp"
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -20,6 +20,7 @@ R#include "APIServer.hpp"
 #include <chrono>
 #include <random>
 #include <regex>
+#include <ctime>
 
 using namespace std::chrono_literals;
 

@@ -25,7 +25,7 @@ TEST_CASE("CoreAI: forward and sigmoid basic checks", "[core]") {
     }
 
     SECTION("Sigmoid sanity") {
-        REQUIRE(core.sigmoid(0.0f) == Approx(0.5f));
+        REQUIRE(core.sigmoid(0.0f) == Catch::Approx(0.5f));
         REQUIRE(core.sigmoid(100.0f) > 0.999f);
         REQUIRE(core.sigmoid(-100.0f) < 0.001f);
     }

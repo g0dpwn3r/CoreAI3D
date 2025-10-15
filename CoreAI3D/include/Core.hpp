@@ -1,7 +1,7 @@
 #ifndef CORE_HPP
 #define CORE_HPP
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 
 #include "Train.hpp"
 #include "Database.hpp"
