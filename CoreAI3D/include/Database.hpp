@@ -1,19 +1,26 @@
 #pragma once
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 
 #include "Train.hpp"
 #include "Core.hpp"
 #include "Language.hpp"
-//Assuming this is the correct header for mysqlx
 
 // Forward declarations for nlohmann::json if needed in header for method signatures
 using json = nlohmann::json;
+
+// Simple enum to replace mysqlx::SSLMode
+enum class SSLMode {
+    DISABLED,
+    REQUIRED,
+    VERIFY_CA,
+    VERIFY_IDENTITY
+};
 
 class Database
 {
 public:
     // Constructor signature: Changed 'int port' to 'unsigned int port' to match implementation
-    Database(const std::string& host, unsigned int port, const std::string& user, const std::string password, const std::string& schemaName, mysqlx::SSLMode ssl);
+    Database(const std::string& host, unsigned int port, const std::string& user, const std::string password, const std::string& schemaName, SSLMode ssl);
 
     void createTables();
 
@@ -87,16 +94,19 @@ public:
         const std::vector<float>& predictedTargets);
 
 private:
-    mysqlx::Session session;
-    mysqlx::Schema schema; // Add this member
-    std::string dbSchema;  // Keep this too // Declare dbSchema as a member
+    std::string dbHost;
+    unsigned int dbPort;
+    std::string dbUser;
+    std::string dbPassword;
+    std::string dbSchema;
+    SSLMode sslMode;
 
     // Helper functions for BLOB conversion of 2D matrices
-    mysqlx::bytes matrixToBlob(const std::vector<std::vector<float> >& matrix);
+    std::vector<char> matrixToBlob(const std::vector<std::vector<float> >& matrix);
     std::vector<std::vector<float> > blobToMatrix(const std::vector<char>& blob);
 
     // New helper functions for 1D vector BLOB conversion
-    mysqlx::bytes vectorToBlob(const std::vector<float>& vec);
+    std::vector<char> vectorToBlob(const std::vector<float>& vec);
     std::vector<float> blobToVector(const std::vector<char>& blob);
 
     // NEW: Helper to create the prediction results table

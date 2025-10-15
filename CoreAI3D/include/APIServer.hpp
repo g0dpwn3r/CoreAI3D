@@ -1,7 +1,7 @@
 #ifndef API_SERVER_HPP
 #define API_SERVER_HPP
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 #include "ModuleOrchestrator.hpp"
 #include "VisionModule.hpp"
 #include "AudioModule.hpp"

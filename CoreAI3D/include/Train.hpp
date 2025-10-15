@@ -1,7 +1,7 @@
 #pragma once
 #define EMBEDDING_DIM 50
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 
 #include "Core.hpp"
 #include "Database.hpp"
@@ -16,12 +16,12 @@ class Training {
 public:
     // Constructor for online mode (with database)
     Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
-        const std::string dbPassword, const std::string& dbSchema, mysqlx::SSLMode ssl, bool createTables); // Changed SSLMode to mysqlx::SSLMode
+        const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables);
 
     // Constructor for offline mode (no database)
     Training(bool isOffline);
 
-    void initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort, std::string& dbUser, std::string& dbPassword, std::string& dbSchema, mysqlx::SSLMode ssl, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
+    void initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort, std::string& dbUser, std::string& dbPassword, std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
 
 
     float convertDateTimeToTimestamp(const std::string& datetime);

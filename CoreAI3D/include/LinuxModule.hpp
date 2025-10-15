@@ -28,6 +28,7 @@ namespace CoreAI3D {
 
     struct LinuxOperationResult {
         bool success;
+        std::string command;
         std::string output;
         std::string error_message;
         int exit_code;
@@ -106,6 +107,8 @@ namespace CoreAI3D {
 
         // Training data management
         void loadTrainingScenarios();
+        bool testDockerConnection();
+        void loadAvailableCommands();
         void saveTrainingResult(const std::string& scenarioName, const LinuxOperationResult& result);
 
         // Command validation

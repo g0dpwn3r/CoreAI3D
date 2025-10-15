@@ -1,7 +1,7 @@
 #ifndef VISION_MODULE_HPP
 #define VISION_MODULE_HPP
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 #include "Core.hpp"
 #include <vector>
 #include <string>

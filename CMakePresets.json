@@ -37,10 +37,12 @@
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_BUILD_PARALLEL_LEVEL": "1"
             },
             "environment": {
-                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
+                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg",
+                "VCPKG_OVERLAY_PORTS": "/home/carlon/code/CoreAI3D/vcpkg/ports"
             }
         },
         {
@@ -54,7 +56,8 @@
                 "CMAKE_BUILD_TYPE": "Release"
             },
             "environment": {
-                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
+                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg",
+                "VCPKG_OVERLAY_PORTS": "/home/carlon/code/CoreAI3D/vcpkg/ports"
             }
         }
     ],

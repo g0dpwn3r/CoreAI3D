@@ -1,6 +1,6 @@
 #pragma once
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 
 #include "Train.hpp"
 #include "Database.hpp"
@@ -14,7 +14,7 @@ class Language
 public:
     Language(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort,
         std::string& dbUser, std::string& dbPassword,
-        std::string& dbSchema, mysqlx::SSLMode ssl, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
+        std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
     std::string detectLanguage(const std::string& text);
     std::vector<float> encodeText(const std::string& text);
     void setCurrentLanguage(const std::string& languageCode);
@@ -50,7 +50,7 @@ private:
     std::string dbUser;
     std::string dbPassword;
     std::string dbSchema;
-    mysqlx::SSLMode ssl;
+    int sslDummy;
     bool createTables;
     std::unordered_map<std::string, std::vector<float>> db;
 

@@ -324,8 +324,105 @@ std::vector<float> MathModule::solveODE(const std::string& equation, float initi
 }
 
 // Optimization
+OptimizationResult MathModule::gradientDescent(const std::function<float(const std::vector<float>&)>& objective,
+                                               const std::vector<float>& initialGuess, float learningRate) {
+    std::vector<float> x = initialGuess;
+    float alpha = learningRate;
+    int maxIter = maxIterations;
+    float tol = convergenceThreshold;
+    std::vector<float> history;
+
+    for (int iter = 0; iter < maxIter; ++iter) {
+        float f = objective(x);
+        history.push_back(f);
+
+        // Simple finite difference gradient
+        std::vector<float> grad(x.size());
+        for (size_t i = 0; i < x.size(); ++i) {
+            std::vector<float> x_plus = x;
+            x_plus[i] += precision;
+            grad[i] = (objective(x_plus) - f) / precision;
+        }
+
+        // Update
+        for (size_t i = 0; i < x.size(); ++i) {
+            x[i] -= alpha * grad[i];
+        }
+
+        // Check convergence
+        if (iter > 0 && std::abs(history.back() - history[history.size() - 2]) < tol) {
+            break;
+        }
+    }
+
+    return OptimizationResult{x, history.back(), (int)history.size(), "converged", history};
+}
+
+OptimizationResult MathModule::newtonMethod(const std::function<float(const std::vector<float>&)>& objective,
+                                            const std::function<std::vector<float>(const std::vector<float>&)>& gradient,
+                                            const std::vector<float>& initialGuess) {
+    // Simplified Newton method
+    std::vector<float> x = initialGuess;
+    int maxIter = maxIterations;
+    float tol = convergenceThreshold;
+    std::vector<float> history;
+
+    for (int iter = 0; iter < maxIter; ++iter) {
+        float f = objective(x);
+        history.push_back(f);
+
+        std::vector<float> g = gradient(x);
+
+        // Approximate Hessian with identity (simplified)
+        for (size_t i = 0; i < x.size(); ++i) {
+            x[i] -= g[i]; // Assuming Hessian ~ I
+        }
+
+        if (iter > 0 && std::abs(history.back() - history[history.size() - 2]) < tol) {
+            break;
+        }
+    }
+
+    return OptimizationResult{x, history.back(), (int)history.size(), "converged", history};
+}
+
+OptimizationResult MathModule::conjugateGradient(const std::function<float(const std::vector<float>&)>& objective,
+                                                 const std::vector<float>& initialGuess) {
+    // Simplified conjugate gradient
+    return gradientDescent(objective, initialGuess, 0.01f);
+}
+
+StatisticalSummary MathModule::calculateStatistics(const std::vector<float>& data) {
+    if (data.empty()) return StatisticalSummary{};
+
+    float sum = 0.0f;
+    for (float val : data) sum += val;
+    float mean = sum / data.size();
+
+    float variance = 0.0f;
+    for (float val : data) variance += (val - mean) * (val - mean);
+    variance /= data.size();
+    float stddev = std::sqrt(variance);
+
+    // Simple median
+    std::vector<float> sorted = data;
+    std::sort(sorted.begin(), sorted.end());
+    float median = sorted[sorted.size() / 2];
+
+    // Mode (simplified)
+    float mode = mean;
+
+    float skewness = 0.0f;
+    float kurtosis = 0.0f;
+
+    std::vector<float> percentiles = {sorted[0], sorted[sorted.size() / 4], median, sorted[3 * sorted.size() / 4], sorted.back()};
+    std::vector<float> quartiles = {percentiles[1], median, percentiles[3]};
+
+    return StatisticalSummary{mean, median, mode, stddev, variance, skewness, kurtosis, percentiles, quartiles};
+}
+
 OptimizationResult MathModule::optimize(const std::string& objectiveFunction, const std::vector<float>& initialGuess,
-                                                   const std::string& method) {
+                                                    const std::string& method) {
     // TODO: Implement optimization
     return OptimizationResult{initialGuess, 0.0f, 0, "not_implemented", {}};
 }
@@ -388,13 +485,11 @@ std::complex<float> MathModule::complexGamma(const std::complex<float>& z) {
 }
 
 float MathModule::errorFunction(float x) {
-    // TODO: Implement error function
-    return 0.0f;
+    return std::erf(x);
 }
 
 float MathModule::complementaryErrorFunction(float x) {
-    // TODO: Implement complementary error function
-    return 0.0f;
+    return std::erfc(x);
 }
 
 // Number theory

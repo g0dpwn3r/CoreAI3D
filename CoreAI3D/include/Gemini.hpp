@@ -1,7 +1,7 @@
 #ifndef GEMINI_H
 #define GEMINI_H
 
-#include "main.hpp"
+#include "CoreAI3DCommon.hpp"
 
 using json = nlohmann::json;
 

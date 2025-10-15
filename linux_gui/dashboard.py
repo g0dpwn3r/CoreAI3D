@@ -1121,6 +1121,99 @@ class CoreAI3DDashboard(QMainWindow):
 
         layout.addWidget(results_group)
 
+    def create_model_downloads_tab(self):
+        """Create model downloads tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Model Downloads")
+
+        layout = QVBoxLayout(tab)
+
+        # Model search and filter
+        search_group = QGroupBox("Model Search")
+        search_layout = QHBoxLayout(search_group)
+
+        self.model_search_input = QLineEdit()
+        self.model_search_input.setPlaceholderText("Search models...")
+        self.model_search_input.textChanged.connect(self.search_models)
+        search_layout.addWidget(self.model_search_input)
+    
+        self.model_type_combo = QComboBox()
+        self.model_type_combo.addItems([
+            "All Types",
+            "Vision",
+            "Audio",
+            "Text",
+            "Multimodal",
+            "Neural",
+            "Math",
+            "Web"
+        ])
+        self.model_type_combo.currentTextChanged.connect(self.search_models)
+        search_layout.addWidget(self.model_type_combo)
+    
+        search_btn = QPushButton("Search")
+        search_btn.clicked.connect(self.search_models)
+        search_layout.addWidget(search_btn)
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh_models)
+        search_layout.addWidget(refresh_btn)
+
+        layout.addWidget(search_group)
+
+        # Model list
+        list_group = QGroupBox("Available Models")
+        list_layout = QVBoxLayout(list_group)
+
+        self.model_table = QTableWidget(0, 5)
+        self.model_table.setHorizontalHeaderLabels([
+            "Model Name", "Type", "Size", "Version", "Status"
+        ])
+        self.model_table.horizontalHeader().setStretchLastSection(True)
+        self.model_table.itemSelectionChanged.connect(self.on_model_selected)
+        list_layout.addWidget(self.model_table)
+
+        # Model list controls
+        list_controls = QHBoxLayout()
+
+        download_btn = QPushButton("Download Selected")
+        download_btn.clicked.connect(self.download_selected_model)
+        list_controls.addWidget(download_btn)
+
+        cancel_download_btn = QPushButton("Cancel Download")
+        cancel_download_btn.clicked.connect(self.cancel_model_download)
+        list_controls.addWidget(cancel_download_btn)
+
+        list_layout.addLayout(list_controls)
+        layout.addWidget(list_group)
+
+        # Download progress
+        progress_group = QGroupBox("Download Progress")
+        progress_layout = QVBoxLayout(progress_group)
+
+        self.download_progress = QProgressBar()
+        self.download_progress.setVisible(False)
+        progress_layout.addWidget(self.download_progress)
+
+        self.download_status_label = QLabel("Ready")
+        progress_layout.addWidget(self.download_status_label)
+
+        layout.addWidget(progress_group)
+
+        # Model information
+        info_group = QGroupBox("Model Information")
+        info_layout = QVBoxLayout(info_group)
+
+        self.model_info = QTextEdit()
+        self.model_info.setMaximumHeight(200)
+        self.model_info.setReadOnly(True)
+        info_layout.addWidget(self.model_info)
+
+        layout.addWidget(info_group)
+
+        # Initialize with sample models
+        self.load_sample_models()
+
     def refresh_containers(self):
         """Refresh available containers"""
         try:
@@ -2741,6 +2834,210 @@ if __name__ == "__main__":
     def clear_chat_history(self):
         """Clear chat history"""
         self.chat_history.clear()
+
+    def load_sample_models(self):
+        """Load all available models from the CoreAI3D system"""
+        # Vision Models - for image processing, classification, and analysis
+        vision_models = [
+            {"name": "ResNet-50", "type": "Vision", "size": "98 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "YOLOv5-Small", "type": "Vision", "size": "14 MB", "version": "6.1.0", "status": "Available"},
+            {"name": "EfficientNet-B0", "type": "Vision", "size": "20 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "MobileNetV3-Small", "type": "Vision", "size": "5.4 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "FaceNet", "type": "Vision", "size": "23 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Tesseract-OCR", "type": "Vision", "size": "8.2 MB", "version": "5.3.0", "status": "Available"},
+            {"name": "Mask-RCNN", "type": "Vision", "size": "170 MB", "version": "2.1.0", "status": "Available"},
+            {"name": "SSD-MobileNet", "type": "Vision", "size": "24 MB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Audio Models - for speech processing and audio analysis
+        audio_models = [
+            {"name": "Whisper-Tiny", "type": "Audio", "size": "39 MB", "version": "1.2.0", "status": "Available"},
+            {"name": "Whisper-Base", "type": "Audio", "size": "74 MB", "version": "1.2.0", "status": "Available"},
+            {"name": "Whisper-Small", "type": "Audio", "size": "244 MB", "version": "1.2.0", "status": "Available"},
+            {"name": "Tacotron2", "type": "Audio", "size": "113 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "WaveNet", "type": "Audio", "size": "4.7 GB", "version": "1.0.0", "status": "Available"},
+            {"name": "DeepSpeech", "type": "Audio", "size": "190 MB", "version": "0.9.3", "status": "Available"},
+            {"name": "SpeakerNet", "type": "Audio", "size": "16 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "AudioNet", "type": "Audio", "size": "8.5 MB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Text/Language Models - for natural language processing
+        text_models = [
+            {"name": "BERT-Base", "type": "Text", "size": "420 MB", "version": "2.1.0", "status": "Available"},
+            {"name": "GPT-2 Small", "type": "Text", "size": "548 MB", "version": "1.5.0", "status": "Available"},
+            {"name": "DistilBERT", "type": "Text", "size": "66 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "RoBERTa-Base", "type": "Text", "size": "476 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "ALBERT-Base", "type": "Text", "size": "43 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "XLNet-Base", "type": "Text", "size": "446 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "ELECTRA-Small", "type": "Text", "size": "13 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Sentence-BERT", "type": "Text", "size": "218 MB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Multimodal Models - combining vision and text
+        multimodal_models = [
+            {"name": "CLIP-ViT", "type": "Multimodal", "size": "1.2 GB", "version": "1.0.1", "status": "Available"},
+            {"name": "CLIP-RN50", "type": "Multimodal", "size": "1.0 GB", "version": "1.0.1", "status": "Available"},
+            {"name": "VisualBERT", "type": "Multimodal", "size": "1.1 GB", "version": "1.0.0", "status": "Available"},
+            {"name": "ViLBERT", "type": "Multimodal", "size": "1.3 GB", "version": "1.0.0", "status": "Available"},
+            {"name": "LXMERT", "type": "Multimodal", "size": "1.8 GB", "version": "1.0.0", "status": "Available"},
+            {"name": "Oscar", "type": "Multimodal", "size": "1.4 GB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Neural Network Models - custom trained models from the system
+        neural_models = [
+            {"name": "CoreAI3D-NN-1", "type": "Neural", "size": "2.3 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "CoreAI3D-NN-2", "type": "Neural", "size": "5.7 MB", "version": "1.1.0", "status": "Available"},
+            {"name": "CoreAI3D-NN-3", "type": "Neural", "size": "12 MB", "version": "1.2.0", "status": "Available"},
+            {"name": "CoreAI3D-NN-4", "type": "Neural", "size": "8.9 MB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Math Models - for mathematical computations and optimization
+        math_models = [
+            {"name": "MathSolver-NN", "type": "Math", "size": "15 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Optimization-Net", "type": "Math", "size": "8.2 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Statistics-Engine", "type": "Math", "size": "6.1 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Symbolic-Math", "type": "Math", "size": "22 MB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Web Models - for web content processing and analysis
+        web_models = [
+            {"name": "WebScraper-NN", "type": "Web", "size": "45 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Sentiment-Analyzer", "type": "Web", "size": "18 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "Content-Classifier", "type": "Web", "size": "27 MB", "version": "1.0.0", "status": "Available"},
+            {"name": "News-Aggregator", "type": "Web", "size": "33 MB", "version": "1.0.0", "status": "Available"}
+        ]
+
+        # Combine all models
+        all_models = (vision_models + audio_models + text_models +
+                     multimodal_models + neural_models + math_models + web_models)
+
+        self.model_table.setRowCount(len(all_models))
+        for row, model in enumerate(all_models):
+            self.model_table.setItem(row, 0, QTableWidgetItem(model["name"]))
+            self.model_table.setItem(row, 1, QTableWidgetItem(model["type"]))
+            self.model_table.setItem(row, 2, QTableWidgetItem(model["size"]))
+            self.model_table.setItem(row, 3, QTableWidgetItem(model["version"]))
+            self.model_table.setItem(row, 4, QTableWidgetItem(model["status"]))
+
+    def search_models(self):
+        """Search models based on input criteria"""
+        search_text = self.model_search_input.text().lower()
+        model_type = self.model_type_combo.currentText()
+
+        for row in range(self.model_table.rowCount()):
+            model_name = self.model_table.item(row, 0).text().lower()
+            model_type_cell = self.model_table.item(row, 1).text()
+
+            # Check search text match
+            text_match = search_text in model_name if search_text else True
+
+            # Check type filter
+            type_match = model_type == "All Types" or model_type == model_type_cell
+
+            # Show/hide row based on filters
+            self.model_table.setRowHidden(row, not (text_match and type_match))
+
+        self.status_bar.showMessage(f"Filtered models by '{search_text}' and type '{model_type}'")
+
+    def refresh_models(self):
+        """Refresh the model list"""
+        try:
+            # In a real implementation, this would fetch from the API
+            self.load_sample_models()
+            self.status_bar.showMessage("Model list refreshed")
+        except Exception as e:
+            QMessageBox.warning(self, "Refresh Error", f"Failed to refresh models: {str(e)}")
+
+    def on_model_selected(self):
+        """Handle model selection"""
+        current_row = self.model_table.currentRow()
+        if current_row >= 0:
+            model_name = self.model_table.item(current_row, 0).text()
+            model_type = self.model_table.item(current_row, 1).text()
+            model_size = self.model_table.item(current_row, 2).text()
+            model_version = self.model_table.item(current_row, 3).text()
+            model_status = self.model_table.item(current_row, 4).text()
+
+            info_text = f"""Model: {model_name}
+Type: {model_type}
+Size: {model_size}
+Version: {model_version}
+Status: {model_status}
+
+Description: This is a sample {model_type.lower()} model for demonstration purposes.
+In a real implementation, this would contain detailed information about the model's
+capabilities, training data, performance metrics, and usage instructions."""
+
+            self.model_info.setPlainText(info_text)
+
+    def download_selected_model(self):
+        """Download the selected model"""
+        current_row = self.model_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select a model to download")
+            return
+
+        model_name = self.model_table.item(current_row, 0).text()
+        model_status = self.model_table.item(current_row, 4).text()
+
+        if model_status == "Downloading":
+            QMessageBox.information(self, "Already Downloading", f"{model_name} is already being downloaded")
+            return
+
+        # Update status to downloading
+        self.model_table.item(current_row, 4).setText("Downloading")
+
+        # Show progress
+        self.download_progress.setVisible(True)
+        self.download_progress.setRange(0, 100)
+        self.download_progress.setValue(0)
+        self.download_status_label.setText(f"Downloading {model_name}...")
+
+        # Simulate download progress (in real implementation, this would be async)
+        self.download_timer = QTimer()
+        self.download_timer.timeout.connect(lambda: self.update_download_progress(current_row, model_name))
+        self.download_timer.start(500)  # Update every 500ms
+
+    def update_download_progress(self, row, model_name):
+        """Update download progress"""
+        current_value = self.download_progress.value()
+        if current_value < 100:
+            self.download_progress.setValue(current_value + 10)
+            self.download_status_label.setText(f"Downloading {model_name}... {current_value + 10}%")
+        else:
+            # Download complete
+            self.download_timer.stop()
+            self.model_table.item(row, 4).setText("Downloaded")
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText(f"{model_name} downloaded successfully")
+            self.status_bar.showMessage(f"Model {model_name} downloaded successfully")
+
+            # Reset progress for next download
+            self.download_progress.setValue(0)
+
+    def cancel_model_download(self):
+        """Cancel the current model download"""
+        current_row = self.model_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select a downloading model to cancel")
+            return
+
+        model_name = self.model_table.item(current_row, 0).text()
+        model_status = self.model_table.item(current_row, 4).text()
+
+        if model_status != "Downloading":
+            QMessageBox.warning(self, "Not Downloading", f"{model_name} is not currently downloading")
+            return
+
+        # Stop download timer if running
+        if hasattr(self, 'download_timer') and self.download_timer.isActive():
+            self.download_timer.stop()
+
+        # Reset status
+        self.model_table.item(current_row, 4).setText("Available")
+        self.download_progress.setVisible(False)
+        self.download_status_label.setText("Download cancelled")
+        self.status_bar.showMessage(f"Download of {model_name} cancelled")
 
     def refresh_neural_data(self):
         """Refresh neural network data"""
