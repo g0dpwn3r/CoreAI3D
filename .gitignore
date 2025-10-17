@@ -1,38 +1,85 @@
-# Visual Studio files
-.vs/
-*.vspscc
-*.suo
-*.user
-*.config
-*.obj
-*.pdb
-*.ilk
-*.idb
-*.lib
-*.exp
-*.log
-*.ncb
-*.aps
-*.bsc
-*.sbr
-*.res
+# CoreAI3D Project .gitignore
+# Comprehensive .gitignore for C++/Python mixed project with ML components
+
+# ==========================================
+# Build Artifacts and Binaries
+# ==========================================
 
 # CMake build directories
 /build/
 /out/
 /x64/
 /bin/
+/Debug/
+/Release/
+/RelWithDebInfo/
+/MinSizeRel/
 
 # CMake generated files
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
+CTestTestfile.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
 *.vcxproj
 *.vcxproj.filters
-*.sln # Uncomment this if you want to exclude CoreAI3D.sln as well
+*.vcxproj.user
+*.sln
 
-# vcpkg related
+# Object files and libraries
+*.obj
+*.o
+*.lib
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.exp
+*.pdb
+*.ilk
+*.idb
+*.res
+*.sbr
+*.bsc
+*.aps
+*.ncb
+
+# ==========================================
+# IDE and Editor Files
+# ==========================================
+
+# Visual Studio
+.vs/
+*.vspscc
+*.suo
+*.user
+*.config
+*.log
+*.ncb
+*.aps
+*.bsc
+*.sbr
+
+# VS Code (keep settings but ignore cache)
+.vscode/settings.json
+.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/c_cpp_properties.json
+
+# Other editors
+*.swp
+*.swo
+*~
+
+# ==========================================
+# Dependencies and Package Managers
+# ==========================================
+
+# vcpkg
 /vcpkg/
 /vcpkg_installed/
 vcpkg-init.cmd
@@ -42,65 +89,300 @@ argparse
 fastText
 googleapiscd
 
-# External dependencies (like mysql-connector-cpp if managed by vcpkg)
-/ChatGPT-Cpp
-/windows_gui/.env*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Other common exclusions
-*~
-*.bak
-*.swp
-.DS_Store
-data.sql# Visual Studio files
-.vs/
-*.vspscc
-*.suo
-*.user
-*.config
-*.obj
-*.pdb
-*.ilk
-*.idb
-*.lib
-*.exp
+# Node.js (if used)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==========================================
+# Large Data and Training Files
+# ==========================================
+
+# Training data (massive PDF collections)
+linux_gui/training_data/
+training_data/
+
+# Model files (large binary models)
+/models/
+/training_data/models/
+
+# Large datasets
+*.csv
+data.csv
+test_data.csv
+predictions.csv
+!example_data.csv  # Keep small example files
+
+# Database files
+mysql_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# Logs and Temporary Files
+# ==========================================
+
+# Log files
 *.log
-*.ncb
-*.aps
-*.bsc
-*.sbr
-*.res
+server.log
+emulator.log
+http_emulator.log
+configure.log
+test-suite.log
 
-# CMake build directories
-/build/
-/out/
-/x64/
-/bin/
+# Process IDs
+*.pid
 
-# CMake generated files
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-*.vcxproj
-*.vcxproj.filters
-*.sln # Uncomment this if you want to exclude CoreAI3D.sln as well
+# Temporary files
+*.tmp
+*.bak
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
 
-# vcpkg related
-/vcpkg/
-/vcpkg_installed/
-vcpkg-init.cmd
-mysql-connector-cpp
-protobuf
-argparse
-fastText
-# External dependencies (like mysql-connector-cpp if managed by vcpkg)
-/ChatGPT-Cpp
+# ==========================================
+# OS Generated Files
+# ==========================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ==========================================
+# Package Manager and Build Tools
+# ==========================================
+
+# PackageManager build artifacts
+PackageManager/obj/
+PackageManager/bin/
+
+# Docker
+.dockerignore
+
+# Build scripts and configs (keep if needed)
+# update.ps1
+# shortpath.ps1
+
+# ==========================================
+# External Dependencies
+# ==========================================
+
+# ChatGPT-Cpp and similar
+/ChatGPT-Cpp/
 /windows_gui/.env*
 
-# Other common exclusions
-*~
+# ==========================================
+# Test and Coverage Files
+# ==========================================
+
+# Test executables
+tests/simple_test
+tests/CoreAI3DTests.sln
+tests/CoreAI3D_GTest.dir/
+tests/CoreAI3D_Catch2Tests.dir/
+tests/CoreTests.cpp
+tests/DatabaseTests.cpp
+tests/test_training.cpp
+tests/TrainTests.cpp
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/
+*.profraw
+
+# ==========================================
+# Documentation and Assets (selective)
+# ==========================================
+
+# Keep essential docs, ignore generated
+# assets/  # Uncomment if assets are large/generated
+
+# Screenshots (keep if documentation)
+# *.png  # Uncomment to ignore all screenshots
+
+# ==========================================
+# Security and Sensitive Files
+# ==========================================
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Keys and secrets
+*.key
+*.pem
+*.crt
+secrets/
+.env*
+
+# ==========================================
+# Archive and Backup Files
+# ==========================================
+
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.backup
 *.bak
-*.swp
-.DS_Store
-data.sql
-windows_gui/__pycache__/
+
+# ==========================================
+# Specific Project Exclusions
+# ==========================================
+
+# Keep core source files
+!CoreAI3D/src/
+!CoreAI3D/include/
+!linux_gui/*.py
+!python/*.py
+!web/*.js
+!web/*.jsx
+
+# Ignore compiled assets
+CoreAI3D/*.dll
+CoreAI3D/*.exe
+CoreAI3D/server.log
+
+# ==========================================
+# Git and Version Control
+# ==========================================
+
+# Git
+.git/
+!.gitignore
+!.gitmodules
+!.gitattributes
+
+# Submodules (if any)
+# .gitmodules
+
+# ==========================================
+# CI/CD and Deployment
+# ==========================================
+
+# CI artifacts
+.github/workflows/*.log
+artifacts/
+deploy/
+
+# Docker containers (if built locally)
+# docker/containers/
+
+# ==========================================
+# Miscellaneous
+# ==========================================
+
+# Cache directories
+.cache/
+.tmp/
+temp/
+
+# Lock files
+package-lock.json
+yarn.lock
+Pipfile.lock
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# R data files (if any)
+.RData
+.Rhistory
+
+# MATLAB
+*.m~
+*.mat
+
+# ==========================================
+# Custom Patterns for CoreAI3D
+# ==========================================
+
+# Ignore large model checkpoints
+*.ckpt
+*.pth
+*.h5
+*.pb
+*.tflite
+*.onnx
+
+# Ignore dataset archives
+*.tar
+*.gz
+*.bz2
+
+# Ignore generated protobuf files (keep .proto)
+*_pb2.py
+*.pb.cc
+*.pb.h
+!*.proto
+
+# Ignore compiled shaders or assets
+*.spv
+*.glsl
+
+# ==========================================
+# Final Notes
+# ==========================================
+# This .gitignore is optimized for:
+# - C++/Python mixed development
+# - Machine learning with large datasets
+# - CMake build system
+# - vcpkg dependency management
+# - Cross-platform development (Windows/Linux/macOS)
+#
+# Review and adjust patterns as needed for your workflow.
+# Use 'git add -f <file>' to force add files that match ignore patterns.
