@@ -1,20 +1,21 @@
 # Kali Linux Bleeding Edge base
 FROM kalilinux/kali-rolling
 
+WORKDIR /root
+
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-## 🛠️ FINAL FIX: Force apt to ignore SSL certificate verification failure
-# The Kali mirrors are redirecting HTTP requests to HTTPS, which still fails
-# until 'ca-certificates' is installed. This command temporarily disables
-# certificate verification for the initial apt run.
-RUN echo "deb http://http.kali.org/kali kali-rolling main contrib non-free" > /etc/apt/sources.list \
-    && apt-get -o Acquire::AllowInsecureTls=true update \
-    && apt-get -o Acquire::AllowInsecureTls=true install -y --no-install-recommends ca-certificates apt-transport-https \
-    && rm -rf /var/lib/apt/lists/*
 
-# The system now has 'ca-certificates' installed.
-# The following steps will now work with standard settings.
+## 🛠️ FINAL FIX: Force apt to ignore SSL certificate verification failure
+# This overrides the stubborn mirror redirects that cause the SSL error until
+# 'ca-certificates' is installed.
+## 🛠️ FIX: Use a direct HTTP mirror to install certificates first
+# This avoids the SSL verification failure when installing ca-certificates.
+RUN echo "deb http://kali.download/kali kali-rolling main contrib non-free" > /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates apt-transport-https \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set TZ and install tzdata non-interactively
 ENV TZ=Europe/Amsterdam
@@ -26,7 +27,7 @@ RUN apt-get update && apt-get install -y tzdata \
 RUN date
 
 # Install core packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt full-upgrade -y && apt upgrade -y && apt-get install -y --no-install-recommends \
       curl wget vim nano htop \
       build-essential cmake git \
       procps psmisc lsof strace \
@@ -38,6 +39,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       imagemagick sox ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+RUN apt update && apt install -y \
+  build-essential \
+  libssl-dev \
+  zlib1g-dev \
+  libbz2-dev \
+  libreadline-dev \
+  libsqlite3-dev \
+  libncurses5-dev \
+  libncursesw5-dev \
+  xz-utils \
+  tk-dev \
+  libffi-dev \
+  liblzma-dev \
+  uuid-dev \
+  libgdbm-dev \
+  libnss3-dev \
+  wget \
+  curl \
+  ca-certificates
+
 
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
@@ -48,8 +69,30 @@ RUN useradd -m -s /bin/bash sandbox && \
 RUN mkdir -p /workspace /training_data && \
     chown -R sandbox:sandbox /workspace /training_data
 
+ENV HOME /root
+ENV PYENV_ROOT $HOME/.pyenv
+ENV PATH $PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH
+
+RUN curl https://pyenv.run | bash && \
+    # Initialize pyenv within this shell context for pyenv install to work
+    eval "$(pyenv init --path)" && \
+    # Install Python 3.10 (use the latest version available, e.g., 3.10.13)
+    # pyenv install 3.10 installs the latest patch version of 3.10
+    pyenv install 3.10 && \
+    # Set Python 3.10 as the global default for this environment
+    pyenv global 3.10 && \
+    # Rehash shims so the new python executable is available
+    pyenv rehash && \
+    # Verify the installation and version (optional)
+    /bin/bash -c "python --version"
+
+# Do some python version trickery
+RUN python -m ensurepip --upgrade
+RUN python -m pip install --upgrade pip setuptools wheel
+RUN python -m pip install SpeechRecognition
+
 # Install Python packages for AI/ML
-RUN pip3 install --break-system-packages \
+RUN python -m pip install --break-system-packages \
     requests aiohttp websockets \
     psutil docker \
     opencv-python-headless \
@@ -57,11 +100,11 @@ RUN pip3 install --break-system-packages \
     scikit-learn \
     pillow \
     pytesseract \
-    speech_recognition \
     pyttsx3 \
     beautifulsoup4 \
     selenium \
-    playwright
+    playwright \
+    supervisor
 
 # Install Node.js packages for web automation
 RUN npm install -g \

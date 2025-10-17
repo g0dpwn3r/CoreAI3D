@@ -1,4 +1,4 @@
-services:
+aservices:
   mysql:
     image: mysql:latest
     container_name: coreai3d_mysql
@@ -27,6 +27,8 @@ services:
     ports:
       - "8080:8080" # API Server
       - "8081:8081" # WebSocket Server
+    volumes:
+      - ./linux_gui/training_data:/training_data
     command:
       - "/app/build/CoreAI3D"
       - "-i"

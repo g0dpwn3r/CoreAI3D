@@ -97,6 +97,8 @@ private:
     bool isOfflineMode; // New member to track offline status
     int currentDatasetId; // Stores the ID of the currently loaded/saved dataset
     std::string currentDatasetName; // Stores the name of the currently loaded/saved dataset
+public:
+    bool verbose; // Control verbosity of debug output
 
     void printProgressBar(const std::string& prefix, long long current, long long total, int barWidth);
     int detectMaxSeqLength(const std::string& filename);

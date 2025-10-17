@@ -126,7 +126,9 @@ int Language::chat(std::string& filename) {
     std::string inputText;
     while (true)
     {
-        std::cout << "\nEnter your message: ";
+        if (trainer && trainer->verbose) {
+            std::cout << "\nEnter your message: ";
+        }
         std::getline(std::cin, inputText);
         if (inputText == "exit")
         {
@@ -135,42 +137,58 @@ int Language::chat(std::string& filename) {
         currentLang = detectLanguage(inputText);
         if (currentLang == "unknown")
         {
-            std::cout
-                << "Could not confidently detect language. Defaulting to English."
-                << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cout
+                    << "Could not confidently detect language. Defaulting to English."
+                    << std::endl;
+            }
             currentLang = "en"; 
         }
         else
         {
-            std::cout << "Detected language: " << currentLang
-                << ". Encoding with this language's embeddings."
-                << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cout << "Detected language: " << currentLang
+                    << ". Encoding with this language's embeddings."
+                    << std::endl;
+            }
         }
         this->embeddingsByLang = Language::createEmbeddingsByLang(embeddingDim); 
         std::vector<float> textEmbedding = this->encodeText(inputText);
         std::vector<std::string> tokens = this->tokenize(inputText);
-        std::cout << "Processed message. Encoded embedding size: " << textEmbedding.size() << std::endl;
+        if (trainer && trainer->verbose) {
+            std::cout << "Processed message. Encoded embedding size: " << textEmbedding.size() << std::endl;
+        }
         if (inputText.find("hello") != std::string::npos
             || inputText.find("hi") != std::string::npos)
         {
-            std::cout << "Core: Hello there!" << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cout << "Core: Hello there!" << std::endl;
+            }
         }
         else if (inputText.find("how are you") != std::string::npos)
         {
-            std::cout << "Core: I'm just a program, but I'm doing great!"
-                << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cout << "Core: I'm just a program, but I'm doing great!"
+                    << std::endl;
+            }
         }
         else if (inputText.find("name") != std::string::npos)
         {
-            std::cout << "Core: My name is CoreAI3D or Core for short."
-                << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cout << "Core: My name is CoreAI3D or Core for short."
+                    << std::endl;
+            }
         }
         else
         {
-            std::cout << answer(textEmbedding) << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cout << answer(textEmbedding) << std::endl;
+            }
         }
     }
-    std::cout << "Exiting chat. Goodbye!" << std::endl;
+    if (trainer && trainer->verbose) {
+        std::cout << "Exiting chat. Goodbye!" << std::endl;
+    }
     return 0;
 }
 

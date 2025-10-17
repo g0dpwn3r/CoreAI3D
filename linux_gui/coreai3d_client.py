@@ -56,6 +56,7 @@ class CoreAI3DClient:
 
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws_connection: Optional[websockets.WebSocketServerProtocol] = None
+        self._ws_task: Optional[asyncio.Task] = None
         self.is_connected = False
         self.message_handlers: Dict[str, List[Callable]] = {}
         self.streaming_tasks: Dict[str, asyncio.Task] = {}
@@ -74,7 +75,8 @@ class CoreAI3DClient:
 
     async def connect(self):
         """Initialize HTTP session and WebSocket connection"""
-        if self.session is None:
+        # Always create a new session to avoid closed session issues
+        if self.session is None or self.session.closed:
             timeout = aiohttp.ClientTimeout(total=self.config['timeout'])
             self.session = aiohttp.ClientSession(timeout=timeout)
 
@@ -84,18 +86,29 @@ class CoreAI3DClient:
     async def disconnect(self):
         """Close connections"""
         if self.ws_connection:
-            await self.ws_connection.close()
+            try:
+                await self.ws_connection.close()
+            except Exception as e:
+                logger.warning(f"Error closing WebSocket: {e}")
             self.ws_connection = None
             self.is_connected = False
 
-        if self.session:
-            await self.session.close()
+        if self.session and not self.session.closed:
+            try:
+                await self.session.close()
+            except Exception as e:
+                logger.warning(f"Error closing session: {e}")
             self.session = None
 
         # Cancel streaming tasks
         for task in self.streaming_tasks.values():
-            task.cancel()
+            if not task.done():
+                task.cancel()
         self.streaming_tasks.clear()
+
+        # Cancel WebSocket task if it exists
+        if hasattr(self, '_ws_task') and not self._ws_task.done():
+            self._ws_task.cancel()
 
     async def _connect_websocket(self):
         """Establish WebSocket connection"""
@@ -109,8 +122,10 @@ class CoreAI3DClient:
             self.is_connected = True
             logger.info("WebSocket connected")
 
-            # Start message handler
-            asyncio.create_task(self._handle_websocket_messages())
+            # Start message handler as a proper task
+            if hasattr(self, '_ws_task') and not self._ws_task.done():
+                self._ws_task.cancel()
+            self._ws_task = asyncio.create_task(self._handle_websocket_messages())
 
         except Exception as e:
             logger.error(f"WebSocket connection failed: {e}")
@@ -129,6 +144,9 @@ class CoreAI3DClient:
                     logger.error(f"Error processing message: {e}")
         except websockets.exceptions.ConnectionClosed:
             logger.info("WebSocket connection closed")
+            self.is_connected = False
+        except asyncio.CancelledError:
+            logger.info("WebSocket handler cancelled")
             self.is_connected = False
         except Exception as e:
             logger.error(f"WebSocket handler error: {e}")
@@ -181,7 +199,8 @@ class CoreAI3DClient:
 
     async def _make_request(self, method: str, endpoint: str, data: Any = None) -> APIResponse:
         """Make HTTP request with retry logic"""
-        if not self.session:
+        # Ensure we have a session and it's not closed
+        if not self.session or self.session.closed:
             await self.connect()
 
         url = urljoin(self.config['base_url'], endpoint)
@@ -193,6 +212,11 @@ class CoreAI3DClient:
 
         for attempt in range(self.config['max_retries'] + 1):
             try:
+                # Check if session is still valid before making request
+                if self.session.closed:
+                    logger.warning("Session closed, reconnecting...")
+                    await self.connect()
+
                 async with self.session.request(
                     method, url, json=data, headers=headers
                 ) as response:
@@ -219,14 +243,34 @@ class CoreAI3DClient:
                     )
 
             except Exception as e:
+                error_msg = str(e)
+                # Check if it's an event loop closed error
+                if "Event loop is closed" in error_msg:
+                    if attempt < self.config['max_retries']:
+                        logger.warning(f"Event loop closed, retrying ({attempt + 1}/{self.config['max_retries'] + 1})")
+                        # Create new session for next attempt
+                        if self.session and not self.session.closed:
+                            await self.session.close()
+                        self.session = None
+                        await asyncio.sleep(self.config['retry_delay'] * (2 ** attempt))
+                        continue
+                    else:
+                        return APIResponse(
+                            success=False,
+                            data=None,
+                            message="Event loop closed - connection lost",
+                            status_code=503,
+                            metadata={}
+                        )
+
                 if attempt < self.config['max_retries']:
-                    logger.warning(f"Request failed: {e}, retrying ({attempt + 1}/{self.config['max_retries'] + 1})")
+                    logger.warning(f"Request failed: {error_msg}, retrying ({attempt + 1}/{self.config['max_retries'] + 1})")
                     await asyncio.sleep(self.config['retry_delay'] * (2 ** attempt))
                 else:
                     return APIResponse(
                         success=False,
                         data=None,
-                        message=str(e),
+                        message=error_msg,
                         status_code=500,
                         metadata={}
                     )
@@ -474,6 +518,19 @@ class CoreAI3DClient:
     async def get_module_status(self, module_name: str = None) -> APIResponse:
         endpoint = f'/status/modules{ f"/{module_name}" if module_name else ""}'
         return await self.get(endpoint)
+
+    # Prediction API
+    async def run_prediction(self, model_name: str, input_data: Any, input_type: str,
+                           contains_header: bool = False, contains_text: bool = False) -> APIResponse:
+        """Run prediction with specified model and input data"""
+        data = {
+            'modelName': model_name,
+            'inputData': input_data,
+            'inputType': input_type,
+            'containsHeader': contains_header,
+            'containsText': contains_text
+        }
+        return await self.post('/prediction/run', data)
 
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:

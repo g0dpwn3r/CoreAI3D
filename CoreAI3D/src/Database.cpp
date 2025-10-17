@@ -135,8 +135,11 @@ int Database::addDataset(const std::string& datasetName, const std::string& desc
 void Database::addDatasetRecord(int& datasetId, int rowIndex,
     const std::vector<float>& featureValues,
     const std::vector<float>& labelValues) {
-    // Stub implementation
-    std::cout << "Database stub: addDatasetRecord(datasetId=" << datasetId << ", rowIndex=" << rowIndex << ")" << std::endl;
+    // Stub implementation - reduce verbosity for bulk operations
+    // Only log every 100th record to avoid spam during data loading
+    if (rowIndex % 100 == 0) {
+        std::cout << "Database stub: addDatasetRecord(datasetId=" << datasetId << ", rowIndex=" << rowIndex << ") - processing..." << std::endl;
+    }
 }
 
 Database::DatasetData Database::getDataset(int& datasetId) {

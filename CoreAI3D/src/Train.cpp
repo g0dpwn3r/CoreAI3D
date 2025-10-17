@@ -6,6 +6,7 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
     isOfflineMode(false), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    verbose(true), // Initialize verbose to true for backward compatibility
     gen(std::random_device{}()) // Initialize random number generator
 {
     if (dbManager && createTables) {
@@ -19,6 +20,7 @@ Training::Training(bool isOffline)
     isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    verbose(true), // Initialize verbose to true for backward compatibility
     gen(std::random_device{}()) // Initialize random number generator
 {
     if (isOfflineMode) {
@@ -100,9 +102,11 @@ void Training::printProgressBar(const std::string& prefix, long long current, lo
 // long long Training::countLines(const std::string& filename, bool hasHeader) is already defined above
 
 bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, int outputSizeParam, bool hasHeader, bool containsText, const char& delimitor, const std::string& datasetName) {
-    std::cout << "[DEBUG] Starting CSV load: filename='" << filename << "', numSamplesToLoad=" << numSamplesToLoad
-              << ", outputSizeParam=" << outputSizeParam << ", hasHeader=" << hasHeader
-              << ", containsText=" << containsText << ", delimiter='" << delimitor << "'" << std::endl;
+    if (verbose) {
+        std::cout << "[DEBUG] Starting CSV load: filename='" << filename << "', numSamplesToLoad=" << numSamplesToLoad
+                  << ", outputSizeParam=" << outputSizeParam << ", hasHeader=" << hasHeader
+                  << ", containsText=" << containsText << ", delimiter='" << delimitor << "'" << std::endl;
+    }
 
 
     std::ifstream file(filename);
@@ -122,20 +126,26 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
     if (hasHeader) {
         std::getline(file, line);
         lineCounter++;
-        std::cout << "[DEBUG] Skipped header line: '" << line << "'" << std::endl;
+        if (verbose) {
+            std::cout << "[DEBUG] Skipped header line: '" << line << "'" << std::endl;
+        }
     }
 
     long long rowIndex = 0;
     bool firstDataRow = true;
     try {
-        while (true) { 
+        while (true) {
             if (!std::getline(file, line)) break;
             lineCounter++;
-            std::cout << "[DEBUG] Processing line " << lineCounter << ": '" << line << "'" << std::endl;
+            if (verbose && lineCounter % 100 == 0) { // Only print every 100 lines to reduce verbosity
+                std::cout << "[DEBUG] Processing line " << lineCounter << ": '" << line << "'" << std::endl;
+            }
 
             // Skip empty lines
             if (line.empty()) {
-                std::cout << "[DEBUG] Skipping empty line " << lineCounter << std::endl;
+                if (verbose && lineCounter % 100 == 0) {
+                    std::cout << "[DEBUG] Skipping empty line " << lineCounter << std::endl;
+                }
                 continue; // Re-enabled continue for empty lines
             }
 
@@ -143,52 +153,66 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             line.erase(0, line.find_first_not_of(" \t\r\n"));
             line.erase(line.find_last_not_of(" \t\r\n") + 1);
             if (line.empty()) {
-                std::cout << "[DEBUG] Skipping whitespace-only line " << lineCounter << std::endl;
+                if (verbose && lineCounter % 100 == 0) {
+                    std::cout << "[DEBUG] Skipping whitespace-only line " << lineCounter << std::endl;
+                }
                 continue; // Re-enabled continue for whitespace-only lines
             }
 
-            std::cout << "[DEBUG] After trimming: '" << line << "'" << std::endl;
+            if (verbose) {
+                std::cout << "[DEBUG] After trimming: '" << line << "'" << std::endl;
 
-            // Check if line starts with a number (basic validation)
-            if (!line.empty() && !std::isdigit(line[0]) && line[0] != '-' && line[0] != '+') {
-                std::cout << "[DEBUG] Line doesn't start with digit, minus, or plus - might be invalid data" << std::endl;
+                // Check if line starts with a number (basic validation)
+                if (!line.empty() && !std::isdigit(line[0]) && line[0] != '-' && line[0] != '+') {
+                    std::cout << "[DEBUG] Line doesn't start with digit, minus, or plus - might be invalid data" << std::endl;
+                }
+
+                std::cout << "[DEBUG] About to parse cells from line: '" << line << "'" << std::endl;
+
+                // FORCE PROCESSING - let's see what happens if we force it to process
+                std::cout << "[DEBUG] FORCE PROCESSING: Will attempt to process this line anyway" << std::endl;
+
+                // Check if we reached end of file
+                if (file.eof()) {
+                    std::cout << "[DEBUG] Reached end of file" << std::endl;
+                }
+
+                // Let's try to force processing by temporarily commenting out the continue statements
+                // This will help us see what happens when we try to process lines that might be skipped
+                std::cout << "[DEBUG] Temporarily forcing processing of all lines..." << std::endl;
             }
-
-            std::cout << "[DEBUG] About to parse cells from line: '" << line << "'" << std::endl;
-
-            // FORCE PROCESSING - let's see what happens if we force it to process
-            std::cout << "[DEBUG] FORCE PROCESSING: Will attempt to process this line anyway" << std::endl;
-
-            // Check if we reached end of file
-            if (file.eof()) {
-                std::cout << "[DEBUG] Reached end of file" << std::endl;
-            }
-
-            // Let's try to force processing by temporarily commenting out the continue statements
-            // This will help us see what happens when we try to process lines that might be skipped
-            std::cout << "[DEBUG] Temporarily forcing processing of all lines..." << std::endl;
 
             std::vector<std::string> current_raw_cells;
             std::vector<float> current_processed_values; // This will hold the converted floats/embeddings
 
             // 1. Read all cells as raw strings first using proper CSV parsing
-            std::cout << "[DEBUG] Parsing cells with delimiter '" << delimitor << "'" << std::endl;
+            if (verbose) {
+                std::cout << "[DEBUG] Parsing cells with delimiter '" << delimitor << "'" << std::endl;
+            }
             current_raw_cells = parseCSVLine(line, delimitor);
-            for (size_t cell_index = 0; cell_index < current_raw_cells.size(); ++cell_index) {
-                std::cout << "[DEBUG]   Raw cell " << cell_index << " before trim: '" << current_raw_cells[cell_index] << "'" << std::endl;
-                // Trim whitespace from cell
-                current_raw_cells[cell_index].erase(0, current_raw_cells[cell_index].find_first_not_of(" \t\r\n"));
-                current_raw_cells[cell_index].erase(current_raw_cells[cell_index].find_last_not_of(" \t\r\n") + 1);
-                std::cout << "[DEBUG]   Parsed cell " << cell_index << ": '" << current_raw_cells[cell_index] << "'" << std::endl;
-            }
-            std::cout << "[DEBUG] Total cells parsed: " << current_raw_cells.size() << std::endl;
+            if (verbose) {
+                for (size_t cell_index = 0; cell_index < current_raw_cells.size(); ++cell_index) {
+                    std::cout << "[DEBUG]   Raw cell " << cell_index << " before trim: '" << current_raw_cells[cell_index] << "'" << std::endl;
+                    // Trim whitespace from cell
+                    current_raw_cells[cell_index].erase(0, current_raw_cells[cell_index].find_first_not_of(" \t\r\n"));
+                    current_raw_cells[cell_index].erase(current_raw_cells[cell_index].find_last_not_of(" \t\r\n") + 1);
+                    std::cout << "[DEBUG]   Parsed cell " << cell_index << ": '" << current_raw_cells[cell_index] << "'" << std::endl;
+                }
+                std::cout << "[DEBUG] Total cells parsed: " << current_raw_cells.size() << std::endl;
 
-            std::cout << "[DEBUG] Parsed " << current_raw_cells.size() << " raw cells: ";
-            for (size_t i = 0; i < current_raw_cells.size(); ++i) {
-                std::cout << "'" << current_raw_cells[i] << "'";
-                if (i < current_raw_cells.size() - 1) std::cout << ", ";
+                std::cout << "[DEBUG] Parsed " << current_raw_cells.size() << " raw cells: ";
+                for (size_t i = 0; i < current_raw_cells.size(); ++i) {
+                    std::cout << "'" << current_raw_cells[i] << "'";
+                    if (i < current_raw_cells.size() - 1) std::cout << ", ";
+                }
+                std::cout << std::endl;
+            } else {
+                // Still trim even if not verbose
+                for (auto& cell : current_raw_cells) {
+                    cell.erase(0, cell.find_first_not_of(" \t\r\n"));
+                    cell.erase(cell.find_last_not_of(" \t\r\n") + 1);
+                }
             }
-            std::cout << std::endl;
 
             if (current_raw_cells.empty()) {
                 std::cout << "[DEBUG] Skipping empty row at line " << lineCounter << " (no cells after parsing)" << std::endl;
@@ -196,12 +220,16 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             }
 
             // 2. Process raw cells into float values or embeddings
-            std::cout << "[DEBUG] Processing cells for row " << rowIndex << " (line " << lineCounter << ")" << std::endl;
+            if (verbose) {
+                std::cout << "[DEBUG] Processing cells for row " << rowIndex << " (line " << lineCounter << ")" << std::endl;
+            }
             for (size_t i = 0; i < current_raw_cells.size(); ++i) {
                 const std::string& cell = current_raw_cells[i];
                 bool value_processed = false;
 
-                std::cout << "[DEBUG]   Cell " << i << ": '" << cell << "' -> ";
+                if (verbose) {
+                    std::cout << "[DEBUG]   Cell " << i << ": '" << cell << "' -> ";
+                }
 
                 // Try to parse as datetime first if it looks like one
                 if ((cell.find("/") != std::string::npos || cell.find("-") != std::string::npos) && cell.length() >= 8) {
@@ -209,7 +237,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                         float timestamp = convertDateTimeToTimestamp(cell);
                         current_processed_values.push_back(timestamp);
                         value_processed = true;
-                        std::cout << "datetime: " << timestamp;
+                        if (verbose) {
+                            std::cout << "datetime: " << timestamp;
+                        }
                         // Store original date string if this is the date column
                         // Assuming date is at a known index, e.g., 0 (first column)
                         if (i == 0) { // Adjust this index if your date column is elsewhere
@@ -217,7 +247,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                         }
                     }
                     catch (const std::runtime_error& e) {
-                        std::cout << "not datetime (" << e.what() << ") -> ";
+                        if (verbose) {
+                            std::cout << "not datetime (" << e.what() << ") -> ";
+                        }
                         // Not a valid datetime, fall through to float or text processing
                         // std::cerr << "Debug: Not a datetime string or conversion error: " << cell << " - " << e.what() << std::endl;
                     }
@@ -230,7 +262,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                         if (vol_str.empty()) {
                             current_processed_values.push_back(0.0f);
                             value_processed = true;
-                            std::cout << "vol empty -> 0.0f";
+                            if (verbose) {
+                                std::cout << "vol empty -> 0.0f";
+                            }
                         } else {
                             if (vol_str.back() == 'K') {
                                 vol_str = vol_str.substr(0, vol_str.size() - 1);
@@ -238,9 +272,13 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                                     float val = std::stof(vol_str) * 1000.0f;
                                     current_processed_values.push_back(val);
                                     value_processed = true;
-                                    std::cout << "vol: " << val;
+                                    if (verbose) {
+                                        std::cout << "vol: " << val;
+                                    }
                                 } catch (const std::exception& e) {
-                                    std::cout << "vol parse error -> 0.0f";
+                                    if (verbose) {
+                                        std::cout << "vol parse error -> 0.0f";
+                                    }
                                     current_processed_values.push_back(0.0f);
                                     value_processed = true;
                                 }
@@ -252,9 +290,13 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                                     float val = std::stof(cleaned);
                                     current_processed_values.push_back(val);
                                     value_processed = true;
-                                    std::cout << "vol plain: " << val;
+                                    if (verbose) {
+                                        std::cout << "vol plain: " << val;
+                                    }
                                 } catch (const std::exception& e) {
-                                    std::cout << "vol parse error -> 0.0f";
+                                    if (verbose) {
+                                        std::cout << "vol parse error -> 0.0f";
+                                    }
                                     current_processed_values.push_back(0.0f);
                                     value_processed = true;
                                 }
@@ -268,9 +310,13 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                                 float val = std::stof(change_str) / 100.0f;
                                 current_processed_values.push_back(val);
                                 value_processed = true;
-                                std::cout << "change%: " << val;
+                                if (verbose) {
+                                    std::cout << "change%: " << val;
+                                }
                             } catch (const std::exception& e) {
-                                std::cout << "change% parse error -> 0.0f";
+                                if (verbose) {
+                                    std::cout << "change% parse error -> 0.0f";
+                                }
                                 current_processed_values.push_back(0.0f);
                                 value_processed = true;
                             }
@@ -280,9 +326,13 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                                 float val = std::stof(change_str);
                                 current_processed_values.push_back(val);
                                 value_processed = true;
-                                std::cout << "change plain: " << val;
+                                if (verbose) {
+                                    std::cout << "change plain: " << val;
+                                }
                             } catch (const std::exception& e) {
-                                std::cout << "change parse error -> 0.0f";
+                                if (verbose) {
+                                    std::cout << "change parse error -> 0.0f";
+                                }
                                 current_processed_values.push_back(0.0f);
                                 value_processed = true;
                             }
@@ -295,10 +345,14 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                             float float_val = std::stof(cleaned_cell);
                             current_processed_values.push_back(float_val);
                             value_processed = true;
-                            std::cout << "float: " << float_val;
+                            if (verbose) {
+                                std::cout << "float: " << float_val;
+                            }
                         }
                         catch (const std::invalid_argument& e) {
-                            std::cout << "not float (" << e.what() << ") -> ";
+                            if (verbose) {
+                                std::cout << "not float (" << e.what() << ") -> ";
+                            }
                             // Not a valid float, fall through to text processing
                             // std::cerr << "Debug: Not a float: " << cell << " - " << e.what() << std::endl;
                         }
@@ -306,7 +360,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                             std::cerr << "Warning: Number out of range in CSV at line " << lineCounter << ", cell '" << cell << "'. Defaulting to 0.0f. Error: " << e.what() << std::endl;
                             current_processed_values.push_back(0.0f);
                             value_processed = true;
-                            std::cout << "out_of_range -> 0.0f";
+                            if (verbose) {
+                                std::cout << "out_of_range -> 0.0f";
+                            }
                         }
                     }
                 }
@@ -318,42 +374,56 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                         std::vector<float> encoded_vec = this->langProc->encodeText(cell);
                         current_processed_values.insert(current_processed_values.end(), encoded_vec.begin(), encoded_vec.end());
                         value_processed = true;
-                        std::cout << "text encoded (" << encoded_vec.size() << " values)";
+                        if (verbose) {
+                            std::cout << "text encoded (" << encoded_vec.size() << " values)";
+                        }
                     }
                     else {
                         std::cerr << "Error: Language processor not initialized for text encoding at line " << lineCounter << ". Skipping text cell '" << cell << "'." << std::endl;
                         // Push a placeholder if language processor is not ready
                         current_processed_values.push_back(0.0f);
                         value_processed = true;
-                        std::cout << "text (no langProc) -> 0.0f";
+                        if (verbose) {
+                            std::cout << "text (no langProc) -> 0.0f";
+                        }
                     }
                 }
 
                 if (!value_processed) {
                     // If still not processed, it's an unhandled type, default to 0.0f
                     current_processed_values.push_back(0.0f);
-                    std::cout << "unhandled -> 0.0f";
+                    if (verbose) {
+                        std::cout << "unhandled -> 0.0f";
+                    }
                 }
-                std::cout << std::endl;
+                if (verbose) {
+                    std::cout << std::endl;
+                }
             } // End of for (current_raw_cells)
 
-            std::cout << "[DEBUG] Processed values count: " << current_processed_values.size() << std::endl;
+            if (verbose) {
+                std::cout << "[DEBUG] Processed values count: " << current_processed_values.size() << std::endl;
+            }
 
             if (current_processed_values.empty()) {
-                std::cout << "[DEBUG] Skipping row " << rowIndex << " (line " << lineCounter << ") - no processed values" << std::endl;
-                std::cout << "[DEBUG] Raw cells were: ";
-                for (size_t i = 0; i < current_raw_cells.size(); ++i) {
-                    std::cout << "'" << current_raw_cells[i] << "'";
-                    if (i < current_raw_cells.size() - 1) std::cout << ", ";
+                if (verbose) {
+                    std::cout << "[DEBUG] Skipping row " << rowIndex << " (line " << lineCounter << ") - no processed values" << std::endl;
+                    std::cout << "[DEBUG] Raw cells were: ";
+                    for (size_t i = 0; i < current_raw_cells.size(); ++i) {
+                        std::cout << "'" << current_raw_cells[i] << "'";
+                        if (i < current_raw_cells.size() - 1) std::cout << ", ";
+                    }
+                    std::cout << std::endl;
                 }
-                std::cout << std::endl;
                 continue; // Skip if row became empty after processing
             }
 
             // Determine inputSize and outputSize from the first data row
             if (firstDataRow) {
-                std::cout << "[DEBUG] First data row - determining sizes. Processed values: " << current_processed_values.size()
-                        << ", outputSizeParam: " << outputSizeParam << std::endl;
+                if (verbose) {
+                    std::cout << "[DEBUG] First data row - determining sizes. Processed values: " << current_processed_values.size()
+                            << ", outputSizeParam: " << outputSizeParam << std::endl;
+                }
 
                 if (outputSizeParam > 0 && current_processed_values.size() < (size_t)outputSizeParam) {
                     std::cerr << "[DEBUG] ERROR: First data row has too few columns (" << current_processed_values.size() << ") for specified outputSize ("
@@ -366,15 +436,21 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
                     this->outputSize = 1;
                     this->inputSize = current_processed_values.size() - 1;
-                    std::cout << "[DEBUG] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
+                    if (verbose) {
+                        std::cout << "[DEBUG] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
+                    }
                 }
                 else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
                     this->outputSize = 0; // No target if only one column and not specified
                     this->inputSize = 1;
-                    std::cout << "[DEBUG] Single column: outputSize=0, inputSize=1" << std::endl;
+                    if (verbose) {
+                        std::cout << "[DEBUG] Single column: outputSize=0, inputSize=1" << std::endl;
+                    }
                 }
                 firstDataRow = false;
-                std::cout << "[DEBUG] Determined Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
+                if (verbose) {
+                    std::cout << "[DEBUG] Determined Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
+                }
             }
             else {
                 // Validate subsequent rows against determined sizes
@@ -391,7 +467,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             std::vector<float> current_input;
             std::vector<float> current_target;
 
-            std::cout << "[DEBUG] Extracting inputs (all except Price) and targets (Price as column 1)" << std::endl;
+            if (verbose) {
+                std::cout << "[DEBUG] Extracting inputs (all except Price) and targets (Price as column 1)" << std::endl;
+            }
 
             // Target is Price (column 1)
             current_target.push_back(current_processed_values[1]);
@@ -403,8 +481,10 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 }
             }
 
-            std::cout << "[DEBUG] Row " << rowIndex << " - Input size: " << current_input.size()
-                    << ", Target size: " << current_target.size() << std::endl;
+            if (verbose) {
+                std::cout << "[DEBUG] Row " << rowIndex << " - Input size: " << current_input.size()
+                        << ", Target size: " << current_target.size() << std::endl;
+            }
 
             inputs.push_back(current_input);
             targets.push_back(current_target);
@@ -419,7 +499,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
         return false;
     }
 
-    std::cout << "[DEBUG] Final validation - Total rows processed: " << inputs.size() << std::endl;
+    if (verbose) {
+        std::cout << "[DEBUG] Final validation - Total rows processed: " << inputs.size() << std::endl;
+    }
 
     // Strict Validation
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -438,8 +520,10 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
     }
 
     this->numSamples = inputs.size();
-    std::cout << "[DEBUG] Successfully loaded CSV. Samples: " << this->numSamples
-              << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
+    if (verbose) {
+        std::cout << "[DEBUG] Successfully loaded CSV. Samples: " << this->numSamples
+                  << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
+    }
 
     // Database Integration
     if (!isOfflineMode && dbManager) {
@@ -448,15 +532,21 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             currentDatasetId = dbManager->addDataset(actualDatasetName, std::string("Data loaded from ") + filename,
                 this->numSamples, this->inputSize, this->outputSize);
             currentDatasetName = actualDatasetName;
-            std::cout << "Dataset metadata added/updated with ID: " << currentDatasetId << std::endl;
+            if (verbose) {
+                std::cout << "Dataset metadata added/updated with ID: " << currentDatasetId << std::endl;
+            }
             long long datasetId = static_cast<long long>(currentDatasetId);
             dbManager->clearDatasetRecords(datasetId);
-            std::cout << "Cleared previous records for dataset ID: " << (int)currentDatasetId << std::endl;
+            if (verbose) {
+                std::cout << "Cleared previous records for dataset ID: " << (int)currentDatasetId << std::endl;
+            }
 
             for (size_t i = 0; i < inputs.size(); ++i) {
                 dbManager->addDatasetRecord(currentDatasetId, i, inputs[i], targets[i]);
             }
-            std::cout << "All dataset records added to database for dataset ID: " << currentDatasetId << std::endl;
+            if (verbose) {
+                std::cout << "All dataset records added to database for dataset ID: " << currentDatasetId << std::endl;
+            }
         }
         catch (const std::exception& err) {
             std::cerr << "Database error during CSV loading: " << err.what() << std::endl; return false;
@@ -469,7 +559,9 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
         std::cerr << "Warning: Database manager not initialized in online mode. CSV data will not be persisted." << std::endl;
     }
 
-    std::cout << "Successfully loaded CSV: " << filename << std::endl;
+    if (verbose) {
+        std::cout << "Successfully loaded CSV: " << filename << std::endl;
+    }
     return true;
 }
 catch (const std::exception& e) {
@@ -776,7 +868,9 @@ void Training::normalize(float minRange, float maxRange) {
     long long current_sample = 0;
     long long total_samples = inputs.size();
 
-    std::cout << "\nNormalizing Data...\n";
+    if (verbose) {
+        std::cout << "\nNormalizing Data...\n";
+    }
     float dataRangeDiff = tempGlobalMax - tempGlobalMin;
     float targetRangeDiff = maxRange - minRange;
 
@@ -814,7 +908,9 @@ void Training::normalize(float minRange, float maxRange) {
     if (total_samples > 0) {
         printProgressBar("Normalizing Data", total_samples, total_samples, barWidth);
     }
-    std::cout << "\nData Normalized!\n";
+    if (verbose) {
+        std::cout << "\nData Normalized!\n";
+    }
 }
 
 int Training::getMinInputColumns() const {
@@ -841,6 +937,7 @@ void Training::preprocess(float minVal, float maxVal) {
 
     if (!core) { // Initialize CoreAI only if it hasn't been already
         core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal);
+        core->trainer = this; // Set the trainer pointer in CoreAI
     }
     else {
         // If core is already initialized, update its parameters if necessary
@@ -856,7 +953,9 @@ void Training::train(double learningRate, int epochs) {
         std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
         return;
     }
-    std::cout << "\nStarting training for " << epochs << " epochs...\n";
+    if (verbose) {
+        std::cout << "\nStarting training for " << epochs << " epochs...\n";
+    }
     const int barWidth = 70;
     for (int i = 0; i < epochs; ++i) {
 
@@ -867,7 +966,9 @@ void Training::train(double learningRate, int epochs) {
     if (epochs > 0) {
         printProgressBar("Training Progress", epochs, epochs, barWidth);
     }
-    std::cout << "\nTraining Complete!\n";
+    if (verbose) {
+        std::cout << "\nTraining Complete!\n";
+    }
 }
 
 float Training::calculateRMSE() {
@@ -1405,7 +1506,9 @@ bool Training::saveResultsToCSV(const std::string& filename, const std::string& 
     }
 
     outputFile.close();
-    std::cout << "Results saved to: " << filename << std::endl;
+    if (verbose) {
+        std::cout << "Results saved to: " << filename << std::endl;
+    }
     return true;
 }
 
@@ -1582,7 +1685,9 @@ bool Training::loadTextCSV(const std::string& filename, int maxSeqLen, int embed
     file.close();
     numSamples = inputs.size();
 
-    std::cout << "Loaded " << numSamples << " text samples from " << filename << std::endl;
+    if (verbose) {
+        std::cout << "Loaded " << numSamples << " text samples from " << filename << std::endl;
+    }
     return !inputs.empty();
 }
 

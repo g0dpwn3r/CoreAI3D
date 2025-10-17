@@ -89,27 +89,27 @@ void CoreAI::setWeightsOutputHidden(const std::vector<std::vector<float> >& data
 
 void CoreAI::populateFields(int numInput, int numOutput) {
     std::mt19937 gen(std::random_device{}());
-    std::uniform_real_distribution<float> dist(minVal, maxVal);
+    std::uniform_real_distribution<float> weight_dist(-0.1f, 0.1f);
 
-    // Initialize transformation parameters
+    // Initialize transformation parameters (no longer needed for weights, but kept for compatibility)
     this->x = this->beautifulRandom();
     this->y = this->beautifulRandom();
     this->z = this->beautifulRandom();
     this->e = this->epsilon;
 
-    // Initialize vectors
+    // Initialize vectors with small random values instead of transformations
     initializeVector(this->hidden_error, neurons);
-    fillVectorWithTransform(this->hidden_error, [this]() { return this->zTransform(this->x, this->y, this->z, 12, 2); });
+    fillVectorWithTransform(this->hidden_error, [&]() { return weight_dist(gen); });
 
     initializeVector(this->hidden_output, neurons);
-    fillVectorWithTransform(this->hidden_output, [this]() { return this->zTransform2(this->z, this->e, this->z, 2); });
+    fillVectorWithTransform(this->hidden_output, [&]() { return weight_dist(gen); });
 
-    // Initialize weight matrices
+    // Initialize weight matrices with uniform random distribution between -0.1 and 0.1
     initializeMatrix(this->weigth_output_hidden, numOutput, neurons);
-    fillMatrixWithTransform(this->weigth_output_hidden, [this]() { return this->xTransform2(this->x, this->e, this->y, 2); });
+    fillMatrixWithTransform(this->weigth_output_hidden, [&]() { return weight_dist(gen); });
 
     initializeMatrix(this->weigth_input_hidden, neurons, numInput);
-    fillMatrixWithTransform(this->weigth_input_hidden, [this]() { return this->xTransform2(this->x, this->e, this->y, 2); });
+    fillMatrixWithTransform(this->weigth_input_hidden, [&]() { return weight_dist(gen); });
 }
 
 // Helper functions to make the code cleaner:

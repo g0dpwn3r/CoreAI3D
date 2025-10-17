@@ -19,6 +19,8 @@ import time
 import psutil
 import subprocess
 import shutil
+import urllib.request
+import csv
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -615,6 +617,7 @@ class AsyncTaskThread(QThread):
         self.coro = coro
         self.callback = callback
         self.error_callback = error_callback
+        self._finished = False
 
     def run(self):
         try:
@@ -629,6 +632,8 @@ class AsyncTaskThread(QThread):
             logger.error(error_msg)
             if self.error_callback:
                 QTimer.singleShot(0, lambda: self.error_callback(str(e)))
+        finally:
+            self._finished = True
 
 class AsyncTaskManager(QObject):
     """Manages async tasks with proper Qt integration"""
@@ -638,13 +643,28 @@ class AsyncTaskManager(QObject):
 
     def __init__(self):
         super().__init__()
+        self.active_threads = []
+        self._shutdown = False
 
     def run_async_task(self, coro, callback=None, error_callback=None):
         """Run an async coroutine safely with Qt integration"""
+        if self._shutdown:
+            logger.warning("AsyncTaskManager is shutting down, ignoring new task")
+            return
+
         if not asyncio.iscoroutine(coro):
             coro = self._make_coroutine(coro)
 
         thread = AsyncTaskThread(coro, callback, error_callback)
+        self.active_threads.append(thread)
+
+        # Remove thread from active list when finished
+        def cleanup_thread():
+            if thread in self.active_threads:
+                self.active_threads.remove(thread)
+
+        thread.finished.connect(cleanup_thread)
+        thread.finished.connect(thread.deleteLater)
         thread.start()
 
     def _make_coroutine(self, func):
@@ -653,8 +673,25 @@ class AsyncTaskManager(QObject):
         return wrapper
 
     def shutdown(self):
-        """Shutdown the task manager"""
-        pass
+        """Shutdown the task manager and wait for active threads"""
+        logger.info(f"Shutting down AsyncTaskManager with {len(self.active_threads)} active threads")
+        self._shutdown = True
+
+        # Wait for all active threads to finish
+        for thread in self.active_threads[:]:  # Copy list to avoid modification during iteration
+            if thread.isRunning():
+                logger.info("Waiting for thread to finish...")
+                thread.wait(5000)  # Wait up to 5 seconds per thread
+                if thread.isRunning():
+                    logger.warning("Thread did not finish within timeout, terminating")
+                    thread.terminate()
+                    thread.wait(1000)  # Give it 1 more second
+                # Ensure thread is properly cleaned up
+                if thread in self.active_threads:
+                    self.active_threads.remove(thread)
+
+        self.active_threads.clear()
+        logger.info("AsyncTaskManager shutdown complete")
 
 
 class CoreAI3DDashboard(QMainWindow):
@@ -677,6 +714,15 @@ class CoreAI3DDashboard(QMainWindow):
 
         # Chat response handler
         self.chat_response_handler = None
+
+        # Initialize training argument variables
+        self.norm_min = 0.0
+        self.norm_max = 1.0
+        self.neurons = 10
+        self.samples = 0
+        self.epochs = 10
+        self.layers = 3
+        self.learning_rate = 0.01
 
         # Initialize UI
         self.setup_ui()
@@ -734,6 +780,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_dashboard_tab()
         self.create_training_tab()
         self.create_testing_tab()
+        self.create_predict_tab()
         self.create_sandbox_tab()
         self.create_debugging_tab()
         self.create_linux_sandbox_tab()
@@ -741,6 +788,9 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_code_generation_tab()
         self.create_chat_tab()
         self.create_neural_tab()
+        self.create_data_normalization_tab()
+        self.create_network_architecture_tab()
+        self.create_training_parameters_tab()
         self.create_settings_tab()
 
         # Create status bar
@@ -954,6 +1004,123 @@ class CoreAI3DDashboard(QMainWindow):
         ])
         self.test_results_table.horizontalHeader().setStretchLastSection(True)
         results_layout.addWidget(self.test_results_table)
+
+        layout.addWidget(results_group)
+
+    def create_predict_tab(self):
+        """Create prediction tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Predict")
+
+        layout = QVBoxLayout(tab)
+
+        # Model selection
+        model_group = QGroupBox("Model Selection")
+        model_layout = QFormLayout(model_group)
+
+        self.predict_model_combo = QComboBox()
+        self.predict_model_combo.addItems([
+            "Select Model...",
+            "Vision Models",
+            "Audio Models",
+            "Text Models",
+            "Multimodal Models",
+            "Neural Networks",
+            "Math Models",
+            "Web Models"
+        ])
+        self.predict_model_combo.currentTextChanged.connect(self.on_predict_model_type_changed)
+        model_layout.addRow("Model Type:", self.predict_model_combo)
+
+        self.predict_specific_model_combo = QComboBox()
+        self.predict_specific_model_combo.addItems([
+            "Select Specific Model..."
+        ])
+        model_layout.addRow("Specific Model:", self.predict_specific_model_combo)
+
+        layout.addWidget(model_group)
+
+        # Input data configuration
+        input_group = QGroupBox("Input Data")
+        input_layout = QVBoxLayout(input_group)
+
+        # Input type selection
+        input_type_layout = QHBoxLayout()
+        input_type_layout.addWidget(QLabel("Input Type:"))
+
+        self.predict_input_type_combo = QComboBox()
+        self.predict_input_type_combo.addItems([
+            "Text",
+            "Image",
+            "Audio",
+            "File",
+            "URL"
+        ])
+        input_type_layout.addWidget(self.predict_input_type_combo)
+
+        input_layout.addLayout(input_type_layout)
+
+        # Data format options
+        format_layout = QHBoxLayout()
+
+        self.predict_contains_header_check = QCheckBox("--contains-header")
+        self.predict_contains_header_check.setToolTip("Specify if the input data contains header row(s)")
+        format_layout.addWidget(self.predict_contains_header_check)
+
+        self.predict_contains_text_check = QCheckBox("--contains-text")
+        self.predict_contains_text_check.setToolTip("Specify if the input data contains text columns")
+        format_layout.addWidget(self.predict_contains_text_check)
+
+        format_layout.addStretch()
+        input_layout.addLayout(format_layout)
+
+        # Input content area
+        self.predict_input_text = QTextEdit()
+        self.predict_input_text.setPlaceholderText("Enter input data here...\n\nFor CSV files, you can also:\n• Select 'File' input type and browse to your CSV file\n• Use the checkboxes below to specify data format\n• The system will automatically parse and analyze your CSV data")
+        self.predict_input_text.setMaximumHeight(120)
+        input_layout.addWidget(self.predict_input_text)
+
+        # File/URL input
+        file_input_layout = QHBoxLayout()
+
+        self.predict_file_path_edit = QLineEdit()
+        self.predict_file_path_edit.setPlaceholderText("File path or URL...")
+        file_input_layout.addWidget(self.predict_file_path_edit)
+
+        browse_file_btn = QPushButton("Browse...")
+        browse_file_btn.clicked.connect(self.browse_predict_input_file)
+        file_input_layout.addWidget(browse_file_btn)
+
+        input_layout.addLayout(file_input_layout)
+
+        layout.addWidget(input_group)
+
+        # Prediction controls
+        controls_layout = QHBoxLayout()
+
+        run_predict_btn = QPushButton("Run Prediction")
+        run_predict_btn.clicked.connect(self.run_prediction)
+        controls_layout.addWidget(run_predict_btn)
+
+        clear_predict_btn = QPushButton("Clear Results")
+        clear_predict_btn.clicked.connect(self.clear_prediction_results)
+        controls_layout.addWidget(clear_predict_btn)
+
+        layout.addLayout(controls_layout)
+
+        # Prediction progress
+        self.predict_progress = QProgressBar()
+        self.predict_progress.setVisible(False)
+        layout.addWidget(self.predict_progress)
+
+        # Prediction results
+        results_group = QGroupBox("Prediction Results")
+        results_layout = QVBoxLayout(results_group)
+
+        self.predict_results_text = QTextEdit()
+        self.predict_results_text.setReadOnly(True)
+        self.predict_results_text.setPlainText("Prediction results will appear here...")
+        results_layout.addWidget(self.predict_results_text)
 
         layout.addWidget(results_group)
 
@@ -1272,6 +1439,16 @@ class CoreAI3DDashboard(QMainWindow):
         list_controls.addWidget(self.download_source_combo)
 
         list_layout.addLayout(list_controls)
+
+        # FastText embeddings download controls
+        fasttext_layout = QHBoxLayout()
+        fasttext_btn = QPushButton("Download FastText Embeddings")
+        fasttext_btn.clicked.connect(self.download_fasttext_embeddings)
+        fasttext_btn.setToolTip("Download FastText word embeddings (crawl-300d-2M)")
+        fasttext_layout.addWidget(fasttext_btn)
+        fasttext_layout.addStretch()
+        list_layout.addLayout(fasttext_layout)
+
         layout.addWidget(list_group)
 
         # Download progress
@@ -2284,6 +2461,154 @@ if __name__ == "__main__":
             activity_layout.addWidget(self.activity_text)
 
         layout.addWidget(activity_group)
+
+    def create_data_normalization_tab(self):
+        """Create data normalization tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Data Normalization")
+
+        layout = QVBoxLayout(tab)
+
+        # Normalization parameters group
+        norm_group = QGroupBox("Normalization Parameters")
+        norm_layout = QFormLayout(norm_group)
+
+        # Min value input
+        self.norm_min_spin = QDoubleSpinBox()
+        self.norm_min_spin.setRange(-10.0, 10.0)
+        self.norm_min_spin.setValue(self.norm_min)
+        self.norm_min_spin.setSingleStep(0.1)
+        self.norm_min_spin.setDecimals(1)
+        self.norm_min_spin.valueChanged.connect(self.on_norm_min_changed)
+        norm_layout.addRow("Minimum (--min):", self.norm_min_spin)
+
+        # Max value input
+        self.norm_max_spin = QDoubleSpinBox()
+        self.norm_max_spin.setRange(-10.0, 10.0)
+        self.norm_max_spin.setValue(self.norm_max)
+        self.norm_max_spin.setSingleStep(0.1)
+        self.norm_max_spin.setDecimals(1)
+        self.norm_max_spin.valueChanged.connect(self.on_norm_max_changed)
+        norm_layout.addRow("Maximum (--max):", self.norm_max_spin)
+
+        layout.addWidget(norm_group)
+
+        # Information group
+        info_group = QGroupBox("Information")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel("Data normalization scales input values to a specified range.\n\n"
+                          "• Minimum: Lower bound of the normalization range\n"
+                          "• Maximum: Upper bound of the normalization range\n\n"
+                          "Common ranges:\n"
+                          "• [0, 1]: Standard normalization\n"
+                          "• [-1, 1]: Symmetric around zero\n"
+                          "• [0, 255]: Image pixel values")
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+
+        layout.addWidget(info_group)
+
+        # Stretch to fill space
+        layout.addStretch()
+
+    def create_network_architecture_tab(self):
+        """Create network architecture tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Network Architecture")
+
+        layout = QVBoxLayout(tab)
+
+        # Network parameters group
+        network_group = QGroupBox("Network Parameters")
+        network_layout = QFormLayout(network_group)
+
+        # Neurons input
+        self.neurons_spin = QSpinBox()
+        self.neurons_spin.setRange(1, 1000)
+        self.neurons_spin.setValue(self.neurons)
+        self.neurons_spin.valueChanged.connect(self.on_neurons_changed)
+        network_layout.addRow("Neurons (-n):", self.neurons_spin)
+
+        # Samples input
+        self.samples_spin = QSpinBox()
+        self.samples_spin.setRange(0, 1000000)
+        self.samples_spin.setValue(self.samples)
+        self.samples_spin.setSpecialValueText("All samples (0)")
+        self.samples_spin.valueChanged.connect(self.on_samples_changed)
+        network_layout.addRow("Samples (-s):", self.samples_spin)
+
+        # Epochs input
+        self.epochs_spin = QSpinBox()
+        self.epochs_spin.setRange(1, 10000)
+        self.epochs_spin.setValue(self.epochs)
+        self.epochs_spin.valueChanged.connect(self.on_epochs_changed)
+        network_layout.addRow("Epochs (-e):", self.epochs_spin)
+
+        # Layers input
+        self.layers_spin = QSpinBox()
+        self.layers_spin.setRange(1, 100)
+        self.layers_spin.setValue(self.layers)
+        self.layers_spin.valueChanged.connect(self.on_layers_changed)
+        network_layout.addRow("Layers (-l):", self.layers_spin)
+
+        layout.addWidget(network_group)
+
+        # Information group
+        info_group = QGroupBox("Information")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel("Network architecture parameters define the neural network structure.\n\n"
+                          "• Neurons (-n): Number of neurons in each layer\n"
+                          "• Samples (-s): Number of training samples (0 = use all available)\n"
+                          "• Epochs (-e): Number of training iterations\n"
+                          "• Layers (-l): Number of hidden layers in the network")
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+
+        layout.addWidget(info_group)
+
+        # Stretch to fill space
+        layout.addStretch()
+
+    def create_training_parameters_tab(self):
+        """Create training parameters tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Training Parameters")
+
+        layout = QVBoxLayout(tab)
+
+        # Training parameters group
+        training_group = QGroupBox("Training Parameters")
+        training_layout = QFormLayout(training_group)
+
+        # Learning rate input
+        self.learning_rate_spin = QDoubleSpinBox()
+        self.learning_rate_spin.setRange(0.0001, 1.0)
+        self.learning_rate_spin.setValue(self.learning_rate)
+        self.learning_rate_spin.setSingleStep(0.0001)
+        self.learning_rate_spin.setDecimals(4)
+        self.learning_rate_spin.valueChanged.connect(self.on_learning_rate_changed)
+        training_layout.addRow("Learning Rate (--learning-rate):", self.learning_rate_spin)
+
+        layout.addWidget(training_group)
+
+        # Information group
+        info_group = QGroupBox("Information")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel("Training parameters control how the neural network learns.\n\n"
+                          "• Learning Rate: Controls how much the model adjusts during training\n"
+                          "  - Higher values (0.1): Faster learning, may overshoot optimal solution\n"
+                          "  - Lower values (0.001): Slower learning, more stable convergence\n"
+                          "  - Typical range: 0.0001 to 0.1")
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+
+        layout.addWidget(info_group)
+
+        # Stretch to fill space
+        layout.addStretch()
 
     def create_settings_tab(self):
         """Create settings configuration tab"""
@@ -3350,6 +3675,30 @@ capabilities, training data, performance metrics, and usage instructions."""
         except Exception as e:
             logger.error(f"Error updating download progress: {str(e)}")
 
+    def _update_download_complete(self, row, model_name):
+        """Update UI when download is complete"""
+        try:
+            logger.info(f"Download completion UI update for {model_name}")
+
+            # Update status
+            status_item = QTableWidgetItem("Downloaded")
+            status_item.setBackground(QColor(173, 216, 230))  # Light blue
+            self.model_table.setItem(row, 4, status_item)
+
+            # Hide progress bar
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText(f"{model_name} downloaded successfully")
+            self.status_bar.showMessage(f"Model {model_name} downloaded successfully")
+
+            # Log success
+            self._log_download(f"✓ Successfully downloaded {model_name}")
+
+            # Reset progress for next download
+            self.download_progress.setValue(0)
+            logger.debug("Download completion UI update completed")
+        except Exception as e:
+            logger.error(f"Error in download completion handler: {str(e)}")
+
     def cancel_model_download(self):
         """Cancel the current model download"""
         logger.info("Cancelling model download")
@@ -3609,6 +3958,580 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Clear the download log"""
         self.download_log.clear()
 
+    def browse_predict_input_file(self):
+        """Browse for prediction input file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Input File",
+            "", "All Files (*.*)"
+        )
+        if file_path:
+            self.predict_file_path_edit.setText(file_path)
+
+    def run_prediction(self):
+        """Run prediction with selected model and input"""
+        if not self.client:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                return
+
+        model_type = self.predict_model_combo.currentText()
+        specific_model = self.predict_specific_model_combo.currentText()
+        input_type = self.predict_input_type_combo.currentText()
+
+        if model_type == "Select Model...":
+            QMessageBox.warning(self, "No Model Selected", "Please select a model type")
+            return
+
+        if specific_model == "Select Specific Model...":
+            QMessageBox.warning(self, "No Model Selected", "Please select a specific model")
+            return
+
+        # Get input data based on type
+        input_data = None
+        parsed_csv_data = None
+
+        if input_type == "Text":
+            input_data = self.predict_input_text.toPlainText().strip()
+            if not input_data:
+                QMessageBox.warning(self, "No Input", "Please enter text input")
+                return
+        elif input_type in ["Image", "Audio"]:
+            input_data = self.predict_file_path_edit.text().strip()
+            if not input_data:
+                QMessageBox.warning(self, "No Input", "Please select a file")
+                return
+        elif input_type == "File":
+            file_path = self.predict_file_path_edit.text().strip()
+            if not file_path:
+                QMessageBox.warning(self, "No Input", "Please select a file")
+                return
+
+            # Check if it's a CSV file and parse it
+            if file_path.lower().endswith('.csv'):
+                # Get checkbox values for data format options
+                contains_header = self.predict_contains_header_check.isChecked()
+                contains_text = self.predict_contains_text_check.isChecked()
+
+                # Show parsing progress for large CSV files
+                self.predict_progress.setVisible(True)
+                self.predict_progress.setRange(0, 0)  # Indeterminate progress
+                self.status_bar.showMessage("Parsing CSV file...")
+
+                # Parse CSV in a separate thread to avoid blocking UI
+                parsed_csv_data = self.parse_csv_file(file_path, contains_header, contains_text)
+                if 'error' in parsed_csv_data:
+                    self.predict_progress.setVisible(False)
+                    QMessageBox.warning(self, "CSV Parse Error", f"Failed to parse CSV file: {parsed_csv_data['error']}")
+                    return
+                input_data = parsed_csv_data
+
+                self.predict_progress.setVisible(False)
+                self.status_bar.showMessage("CSV file parsed successfully")
+            else:
+                input_data = file_path
+        elif input_type == "URL":
+            input_data = self.predict_file_path_edit.text().strip()
+            if not input_data:
+                QMessageBox.warning(self, "No Input", "Please enter a URL")
+                return
+
+        # Get checkbox values for data format options (only for non-CSV files)
+        contains_header = self.predict_contains_header_check.isChecked()
+        contains_text = self.predict_contains_text_check.isChecked()
+
+        # Show progress
+        self.predict_progress.setVisible(True)
+        self.predict_progress.setRange(0, 0)  # Indeterminate progress
+
+        try:
+            async def predict():
+                # Call appropriate prediction method based on model type
+                if model_type == "Vision Models":
+                    result = await self.client.analyze_image(input_data)
+                elif model_type == "Audio Models":
+                    result = await self.client.analyze_audio(input_data)
+                elif model_type == "Text Models":
+                    result = await self.client.process_with_ai(input_data, 'text')
+                elif model_type == "Math Models":
+                    result = await self.client.solve_math(input_data)
+                elif model_type == "Web Models":
+                    result = await self.client.web_search(input_data)
+                else:
+                    # Generic prediction call with data format options
+                    result = await self.client.run_prediction(
+                        specific_model, input_data, input_type.lower(),
+                        contains_header=contains_header, contains_text=contains_text
+                    )
+                return result
+
+            def on_success(result):
+                self.predict_progress.setVisible(False)
+                if result.success:
+                    # Format and display results
+                    formatted_result = self._format_prediction_result(result.data)
+
+                    # If we parsed CSV data, include CSV parsing summary
+                    if parsed_csv_data and 'error' not in parsed_csv_data:
+                        csv_summary = self._format_csv_summary(parsed_csv_data)
+                        formatted_result = f"CSV Data Summary:\n{csv_summary}\n\nPrediction Results:\n{formatted_result}"
+
+                    self.predict_results_text.setPlainText(formatted_result)
+                    self.status_bar.showMessage("Prediction completed successfully")
+                else:
+                    error_msg = result.data.get('error', 'Unknown error')
+                    self.predict_results_text.setPlainText(f"Prediction failed: {error_msg}")
+                    self.status_bar.showMessage("Prediction failed")
+
+            def on_error(error_msg):
+                self.predict_progress.setVisible(False)
+                self.predict_results_text.setPlainText(f"Error: {error_msg}")
+                self.status_bar.showMessage("Prediction error")
+
+            self.async_manager.run_async_task(predict(), on_success, on_error)
+
+        except Exception as e:
+            self.predict_progress.setVisible(False)
+            QMessageBox.warning(self, "Error", f"Failed to start prediction: {str(e)}")
+
+    def clear_prediction_results(self):
+        """Clear prediction results"""
+        self.predict_results_text.clear()
+        self.predict_progress.setVisible(False)
+
+    def parse_csv_file(self, file_path: str, contains_header: bool = False, contains_text: bool = False) -> Dict[str, Any]:
+        """Parse CSV file using comma as delimiter and return structured data with improved performance"""
+        try:
+            parsed_data = {
+                'rows': [],
+                'headers': [],
+                'row_count': 0,
+                'column_count': 0,
+                'text_columns': [],
+                'numeric_columns': []
+            }
+
+            # Check file size for large file handling
+            file_size = os.path.getsize(file_path)
+            is_large_file = file_size > 10 * 1024 * 1024  # 10MB threshold
+
+            with open(file_path, 'r', encoding='utf-8') as csvfile:
+                # Use comma as delimiter as specified
+                reader = csv.reader(csvfile, delimiter=',')
+
+                # Read all rows or limit for large files
+                if is_large_file:
+                    # For large files, read first 1000 rows for analysis
+                    rows = []
+                    for i, row in enumerate(reader):
+                        if i >= 1000:  # Limit to first 1000 rows
+                            break
+                        rows.append(row)
+                    parsed_data['large_file_limited'] = True
+                    parsed_data['total_file_size'] = file_size
+                else:
+                    rows = list(reader)
+
+                if not rows:
+                    return parsed_data
+
+                parsed_data['row_count'] = len(rows)
+
+                # Handle headers
+                if contains_header and rows:
+                    parsed_data['headers'] = rows[0]
+                    data_rows = rows[1:]
+                else:
+                    # Generate column names if no headers
+                    if rows:
+                        parsed_data['headers'] = [f'col_{i+1}' for i in range(len(rows[0]))]
+                    data_rows = rows
+
+                parsed_data['column_count'] = len(parsed_data['headers'])
+
+                # Process data rows with better error handling
+                for row_idx, row in enumerate(data_rows):
+                    if len(row) == parsed_data['column_count']:
+                        parsed_data['rows'].append(row)
+                    elif len(row) > parsed_data['column_count']:
+                        # Pad short rows with empty strings
+                        row.extend([''] * (parsed_data['column_count'] - len(row)))
+                        parsed_data['rows'].append(row)
+                    # Skip rows that are too short (they will be ignored)
+
+                # Analyze column types if contains_text is specified and we have data
+                if contains_text and parsed_data['rows']:
+                    # Sample first few rows to determine column types (limit to 50 for performance)
+                    sample_rows = parsed_data['rows'][:min(50, len(parsed_data['rows']))]
+
+                    for col_idx in range(parsed_data['column_count']):
+                        is_text = False
+                        is_numeric = True
+
+                        for row in sample_rows:
+                            if col_idx < len(row):
+                                cell_value = row[col_idx].strip()
+                                if not cell_value:  # Skip empty cells
+                                    continue
+
+                                # Check if it's text (contains letters)
+                                if any(c.isalpha() for c in cell_value):
+                                    is_text = True
+
+                                # Check if it's numeric (more robust check)
+                                try:
+                                    # Remove common number formatting characters
+                                    clean_value = cell_value.replace(',', '').replace('%', '').replace('$', '').strip()
+                                    float(clean_value)
+                                except ValueError:
+                                    is_numeric = False
+
+                        if is_text:
+                            parsed_data['text_columns'].append(col_idx)
+                        if is_numeric:
+                            parsed_data['numeric_columns'].append(col_idx)
+
+            return parsed_data
+
+        except UnicodeDecodeError:
+            # Try with different encoding for files with special characters
+            try:
+                with open(file_path, 'r', encoding='latin-1') as csvfile:
+                    reader = csv.reader(csvfile, delimiter=',')
+                    rows = list(reader)
+                    # Simplified parsing for encoding issues
+                    parsed_data['rows'] = rows
+                    parsed_data['row_count'] = len(rows)
+                    if rows:
+                        parsed_data['column_count'] = len(rows[0])
+                        parsed_data['headers'] = [f'col_{i+1}' for i in range(len(rows[0]))]
+                    return parsed_data
+            except Exception as e2:
+                return {
+                    'error': f"File encoding error. Tried UTF-8 and Latin-1: {str(e2)}",
+                    'rows': [],
+                    'headers': [],
+                    'row_count': 0,
+                    'column_count': 0
+                }
+        except Exception as e:
+            logger.error(f"Error parsing CSV file {file_path}: {str(e)}")
+            return {
+                'error': str(e),
+                'rows': [],
+                'headers': [],
+                'row_count': 0,
+                'column_count': 0
+            }
+
+    def _format_csv_summary(self, csv_data: Dict[str, Any]) -> str:
+        """Format CSV parsing summary for display with improved performance"""
+        try:
+            summary_lines = []
+            row_count = csv_data.get('row_count', 0)
+            column_count = csv_data.get('column_count', 0)
+
+            summary_lines.append(f"Rows: {row_count:,}")  # Add thousand separators
+            summary_lines.append(f"Columns: {column_count}")
+
+            # Add file size info for large files
+            if csv_data.get('large_file_limited'):
+                file_size_mb = csv_data.get('total_file_size', 0) / (1024 * 1024)
+                summary_lines.append(f"File Size: {file_size_mb:.1f} MB (showing first 1000 rows)")
+            elif csv_data.get('total_file_size'):
+                file_size_kb = csv_data.get('total_file_size', 0) / 1024
+                if file_size_kb > 1024:
+                    file_size_mb = file_size_kb / 1024
+                    summary_lines.append(f"File Size: {file_size_mb:.1f} MB")
+                else:
+                    summary_lines.append(f"File Size: {file_size_kb:.1f} KB")
+
+            if csv_data.get('headers') and len(csv_data['headers']) <= 20:  # Only show if not too many columns
+                summary_lines.append(f"Headers: {', '.join(csv_data['headers'])}")
+            elif csv_data.get('headers') and len(csv_data['headers']) > 20:
+                summary_lines.append(f"Headers: {', '.join(csv_data['headers'][:10])}, ... ({len(csv_data['headers'])-10} more)")
+
+            if csv_data.get('text_columns'):
+                text_cols = [csv_data['headers'][i] if i < len(csv_data.get('headers', [])) else f'col_{i+1}'
+                            for i in csv_data['text_columns']]
+                if len(text_cols) <= 10:
+                    summary_lines.append(f"Text columns ({len(text_cols)}): {', '.join(text_cols)}")
+                else:
+                    summary_lines.append(f"Text columns ({len(text_cols)}): {', '.join(text_cols[:5])}, ...")
+
+            if csv_data.get('numeric_columns'):
+                numeric_cols = [csv_data['headers'][i] if i < len(csv_data.get('headers', [])) else f'col_{i+1}'
+                              for i in csv_data['numeric_columns']]
+                if len(numeric_cols) <= 10:
+                    summary_lines.append(f"Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols)}")
+                else:
+                    summary_lines.append(f"Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols[:5])}, ...")
+
+            # Show first few rows as preview (limit for performance)
+            if csv_data.get('rows') and len(csv_data['rows']) > 0:
+                preview_rows = min(3, len(csv_data['rows']))  # Limit preview rows
+                summary_lines.append(f"\nFirst {preview_rows} rows preview:")
+
+                for i, row in enumerate(csv_data['rows'][:preview_rows]):
+                    # Truncate long rows for display
+                    if len(row) <= 10:
+                        row_display = ', '.join(row)
+                    else:
+                        row_display = ', '.join(row[:5]) + f", ... ({len(row)-5} more columns)"
+
+                    # Truncate very long cell values
+                    if len(row_display) > 200:
+                        row_display = row_display[:200] + "..."
+
+                    summary_lines.append(f"  Row {i+1}: {row_display}")
+
+            return "\n".join(summary_lines)
+
+        except Exception as e:
+            return f"Error formatting CSV summary: {str(e)}"
+
+    def _format_prediction_result(self, data: Dict[str, Any]) -> str:
+        """Format prediction result for display with truncation for large arrays"""
+        try:
+            if isinstance(data, dict):
+                # Pretty format JSON-like results
+                formatted_lines = []
+                for key, value in data.items():
+                    if isinstance(value, (int, float)):
+                        formatted_lines.append(f"{key}: {value:.4f}")
+                    elif isinstance(value, list):
+                        formatted_lines.append(self._format_array_with_truncation(key, value))
+                    else:
+                        formatted_lines.append(f"{key}: {value}")
+                return "\n".join(formatted_lines)
+            else:
+                return str(data)
+        except Exception as e:
+            return f"Error formatting result: {str(e)}\n\nRaw data: {data}"
+
+    def _format_array_with_truncation(self, key: str, array: list, max_display: int = 5) -> str:
+        """Format array with truncation and summary statistics"""
+        try:
+            total_count = len(array)
+
+            # If array is small, show it fully
+            if total_count <= max_display:
+                return f"{key}: {array}"
+
+            # Count non-zero elements
+            non_zero_count = sum(1 for x in array if x != 0)
+
+            # Show first few elements
+            displayed_elements = array[:max_display]
+            truncated_display = f"{displayed_elements} ... ({total_count - max_display} more items)"
+
+            # Create summary
+            summary_parts = [f"{key}: {truncated_display}"]
+            summary_parts.append(f"  Total items: {total_count}")
+            summary_parts.append(f"  Non-zero values: {non_zero_count}")
+
+            # Add statistics for numeric arrays
+            if array and isinstance(array[0], (int, float)):
+                try:
+                    numeric_array = [float(x) for x in array if isinstance(x, (int, float))]
+                    if numeric_array:
+                        min_val = min(numeric_array)
+                        max_val = max(numeric_array)
+                        avg_val = sum(numeric_array) / len(numeric_array)
+                        summary_parts.append(f"  Range: [{min_val:.4f}, {max_val:.4f}]")
+                        summary_parts.append(f"  Average: {avg_val:.4f}")
+                except (ValueError, TypeError):
+                    pass  # Skip statistics if conversion fails
+
+            return "\n".join(summary_parts)
+
+        except Exception as e:
+            return f"{key}: [Error formatting array: {str(e)}] ({len(array)} items)"
+
+    def on_predict_model_type_changed(self):
+        """Handle model type selection change"""
+        model_type = self.predict_model_combo.currentText()
+
+        # Update specific model options based on type
+        self.predict_specific_model_combo.clear()
+        self.predict_specific_model_combo.addItem("Select Specific Model...")
+
+        if model_type == "Vision Models":
+            self.predict_specific_model_combo.addItems([
+                "ResNet-50", "YOLOv5-Small", "EfficientNet-B0", "MobileNetV3-Small",
+                "FaceNet", "Tesseract-OCR", "Mask-RCNN", "SSD-MobileNet"
+            ])
+        elif model_type == "Audio Models":
+            self.predict_specific_model_combo.addItems([
+                "Whisper-Tiny", "Whisper-Base", "Whisper-Small", "Tacotron2",
+                "WaveNet", "DeepSpeech", "SpeakerNet", "AudioNet"
+            ])
+        elif model_type == "Text Models":
+            self.predict_specific_model_combo.addItems([
+                "BERT-Base", "GPT-2 Small", "DistilBERT", "RoBERTa-Base",
+                "ALBERT-Base", "XLNet-Base", "ELECTRA-Small", "Sentence-BERT"
+            ])
+        elif model_type == "Multimodal Models":
+            self.predict_specific_model_combo.addItems([
+                "CLIP-ViT", "CLIP-RN50", "VisualBERT", "ViLBERT",
+                "LXMERT", "Oscar"
+            ])
+        elif model_type == "Neural Networks":
+            self.predict_specific_model_combo.addItems([
+                "CoreAI3D-NN-1", "CoreAI3D-NN-2", "CoreAI3D-NN-3", "CoreAI3D-NN-4"
+            ])
+        elif model_type == "Math Models":
+            self.predict_specific_model_combo.addItems([
+                "MathSolver-NN", "Optimization-Net", "Statistics-Engine", "Symbolic-Math"
+            ])
+        elif model_type == "Web Models":
+            self.predict_specific_model_combo.addItems([
+                "WebScraper-NN", "Sentiment-Analyzer", "Content-Classifier", "News-Aggregator"
+            ])
+
+    def download_fasttext_embeddings(self):
+        """Download FastText embeddings file"""
+        try:
+            # FastText crawl-300d-2M embeddings URL
+            url = "https://dl.fbaipublicfiles.com/fasttext/vectors-english/crawl-300d-2M.vec.zip"
+            filename = "crawl-300d-2M.vec.zip"
+
+            # Ensure models directory exists
+            models_dir = os.path.join(self.config.data_dir, "models")
+            os.makedirs(models_dir, exist_ok=True)
+
+            # Full path for download
+            download_path = os.path.join(models_dir, filename)
+
+            logger.info(f"Starting FastText embeddings download to: {download_path}")
+
+            # Check if file already exists
+            if os.path.exists(download_path):
+                reply = QMessageBox.question(
+                    self, "File Exists",
+                    f"FastText embeddings file already exists at {download_path}.\nDo you want to overwrite it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    self.status_bar.showMessage("Download cancelled - file already exists")
+                    return
+
+            # Show progress
+            self.download_progress.setVisible(True)
+            self.download_progress.setRange(0, 100)
+            self.download_progress.setValue(0)
+            self.download_status_label.setText("Downloading FastText embeddings...")
+
+            # Start download in background thread
+            download_thread = threading.Thread(
+                target=self._download_fasttext_worker,
+                args=(url, download_path),
+                daemon=True
+            )
+            download_thread.start()
+
+            self.status_bar.showMessage("FastText embeddings download started")
+
+        except Exception as e:
+            logger.error(f"Error starting FastText download: {str(e)}")
+            QMessageBox.warning(self, "Download Error", f"Failed to start download: {str(e)}")
+
+    def _download_fasttext_worker(self, url, download_path):
+        """Worker thread for FastText download"""
+        try:
+            logger.info(f"Downloading from {url} to {download_path}")
+
+            # Create request with user agent
+            req = urllib.request.Request(
+                url,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
+                }
+            )
+
+            # Open URL and get response
+            with urllib.request.urlopen(req) as response:
+                total_size = int(response.headers.get('Content-Length', 0))
+                logger.info(f"Total file size: {total_size} bytes")
+
+                downloaded = 0
+                chunk_size = 8192
+
+                with open(download_path, 'wb') as f:
+                    while True:
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        # Update progress
+                        if total_size > 0:
+                            progress = int((downloaded / total_size) * 100)
+                            QTimer.singleShot(0, lambda p=progress: self._update_fasttext_progress(p))
+
+            # Download complete
+            QTimer.singleShot(0, lambda: self._fasttext_download_success(download_path))
+
+        except Exception as e:
+            error_msg = f"Download failed: {str(e)}"
+            logger.error(error_msg)
+            QTimer.singleShot(0, lambda msg=error_msg: self._fasttext_download_error(msg))
+
+    def _update_fasttext_progress(self, progress):
+        """Update FastText download progress"""
+        try:
+            self.download_progress.setValue(progress)
+            self.download_status_label.setText(f"Downloading FastText embeddings... {progress}%")
+        except Exception as e:
+            logger.error(f"Error updating progress: {str(e)}")
+
+    def _fasttext_download_success(self, download_path):
+        """Handle successful FastText download"""
+        try:
+            # Hide progress
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText("FastText embeddings downloaded successfully")
+
+            # Log success
+            file_size = os.path.getsize(download_path) / (1024 * 1024)  # Size in MB
+            self._log_download(f"✓ Successfully downloaded FastText embeddings ({file_size:.1f} MB)")
+
+            # Show success message
+            QMessageBox.information(
+                self, "Download Complete",
+                f"FastText embeddings downloaded successfully!\n\n"
+                f"File: {os.path.basename(download_path)}\n"
+                f"Size: {file_size:.1f} MB\n"
+                f"Location: {download_path}"
+            )
+
+            self.status_bar.showMessage("FastText embeddings download completed")
+
+        except Exception as e:
+            logger.error(f"Error in download success handler: {str(e)}")
+
+    def _fasttext_download_error(self, error_msg):
+        """Handle FastText download error"""
+        try:
+            # Hide progress
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText("FastText download failed")
+
+            # Log error
+            self._log_download(f"✗ FastText download failed: {error_msg}")
+
+            # Show error message
+            QMessageBox.warning(
+                self, "Download Failed",
+                f"Failed to download FastText embeddings:\n\n{error_msg}"
+            )
+
+            self.status_bar.showMessage("FastText download failed")
+
+        except Exception as e:
+            logger.error(f"Error in download error handler: {str(e)}")
+
     def refresh_neural_data(self):
         """Refresh neural network data"""
         if not self.client:
@@ -3681,28 +4604,67 @@ capabilities, training data, performance metrics, and usage instructions."""
 
         self.activity_canvas.draw()
 
+    # Training parameter change handlers
+    def on_norm_min_changed(self, value):
+        """Handle normalization min value change"""
+        self.norm_min = value
+
+    def on_norm_max_changed(self, value):
+        """Handle normalization max value change"""
+        self.norm_max = value
+
+    def on_neurons_changed(self, value):
+        """Handle neurons value change"""
+        self.neurons = value
+
+    def on_samples_changed(self, value):
+        """Handle samples value change"""
+        self.samples = value
+
+    def on_epochs_changed(self, value):
+        """Handle epochs value change"""
+        self.epochs = value
+
+    def on_layers_changed(self, value):
+        """Handle layers value change"""
+        self.layers = value
+
+    def on_learning_rate_changed(self, value):
+        """Handle learning rate value change"""
+        self.learning_rate = value
+
     def closeEvent(self, event):
         """Handle application close event"""
         try:
+            logger.info("Starting application shutdown sequence")
+
             # Stop sandbox if running
             if self.sandbox_manager.is_running:
+                logger.info("Stopping sandbox manager")
                 self.sandbox_manager.stop_sandbox()
 
-            # Close client connection
+            # Close client connection synchronously to avoid race conditions
             if self.client:
-                # Use async manager for proper shutdown
-                def close_client():
+                logger.info("Closing client connection")
+                try:
+                    # Close synchronously to ensure proper cleanup
                     if hasattr(self.client, 'close'):
-                        asyncio.create_task(self.client.close())
-                self.async_manager.run_async_task(close_client())
+                        # Create a new event loop for synchronous close
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self.client.close())
+                        loop.close()
+                except Exception as e:
+                    logger.error(f"Error closing client: {str(e)}")
 
-            # Shutdown async manager
+            # Shutdown async manager (this will wait for threads)
+            logger.info("Shutting down async manager")
             self.async_manager.shutdown()
 
             # Save configuration
             self._save_config()
 
-            logger.info("CoreAI3D Dashboard closed")
+            logger.info("CoreAI3D Dashboard closed successfully")
             event.accept()
 
         except Exception as e:

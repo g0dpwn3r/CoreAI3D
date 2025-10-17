@@ -72,7 +72,7 @@ public:
     const std::vector<float>& getHiddenOutputData() const;
     const std::vector<float>& getHiddenErrorData() const;
 
-    std::unique_ptr<Training> trainer;
+    Training* trainer;
 
     // Methods to set internal state for loading
     void setInput(const std::vector<std::vector<float> >& data);
