@@ -18,10 +18,12 @@ import threading
 import time
 import psutil
 import subprocess
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 
 # PyQt6 imports
 from PyQt6.QtWidgets import (
@@ -117,6 +119,8 @@ class SandboxManager(QObject):
         self.sandboxed_processes: List[subprocess.Popen] = []
         self.is_running = False
         self.sandbox_name = "CoreAI3D_Sandbox"
+        self.sandbox_config: Optional[Dict[str, Any]] = None
+        self.monitor_thread: Optional[threading.Thread] = None
 
     def create_sandbox_config(self, config: Dict[str, Any]) -> bool:
         """Create Docker container configuration"""
@@ -164,7 +168,8 @@ class SandboxManager(QObject):
             logger.info("Docker container started")
 
             # Monitor container
-            threading.Thread(target=self._monitor_container, daemon=True).start()
+            self.monitor_thread = threading.Thread(target=self._monitor_container, daemon=True)
+            self.monitor_thread.start()
 
             return True
 
@@ -191,6 +196,10 @@ class SandboxManager(QObject):
                 self.sandbox_stopped.emit("Docker container stopped with warnings")
                 logger.warning("Docker container stopped with some issues")
 
+            # Clean up monitor thread
+            if self.monitor_thread and self.monitor_thread.is_alive():
+                self.monitor_thread.join(timeout=1.0)
+
             return success
 
         except Exception as e:
@@ -216,6 +225,10 @@ class SandboxManager(QObject):
     def _start_docker_container(self) -> bool:
         """Start Docker container"""
         try:
+            if not self.sandbox_config:
+                logger.error("No sandbox config available")
+                return False
+
             # Pull the image if needed
             self._pull_image()
 
@@ -270,6 +283,10 @@ class SandboxManager(QObject):
     def _pull_image(self):
         """Pull Docker image if needed"""
         try:
+            if not self.sandbox_config:
+                logger.error("No sandbox config available for image pull")
+                return
+
             image = self.sandbox_config['image']
             # Check if image exists locally
             result = subprocess.run(
@@ -294,6 +311,10 @@ class SandboxManager(QObject):
         """Terminate Docker container"""
         try:
             success = True
+
+            if not self.sandbox_config:
+                logger.warning("No sandbox config available for termination")
+                return False
 
             # Stop the container
             try:
@@ -333,7 +354,7 @@ class SandboxManager(QObject):
     def _monitor_container(self):
         """Monitor container in background"""
         try:
-            while self.is_running:
+            while self.is_running and self.sandbox_config:
                 # Check if container is still running
                 result = subprocess.run(
                     ['docker', 'ps', '--filter', f'name={self.sandbox_config["container_name"]}', '--format', '{{.Names}}'],
@@ -350,10 +371,15 @@ class SandboxManager(QObject):
                 time.sleep(2)
         except Exception as e:
             logger.error(f"Error monitoring container: {str(e)}")
+            self.is_running = False
+            self.sandbox_error.emit("Monitor Error", f"Container monitoring failed: {str(e)}")
 
     def _update_container_processes(self):
         """Update list of container processes"""
         try:
+            if not self.is_running or not self.sandbox_config:
+                return
+
             # Query Docker for running processes in our container
             result = subprocess.run(
                 ['docker', 'exec', self.sandbox_config['container_name'], 'ps', 'aux'],
@@ -423,7 +449,6 @@ class TrainingDataManager(QObject):
 
             # Copy file to dataset
             dest_path = os.path.join(dataset_path, file_name)
-            import shutil
             shutil.copy2(file_path, dest_path)
 
             # Update dataset metadata
@@ -584,6 +609,54 @@ class CodeDebugger(QObject):
 
             return test_result
 
+class AsyncTaskThread(QThread):
+    def __init__(self, coro, callback=None, error_callback=None):
+        super().__init__()
+        self.coro = coro
+        self.callback = callback
+        self.error_callback = error_callback
+
+    def run(self):
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self.coro)
+            loop.close()
+            if self.callback:
+                QTimer.singleShot(0, lambda: self.callback(result))
+        except Exception as e:
+            error_msg = f"Async task failed: {str(e)}"
+            logger.error(error_msg)
+            if self.error_callback:
+                QTimer.singleShot(0, lambda: self.error_callback(str(e)))
+
+class AsyncTaskManager(QObject):
+    """Manages async tasks with proper Qt integration"""
+
+    task_completed = pyqtSignal(object)
+    task_error = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+
+    def run_async_task(self, coro, callback=None, error_callback=None):
+        """Run an async coroutine safely with Qt integration"""
+        if not asyncio.iscoroutine(coro):
+            coro = self._make_coroutine(coro)
+
+        thread = AsyncTaskThread(coro, callback, error_callback)
+        thread.start()
+
+    def _make_coroutine(self, func):
+        async def wrapper():
+            return func()
+        return wrapper
+
+    def shutdown(self):
+        """Shutdown the task manager"""
+        pass
+
+
 class CoreAI3DDashboard(QMainWindow):
     """Main dashboard window"""
 
@@ -593,11 +666,17 @@ class CoreAI3DDashboard(QMainWindow):
         # Initialize configuration
         self.config = self._load_config()
 
+        # Initialize async task manager
+        self.async_manager = AsyncTaskManager()
+
         # Initialize components
         self.client: Optional[CoreAI3DClient] = None
         self.sandbox_manager = SandboxManager(self.config)
         self.training_manager = TrainingDataManager(self.config)
         self.debugger: Optional[CodeDebugger] = None
+
+        # Chat response handler
+        self.chat_response_handler = None
 
         # Initialize UI
         self.setup_ui()
@@ -659,6 +738,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_debugging_tab()
         self.create_linux_sandbox_tab()
         self.create_model_downloads_tab()
+        self.create_code_generation_tab()
         self.create_chat_tab()
         self.create_neural_tab()
         self.create_settings_tab()
@@ -1184,6 +1264,13 @@ class CoreAI3DDashboard(QMainWindow):
         cancel_download_btn.clicked.connect(self.cancel_model_download)
         list_controls.addWidget(cancel_download_btn)
 
+        # Add source selection
+        self.download_source_combo = QComboBox()
+        self.download_source_combo.addItems(["Auto", "Kaggle", "HuggingFace", "Local"])
+        self.download_source_combo.setCurrentText("Auto")
+        list_controls.addWidget(QLabel("Source:"))
+        list_controls.addWidget(self.download_source_combo)
+
         list_layout.addLayout(list_controls)
         layout.addWidget(list_group)
 
@@ -1197,6 +1284,16 @@ class CoreAI3DDashboard(QMainWindow):
 
         self.download_status_label = QLabel("Ready")
         progress_layout.addWidget(self.download_status_label)
+
+        # Download history/log
+        self.download_log = QPlainTextEdit()
+        self.download_log.setMaximumHeight(100)
+        self.download_log.setReadOnly(True)
+        progress_layout.addWidget(self.download_log)
+
+        clear_log_btn = QPushButton("Clear Log")
+        clear_log_btn.clicked.connect(self.clear_download_log)
+        progress_layout.addWidget(clear_log_btn)
 
         layout.addWidget(progress_group)
 
@@ -1241,30 +1338,34 @@ class CoreAI3DDashboard(QMainWindow):
         try:
             async def execute():
                 try:
-                    # Show progress
-                    self.linux_training_progress.setVisible(True)
-                    self.linux_training_progress.setRange(0, 0)
-
                     # Execute command via LinuxModule
                     result = await self.client.execute_linux_command(container, command)
-
-                    if result.success:
-                        self.linux_output.appendPlainText(f"$ {command}")
-                        self.linux_output.appendPlainText(result.data.get('output', ''))
-                        self.linux_sandbox_status_label.setText(f"Linux Sandbox: Command executed in {container}")
-                        self.status_bar.showMessage("Command executed successfully")
-                    else:
-                        self.linux_output.appendPlainText(f"$ {command}")
-                        self.linux_output.appendPlainText(f"Error: {result.data.get('error', 'Unknown error')}")
-                        self.status_bar.showMessage("Command execution failed")
-
+                    return result
                 except Exception as e:
-                    self.linux_output.appendPlainText(f"Error: {str(e)}")
-                    self.status_bar.showMessage("Command execution error")
-                finally:
-                    self.linux_training_progress.setVisible(False)
+                    raise e
 
-            asyncio.create_task(execute())
+            def on_success(result):
+                self.linux_training_progress.setVisible(False)
+                if result.success:
+                    self.linux_output.appendPlainText(f"$ {command}")
+                    self.linux_output.appendPlainText(result.data.get('output', ''))
+                    self.linux_sandbox_status_label.setText(f"Linux Sandbox: Command executed in {container}")
+                    self.status_bar.showMessage("Command executed successfully")
+                else:
+                    self.linux_output.appendPlainText(f"$ {command}")
+                    self.linux_output.appendPlainText(f"Error: {result.data.get('error', 'Unknown error')}")
+                    self.status_bar.showMessage("Command execution failed")
+
+            def on_error(error_msg):
+                self.linux_training_progress.setVisible(False)
+                self.linux_output.appendPlainText(f"Error: {error_msg}")
+                self.status_bar.showMessage("Command execution error")
+
+            # Show progress
+            self.linux_training_progress.setVisible(True)
+            self.linux_training_progress.setRange(0, 0)
+
+            self.async_manager.run_async_task(execute(), on_success, on_error)
 
         except Exception as e:
             self.linux_training_progress.setVisible(False)
@@ -1281,19 +1382,20 @@ class CoreAI3DDashboard(QMainWindow):
 
         try:
             async def start():
-                try:
-                    result = await self.client.start_linux_container(container)
+                result = await self.client.start_linux_container(container)
+                return result
 
-                    if result.success:
-                        self.linux_sandbox_status_label.setText(f"Linux Sandbox: {container} started")
-                        self.status_bar.showMessage(f"Container {container} started successfully")
-                    else:
-                        QMessageBox.warning(self, "Start Error", result.data.get('error', 'Unknown error'))
+            def on_success(result):
+                if result.success:
+                    self.linux_sandbox_status_label.setText(f"Linux Sandbox: {container} started")
+                    self.status_bar.showMessage(f"Container {container} started successfully")
+                else:
+                    QMessageBox.warning(self, "Start Error", result.data.get('error', 'Unknown error'))
 
-                except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
+            def on_error(error_msg):
+                QMessageBox.warning(self, "Error", f"Failed to start container: {error_msg}")
 
-            asyncio.create_task(start())
+            self.async_manager.run_async_task(start(), on_success, on_error)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
@@ -1309,19 +1411,20 @@ class CoreAI3DDashboard(QMainWindow):
 
         try:
             async def stop():
-                try:
-                    result = await self.client.stop_linux_container(container)
+                result = await self.client.stop_linux_container(container)
+                return result
 
-                    if result.success:
-                        self.linux_sandbox_status_label.setText("Linux Sandbox: Container stopped")
-                        self.status_bar.showMessage(f"Container {container} stopped successfully")
-                    else:
-                        QMessageBox.warning(self, "Stop Error", result.data.get('error', 'Unknown error'))
+            def on_success(result):
+                if result.success:
+                    self.linux_sandbox_status_label.setText("Linux Sandbox: Container stopped")
+                    self.status_bar.showMessage(f"Container {container} stopped successfully")
+                else:
+                    QMessageBox.warning(self, "Stop Error", result.data.get('error', 'Unknown error'))
 
-                except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Failed to stop container: {str(e)}")
+            def on_error(error_msg):
+                QMessageBox.warning(self, "Error", f"Failed to stop container: {error_msg}")
 
-            asyncio.create_task(stop())
+            self.async_manager.run_async_task(stop(), on_success, on_error)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to stop container: {str(e)}")
@@ -1342,28 +1445,29 @@ class CoreAI3DDashboard(QMainWindow):
 
         try:
             async def train():
-                try:
-                    # Show progress
-                    self.linux_training_progress.setVisible(True)
-                    self.linux_training_progress.setRange(0, 0)
+                # Run training scenario
+                result = await self.client.run_linux_training(container, scenario)
+                return result
 
-                    # Run training scenario
-                    result = await self.client.run_linux_training(container, scenario)
+            def on_success(result):
+                self.linux_training_progress.setVisible(False)
+                if result.success:
+                    self.training_results.setPlainText(result.data.get('report', 'Training completed'))
+                    self.status_bar.showMessage(f"Training scenario '{scenario}' completed")
+                else:
+                    self.training_results.setPlainText(f"Training failed: {result.data.get('error', 'Unknown error')}")
+                    self.status_bar.showMessage("Training failed")
 
-                    if result.success:
-                        self.training_results.setPlainText(result.data.get('report', 'Training completed'))
-                        self.status_bar.showMessage(f"Training scenario '{scenario}' completed")
-                    else:
-                        self.training_results.setPlainText(f"Training failed: {result.data.get('error', 'Unknown error')}")
-                        self.status_bar.showMessage("Training failed")
+            def on_error(error_msg):
+                self.linux_training_progress.setVisible(False)
+                self.training_results.setPlainText(f"Training error: {error_msg}")
+                self.status_bar.showMessage("Training error")
 
-                except Exception as e:
-                    self.training_results.setPlainText(f"Training error: {str(e)}")
-                    self.status_bar.showMessage("Training error")
-                finally:
-                    self.linux_training_progress.setVisible(False)
+            # Show progress
+            self.linux_training_progress.setVisible(True)
+            self.linux_training_progress.setRange(0, 0)
 
-            asyncio.create_task(train())
+            self.async_manager.run_async_task(train(), on_success, on_error)
 
         except Exception as e:
             self.linux_training_progress.setVisible(False)
@@ -1380,19 +1484,20 @@ class CoreAI3DDashboard(QMainWindow):
 
         try:
             async def generate():
-                try:
-                    result = await self.client.generate_training_report(container)
+                result = await self.client.generate_training_report(container)
+                return result
 
-                    if result.success:
-                        self.training_results.setPlainText(result.data.get('report', 'Report generated'))
-                        self.status_bar.showMessage("Training report generated")
-                    else:
-                        QMessageBox.warning(self, "Report Error", result.data.get('error', 'Unknown error'))
+            def on_success(result):
+                if result.success:
+                    self.training_results.setPlainText(result.data.get('report', 'Report generated'))
+                    self.status_bar.showMessage("Training report generated")
+                else:
+                    QMessageBox.warning(self, "Report Error", result.data.get('error', 'Unknown error'))
 
-                except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Failed to generate report: {str(e)}")
+            def on_error(error_msg):
+                QMessageBox.warning(self, "Error", f"Failed to generate report: {error_msg}")
 
-            asyncio.create_task(generate())
+            self.async_manager.run_async_task(generate(), on_success, on_error)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to generate report: {str(e)}")
@@ -1523,32 +1628,37 @@ class CoreAI3DDashboard(QMainWindow):
 
         try:
             async def generate():
-                try:
-                    # Use AI to generate code
-                    result = await self._generate_code_ai(language, code_type, complexity, description)
+                # Use AI to generate code
+                result = await self._generate_code_ai(language, code_type, complexity, description)
+                return result
 
-                    if result.success:
-                        self.generated_code.setPlainText(result.data.get('code', ''))
-                        self.template_info.setPlainText(result.data.get('template_info', ''))
+            def on_success(result):
+                # Hide progress
+                self.generation_progress.setVisible(False)
+                self.generate_btn.setEnabled(True)
 
-                        # Update UI
-                        self.copy_btn.setEnabled(True)
-                        self.save_btn.setEnabled(True)
+                if result.success:
+                    self.generated_code.setPlainText(result.data.get('code', ''))
+                    self.template_info.setPlainText(result.data.get('template_info', ''))
 
-                        self.status_bar.showMessage("Code generated successfully")
-                    else:
-                        QMessageBox.warning(self, "Generation Failed", result.data.get('error', 'Unknown error'))
-                        self.status_bar.showMessage("Code generation failed")
+                    # Update UI
+                    self.copy_btn.setEnabled(True)
+                    self.save_btn.setEnabled(True)
 
-                except Exception as e:
-                    QMessageBox.warning(self, "Generation Error", str(e))
-                    self.status_bar.showMessage("Code generation error")
-                finally:
-                    # Hide progress
-                    self.generation_progress.setVisible(False)
-                    self.generate_btn.setEnabled(True)
+                    self.status_bar.showMessage("Code generated successfully")
+                else:
+                    QMessageBox.warning(self, "Generation Failed", result.data.get('error', 'Unknown error'))
+                    self.status_bar.showMessage("Code generation failed")
 
-            asyncio.create_task(generate())
+            def on_error(error_msg):
+                # Hide progress
+                self.generation_progress.setVisible(False)
+                self.generate_btn.setEnabled(True)
+
+                QMessageBox.warning(self, "Generation Error", error_msg)
+                self.status_bar.showMessage("Code generation error")
+
+            self.async_manager.run_async_task(generate(), on_success, on_error)
 
         except Exception as e:
             self.generation_progress.setVisible(False)
@@ -2155,6 +2265,7 @@ if __name__ == "__main__":
 
         self.topology_text = QTextEdit()
         self.topology_text.setReadOnly(True)
+        self.topology_text.setPlainText("No neural network data available.\n\nPlease ensure:\n1. The CoreAI3D server is running\n2. A neural network model has been trained\n3. The API connection is established\n\nClick 'Refresh' to check for data.")
         topology_layout.addWidget(self.topology_text)
 
         layout.addWidget(topology_group)
@@ -2169,6 +2280,7 @@ if __name__ == "__main__":
         else:
             self.activity_text = QTextEdit()
             self.activity_text.setReadOnly(True)
+            self.activity_text.setPlainText("No neural network activity data available.\n\nMatplotlib is not available for visualization.\n\nPlease ensure:\n1. The CoreAI3D server is running\n2. A neural network model has been trained\n3. The API connection is established\n\nClick 'Refresh' to check for data.")
             activity_layout.addWidget(self.activity_text)
 
         layout.addWidget(activity_group)
@@ -2270,26 +2382,53 @@ if __name__ == "__main__":
     def initialize_client(self):
         """Initialize CoreAI3D client"""
         try:
-            if not self.config.api_url or not self.config.api_key:
-                logger.warning("API configuration incomplete")
-                return False
+            logger.info("Starting client initialization...")
+            logger.info(f"API URL: {self.config.api_url}")
+            logger.info(f"WS URL: {self.config.ws_url}")
+            logger.info(f"API Key configured: {bool(self.config.api_key)}")
 
+            # Allow initialization even without API key for offline mode
+            if not self.config.api_url:
+                logger.warning("API URL not configured - client will work in offline mode")
+                self.config.api_url = "http://localhost:8080/api/v1"  # Set default
+
+            if not self.config.api_key:
+                logger.warning("API key not configured - using empty key (may cause authentication failures)")
+                self.config.api_key = ""  # Allow empty key
+
+            logger.info("Creating CoreAI3DClient instance...")
             self.client = CoreAI3DClient({
                 'base_url': self.config.api_url,
                 'ws_url': self.config.ws_url,
                 'api_key': self.config.api_key,
                 'timeout': self.config.connection_timeout,
                 'max_connections': self.config.max_connections,
-                'retry_attempts': self.config.retry_attempts
+                'retry_attempts': self.config.retry_attempts,
+                'debug': True  # Enable debug logging
             })
 
+            logger.info("CoreAI3DClient instance created successfully")
+
+            # Register chat response handler
+            self.chat_response_handler = self._handle_chat_response
+            self.client.on('chat_response', self.chat_response_handler)
+            logger.info("Chat response handler registered")
+
+            logger.info("Creating CodeDebugger...")
             self.debugger = CodeDebugger(self.client)
-            logger.info("CoreAI3D client initialized")
+            logger.info("CodeDebugger created successfully")
+            logger.info("CoreAI3D client initialized successfully")
 
             return True
 
+        except ImportError as e:
+            logger.error(f"Import error during client initialization: {str(e)}")
+            logger.error("Make sure coreai3d_client.py is in the same directory or PYTHONPATH")
+            return False
         except Exception as e:
             logger.error(f"Failed to initialize client: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     # Event handlers
@@ -2346,9 +2485,12 @@ if __name__ == "__main__":
                 return
 
         try:
-            # Run health check in background
+            # Run health check using async manager
             async def check_health():
                 result = await self.client.health_check()
+                return result
+
+            def on_success(result):
                 if result.success:
                     self.status_bar.showMessage("Connection test successful")
                     QMessageBox.information(self, "Connection Test", "API connection successful")
@@ -2356,8 +2498,10 @@ if __name__ == "__main__":
                     self.status_bar.showMessage("Connection test failed")
                     QMessageBox.warning(self, "Connection Test", "API connection failed")
 
-            # Run async task
-            asyncio.create_task(check_health())
+            def on_error(error_msg):
+                QMessageBox.warning(self, "Connection Error", error_msg)
+
+            self.async_manager.run_async_task(check_health(), on_success, on_error)
 
         except Exception as e:
             QMessageBox.warning(self, "Connection Error", str(e))
@@ -2410,11 +2554,17 @@ if __name__ == "__main__":
         try:
             async def health_check():
                 result = await self.client.health_check()
+                return result
+
+            def on_success(result):
                 if not result.success:
                     self.status_bar.showMessage("System health check failed")
                     logger.warning("System health check failed")
 
-            asyncio.create_task(health_check())
+            def on_error(error_msg):
+                logger.error(f"Health check error: {error_msg}")
+
+            self.async_manager.run_async_task(health_check(), on_success, on_error)
 
         except Exception as e:
             logger.error(f"Health check error: {str(e)}")
@@ -2475,7 +2625,6 @@ if __name__ == "__main__":
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 dataset_path = os.path.join(self.config.data_dir, dataset_name)
-                import shutil
                 shutil.rmtree(dataset_path)
 
                 del self.training_manager.datasets[dataset_name]
@@ -2490,7 +2639,7 @@ if __name__ == "__main__":
                 QMessageBox.warning(self, "Error", f"Failed to delete dataset: {str(e)}")
 
     def add_file_to_dataset(self):
-        """Add file to selected dataset"""
+        """Add file(s) or directory to selected dataset"""
         current_item = self.dataset_list.currentItem()
         if not current_item:
             QMessageBox.warning(self, "No Selection", "Please select a dataset first")
@@ -2498,15 +2647,87 @@ if __name__ == "__main__":
 
         dataset_name = current_item.text()
 
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select File",
-            "", "All Files (*)"
-        )
+        # Create dialog for file/directory selection
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Select Files or Directory")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)  # Allow multiple files
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, False)  # Allow both files and directories
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)  # Use Qt dialog for better control
 
-        if file_path:
-            success = self.training_manager.add_file_to_dataset(dataset_name, file_path)
-            if not success:
-                QMessageBox.warning(self, "Error", "Failed to add file to dataset")
+        # Add directory selection option
+        select_dir_btn = QPushButton("Select Directory")
+        select_dir_btn.clicked.connect(lambda: self._select_directory_for_dataset(dialog, dataset_name))
+        dialog.layout().addWidget(select_dir_btn)
+
+        # Show dialog and get selected files
+        if dialog.exec():
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                self._process_selected_files(dataset_name, selected_files)
+
+    def _select_directory_for_dataset(self, dialog, dataset_name):
+        """Handle directory selection"""
+        directory = QFileDialog.getExistingDirectory(self, "Select Directory")
+        if directory:
+            # Close the file dialog
+            dialog.reject()
+            # Process the directory
+            self._process_selected_directory(dataset_name, directory)
+
+    def _process_selected_files(self, dataset_name, file_paths):
+        """Process multiple selected files"""
+        added_count = 0
+        failed_count = 0
+
+        for file_path in file_paths:
+            if os.path.isfile(file_path):
+                success = self.training_manager.add_file_to_dataset(dataset_name, file_path)
+                if success:
+                    added_count += 1
+                else:
+                    failed_count += 1
+                    logger.error(f"Failed to add file: {file_path}")
+
+        # Show results
+        if added_count > 0:
+            self.status_bar.showMessage(f"Added {added_count} file(s) to {dataset_name}")
+            if failed_count > 0:
+                QMessageBox.warning(self, "Partial Success",
+                                  f"Added {added_count} file(s), failed to add {failed_count} file(s)")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to add any files to dataset")
+
+    def _process_selected_directory(self, dataset_name, directory_path):
+        """Process selected directory recursively"""
+        try:
+            added_count = 0
+            failed_count = 0
+
+            # Walk through directory recursively
+            for root, dirs, files in os.walk(directory_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    try:
+                        success = self.training_manager.add_file_to_dataset(dataset_name, file_path)
+                        if success:
+                            added_count += 1
+                        else:
+                            failed_count += 1
+                    except Exception as e:
+                        logger.error(f"Error adding file {file_path}: {str(e)}")
+                        failed_count += 1
+
+            # Show results
+            if added_count > 0:
+                self.status_bar.showMessage(f"Added {added_count} file(s) from directory to {dataset_name}")
+                if failed_count > 0:
+                    QMessageBox.warning(self, "Partial Success",
+                                      f"Added {added_count} file(s), failed to add {failed_count} file(s)")
+            else:
+                QMessageBox.warning(self, "Error", "No files were added from the selected directory")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to process directory: {str(e)}")
 
     def remove_file_from_dataset(self):
         """Remove file from selected dataset"""
@@ -2562,9 +2783,15 @@ if __name__ == "__main__":
             if test_type == "API Connectivity":
                 async def api_test():
                     result = await self.debugger.run_api_test("health_check")
+                    return result
+
+                def on_success(result):
                     self.add_test_result(result)
 
-                asyncio.create_task(api_test())
+                def on_error(error_msg):
+                    QMessageBox.warning(self, "Test Error", f"API test failed: {error_msg}")
+
+                self.async_manager.run_async_task(api_test(), on_success, on_error)
 
             elif test_type == "Module Functionality":
                 module_name = self.test_module_combo.currentText().split()[0].lower()
@@ -2572,9 +2799,15 @@ if __name__ == "__main__":
 
                 async def module_test():
                     result = await self.debugger.run_module_test(module_name, test_data)
+                    return result
+
+                def on_success(result):
                     self.add_test_result(result)
 
-                asyncio.create_task(module_test())
+                def on_error(error_msg):
+                    QMessageBox.warning(self, "Test Error", f"Module test failed: {error_msg}")
+
+                self.async_manager.run_async_task(module_test(), on_success, on_error)
 
             else:
                 QMessageBox.information(self, "Test", f"Test type '{test_type}' not implemented yet")
@@ -2681,6 +2914,7 @@ if __name__ == "__main__":
                     ("module_status", {})
                 ]
 
+                results = []
                 for endpoint, params in endpoints:
                     try:
                         if endpoint == "health_check":
@@ -2690,13 +2924,25 @@ if __name__ == "__main__":
                         elif endpoint == "module_status":
                             result = await self.client.get_module_status()
 
-                        message = f"{endpoint}: {'OK' if result.success else 'FAILED'}"
-                        self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+                        results.append((endpoint, result.success, None))
 
                     except Exception as e:
-                        self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {endpoint}: ERROR - {str(e)}")
+                        results.append((endpoint, False, str(e)))
 
-            asyncio.create_task(debug_api())
+                return results
+
+            def on_success(results):
+                for endpoint, success, error in results:
+                    if error:
+                        message = f"{endpoint}: ERROR - {error}"
+                    else:
+                        message = f"{endpoint}: {'OK' if success else 'FAILED'}"
+                    self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+
+            def on_error(error_msg):
+                self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Debug API Error: {error_msg}")
+
+            self.async_manager.run_async_task(debug_api(), on_success, on_error)
 
         except Exception as e:
             QMessageBox.warning(self, "Debug Error", str(e))
@@ -2812,24 +3058,54 @@ if __name__ == "__main__":
         self.chat_history.append(f"You: {message}")
         self.chat_input.clear()
 
+        # Add debug logging
+        logger.info(f"Sending chat message: {message}")
+        logger.info(f"Client connected: {self.client.is_connected}")
+
         try:
             async def send_message():
-                try:
-                    result = await self.client.send_chat_message(message)
+                logger.info("Making HTTP request to send chat message")
+                result = await self.client.send_chat_message(message)
+                logger.info(f"HTTP response received: success={result.success}, status={result.status_code}")
+                if result.data:
+                    logger.info(f"Response data: {result.data}")
+                return result
 
-                    if result.success:
-                        response = result.data.get('response', 'No response')
-                        self.chat_history.append(f"AI: {response}")
-                    else:
-                        self.chat_history.append(f"Error: {result.data.get('error', 'Unknown error')}")
+            def on_success(result):
+                logger.info("HTTP request successful, waiting for WebSocket response")
+                if result.success:
+                    # HTTP request succeeded, but actual response comes via WebSocket
+                    # The response will be handled by the registered chat response handler
+                    pass
+                else:
+                    error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                    logger.error(f"HTTP request failed: {error_msg}")
+                    self.chat_history.append(f"Error: {error_msg}")
 
-                except Exception as e:
-                    self.chat_history.append(f"Error: {str(e)}")
+            def on_error(error_msg):
+                logger.error(f"Async task error: {error_msg}")
+                self.chat_history.append(f"Error: {error_msg}")
 
-            asyncio.create_task(send_message())
+            self.async_manager.run_async_task(send_message(), on_success, on_error)
 
         except Exception as e:
+            logger.error(f"Exception in send_chat_message: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to send message: {str(e)}")
+
+    def _handle_chat_response(self, data: Dict[str, Any]):
+        """Handle chat response from WebSocket"""
+        logger.info(f"Handling chat response: {data}")
+        content = data.get('content', '')
+        if content:
+            logger.info(f"Adding chat response to history: {content}")
+            self.chat_history.append(f"AI: {content}")
+        else:
+            logger.warning("Received chat response with empty content")
+
+    def _handle_chat_error(self, error_msg: str):
+        """Handle chat error"""
+        logger.error(f"Chat error: {error_msg}")
+        self.chat_history.append(f"Error: {error_msg}")
 
     def clear_chat_history(self):
         """Clear chat history"""
@@ -2837,107 +3113,124 @@ if __name__ == "__main__":
 
     def load_sample_models(self):
         """Load all available models from the CoreAI3D system"""
-        # Vision Models - for image processing, classification, and analysis
-        vision_models = [
-            {"name": "ResNet-50", "type": "Vision", "size": "98 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "YOLOv5-Small", "type": "Vision", "size": "14 MB", "version": "6.1.0", "status": "Available"},
-            {"name": "EfficientNet-B0", "type": "Vision", "size": "20 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "MobileNetV3-Small", "type": "Vision", "size": "5.4 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "FaceNet", "type": "Vision", "size": "23 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Tesseract-OCR", "type": "Vision", "size": "8.2 MB", "version": "5.3.0", "status": "Available"},
-            {"name": "Mask-RCNN", "type": "Vision", "size": "170 MB", "version": "2.1.0", "status": "Available"},
-            {"name": "SSD-MobileNet", "type": "Vision", "size": "24 MB", "version": "1.0.0", "status": "Available"}
-        ]
+        try:
+            # Vision Models - for image processing, classification, and analysis
+            vision_models = [
+                {"name": "ResNet-50", "type": "Vision", "size": "98 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "YOLOv5-Small", "type": "Vision", "size": "14 MB", "version": "6.1.0", "status": "Available"},
+                {"name": "EfficientNet-B0", "type": "Vision", "size": "20 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "MobileNetV3-Small", "type": "Vision", "size": "5.4 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "FaceNet", "type": "Vision", "size": "23 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Tesseract-OCR", "type": "Vision", "size": "8.2 MB", "version": "5.3.0", "status": "Available"},
+                {"name": "Mask-RCNN", "type": "Vision", "size": "170 MB", "version": "2.1.0", "status": "Available"},
+                {"name": "SSD-MobileNet", "type": "Vision", "size": "24 MB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Audio Models - for speech processing and audio analysis
-        audio_models = [
-            {"name": "Whisper-Tiny", "type": "Audio", "size": "39 MB", "version": "1.2.0", "status": "Available"},
-            {"name": "Whisper-Base", "type": "Audio", "size": "74 MB", "version": "1.2.0", "status": "Available"},
-            {"name": "Whisper-Small", "type": "Audio", "size": "244 MB", "version": "1.2.0", "status": "Available"},
-            {"name": "Tacotron2", "type": "Audio", "size": "113 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "WaveNet", "type": "Audio", "size": "4.7 GB", "version": "1.0.0", "status": "Available"},
-            {"name": "DeepSpeech", "type": "Audio", "size": "190 MB", "version": "0.9.3", "status": "Available"},
-            {"name": "SpeakerNet", "type": "Audio", "size": "16 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "AudioNet", "type": "Audio", "size": "8.5 MB", "version": "1.0.0", "status": "Available"}
-        ]
+            # Audio Models - for speech processing and audio analysis
+            audio_models = [
+                {"name": "Whisper-Tiny", "type": "Audio", "size": "39 MB", "version": "1.2.0", "status": "Available"},
+                {"name": "Whisper-Base", "type": "Audio", "size": "74 MB", "version": "1.2.0", "status": "Available"},
+                {"name": "Whisper-Small", "type": "Audio", "size": "244 MB", "version": "1.2.0", "status": "Available"},
+                {"name": "Tacotron2", "type": "Audio", "size": "113 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "WaveNet", "type": "Audio", "size": "4.7 GB", "version": "1.0.0", "status": "Available"},
+                {"name": "DeepSpeech", "type": "Audio", "size": "190 MB", "version": "0.9.3", "status": "Available"},
+                {"name": "SpeakerNet", "type": "Audio", "size": "16 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "AudioNet", "type": "Audio", "size": "8.5 MB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Text/Language Models - for natural language processing
-        text_models = [
-            {"name": "BERT-Base", "type": "Text", "size": "420 MB", "version": "2.1.0", "status": "Available"},
-            {"name": "GPT-2 Small", "type": "Text", "size": "548 MB", "version": "1.5.0", "status": "Available"},
-            {"name": "DistilBERT", "type": "Text", "size": "66 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "RoBERTa-Base", "type": "Text", "size": "476 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "ALBERT-Base", "type": "Text", "size": "43 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "XLNet-Base", "type": "Text", "size": "446 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "ELECTRA-Small", "type": "Text", "size": "13 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Sentence-BERT", "type": "Text", "size": "218 MB", "version": "1.0.0", "status": "Available"}
-        ]
+            # Text/Language Models - for natural language processing
+            text_models = [
+                {"name": "BERT-Base", "type": "Text", "size": "420 MB", "version": "2.1.0", "status": "Available"},
+                {"name": "GPT-2 Small", "type": "Text", "size": "548 MB", "version": "1.5.0", "status": "Available"},
+                {"name": "DistilBERT", "type": "Text", "size": "66 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "RoBERTa-Base", "type": "Text", "size": "476 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "ALBERT-Base", "type": "Text", "size": "43 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "XLNet-Base", "type": "Text", "size": "446 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "ELECTRA-Small", "type": "Text", "size": "13 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Sentence-BERT", "type": "Text", "size": "218 MB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Multimodal Models - combining vision and text
-        multimodal_models = [
-            {"name": "CLIP-ViT", "type": "Multimodal", "size": "1.2 GB", "version": "1.0.1", "status": "Available"},
-            {"name": "CLIP-RN50", "type": "Multimodal", "size": "1.0 GB", "version": "1.0.1", "status": "Available"},
-            {"name": "VisualBERT", "type": "Multimodal", "size": "1.1 GB", "version": "1.0.0", "status": "Available"},
-            {"name": "ViLBERT", "type": "Multimodal", "size": "1.3 GB", "version": "1.0.0", "status": "Available"},
-            {"name": "LXMERT", "type": "Multimodal", "size": "1.8 GB", "version": "1.0.0", "status": "Available"},
-            {"name": "Oscar", "type": "Multimodal", "size": "1.4 GB", "version": "1.0.0", "status": "Available"}
-        ]
+            # Multimodal Models - combining vision and text
+            multimodal_models = [
+                {"name": "CLIP-ViT", "type": "Multimodal", "size": "1.2 GB", "version": "1.0.1", "status": "Available"},
+                {"name": "CLIP-RN50", "type": "Multimodal", "size": "1.0 GB", "version": "1.0.1", "status": "Available"},
+                {"name": "VisualBERT", "type": "Multimodal", "size": "1.1 GB", "version": "1.0.0", "status": "Available"},
+                {"name": "ViLBERT", "type": "Multimodal", "size": "1.3 GB", "version": "1.0.0", "status": "Available"},
+                {"name": "LXMERT", "type": "Multimodal", "size": "1.8 GB", "version": "1.0.0", "status": "Available"},
+                {"name": "Oscar", "type": "Multimodal", "size": "1.4 GB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Neural Network Models - custom trained models from the system
-        neural_models = [
-            {"name": "CoreAI3D-NN-1", "type": "Neural", "size": "2.3 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "CoreAI3D-NN-2", "type": "Neural", "size": "5.7 MB", "version": "1.1.0", "status": "Available"},
-            {"name": "CoreAI3D-NN-3", "type": "Neural", "size": "12 MB", "version": "1.2.0", "status": "Available"},
-            {"name": "CoreAI3D-NN-4", "type": "Neural", "size": "8.9 MB", "version": "1.0.0", "status": "Available"}
-        ]
+            # Neural Network Models - custom trained models from the system
+            neural_models = [
+                {"name": "CoreAI3D-NN-1", "type": "Neural", "size": "2.3 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "CoreAI3D-NN-2", "type": "Neural", "size": "5.7 MB", "version": "1.1.0", "status": "Available"},
+                {"name": "CoreAI3D-NN-3", "type": "Neural", "size": "12 MB", "version": "1.2.0", "status": "Available"},
+                {"name": "CoreAI3D-NN-4", "type": "Neural", "size": "8.9 MB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Math Models - for mathematical computations and optimization
-        math_models = [
-            {"name": "MathSolver-NN", "type": "Math", "size": "15 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Optimization-Net", "type": "Math", "size": "8.2 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Statistics-Engine", "type": "Math", "size": "6.1 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Symbolic-Math", "type": "Math", "size": "22 MB", "version": "1.0.0", "status": "Available"}
-        ]
+            # Math Models - for mathematical computations and optimization
+            math_models = [
+                {"name": "MathSolver-NN", "type": "Math", "size": "15 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Optimization-Net", "type": "Math", "size": "8.2 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Statistics-Engine", "type": "Math", "size": "6.1 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Symbolic-Math", "type": "Math", "size": "22 MB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Web Models - for web content processing and analysis
-        web_models = [
-            {"name": "WebScraper-NN", "type": "Web", "size": "45 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Sentiment-Analyzer", "type": "Web", "size": "18 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "Content-Classifier", "type": "Web", "size": "27 MB", "version": "1.0.0", "status": "Available"},
-            {"name": "News-Aggregator", "type": "Web", "size": "33 MB", "version": "1.0.0", "status": "Available"}
-        ]
+            # Web Models - for web content processing and analysis
+            web_models = [
+                {"name": "WebScraper-NN", "type": "Web", "size": "45 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Sentiment-Analyzer", "type": "Web", "size": "18 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "Content-Classifier", "type": "Web", "size": "27 MB", "version": "1.0.0", "status": "Available"},
+                {"name": "News-Aggregator", "type": "Web", "size": "33 MB", "version": "1.0.0", "status": "Available"}
+            ]
 
-        # Combine all models
-        all_models = (vision_models + audio_models + text_models +
-                     multimodal_models + neural_models + math_models + web_models)
+            # Combine all models
+            all_models = (vision_models + audio_models + text_models +
+                          multimodal_models + neural_models + math_models + web_models)
 
-        self.model_table.setRowCount(len(all_models))
-        for row, model in enumerate(all_models):
-            self.model_table.setItem(row, 0, QTableWidgetItem(model["name"]))
-            self.model_table.setItem(row, 1, QTableWidgetItem(model["type"]))
-            self.model_table.setItem(row, 2, QTableWidgetItem(model["size"]))
-            self.model_table.setItem(row, 3, QTableWidgetItem(model["version"]))
-            self.model_table.setItem(row, 4, QTableWidgetItem(model["status"]))
+            self.model_table.setRowCount(len(all_models))
+            for row, model in enumerate(all_models):
+                self.model_table.setItem(row, 0, QTableWidgetItem(model["name"]))
+                self.model_table.setItem(row, 1, QTableWidgetItem(model["type"]))
+                self.model_table.setItem(row, 2, QTableWidgetItem(model["size"]))
+                self.model_table.setItem(row, 3, QTableWidgetItem(model["version"]))
+                status_item = QTableWidgetItem(model["status"])
+                self.model_table.setItem(row, 4, status_item)
+
+                # Color code status
+                if model["status"] == "Available":
+                    status_item.setBackground(QColor(144, 238, 144))  # Light green
+                elif model["status"] == "Downloaded":
+                    status_item.setBackground(QColor(173, 216, 230))  # Light blue
+                elif model["status"] == "Downloading":
+                    status_item.setBackground(QColor(255, 255, 224))  # Light yellow
+                elif model["status"] == "Error":
+                    status_item.setBackground(QColor(255, 182, 193))  # Light red
+        except Exception as e:
+            logger.error(f"Error loading sample models: {str(e)}")
 
     def search_models(self):
         """Search models based on input criteria"""
-        search_text = self.model_search_input.text().lower()
-        model_type = self.model_type_combo.currentText()
+        try:
+            search_text = self.model_search_input.text().lower()
+            model_type = self.model_type_combo.currentText()
 
-        for row in range(self.model_table.rowCount()):
-            model_name = self.model_table.item(row, 0).text().lower()
-            model_type_cell = self.model_table.item(row, 1).text()
+            for row in range(self.model_table.rowCount()):
+                model_name = self.model_table.item(row, 0).text().lower()
+                model_type_cell = self.model_table.item(row, 1).text()
 
-            # Check search text match
-            text_match = search_text in model_name if search_text else True
+                # Check search text match
+                text_match = search_text in model_name if search_text else True
 
-            # Check type filter
-            type_match = model_type == "All Types" or model_type == model_type_cell
+                # Check type filter
+                type_match = model_type == "All Types" or model_type == model_type_cell
 
-            # Show/hide row based on filters
-            self.model_table.setRowHidden(row, not (text_match and type_match))
+                # Show/hide row based on filters
+                self.model_table.setRowHidden(row, not (text_match and type_match))
 
-        self.status_bar.showMessage(f"Filtered models by '{search_text}' and type '{model_type}'")
+            self.status_bar.showMessage(f"Filtered models by '{search_text}' and type '{model_type}'")
+        except Exception as e:
+            logger.error(f"Error searching models: {str(e)}")
 
     def refresh_models(self):
         """Refresh the model list"""
@@ -2946,19 +3239,21 @@ if __name__ == "__main__":
             self.load_sample_models()
             self.status_bar.showMessage("Model list refreshed")
         except Exception as e:
+            logger.error(f"Error refreshing models: {str(e)}")
             QMessageBox.warning(self, "Refresh Error", f"Failed to refresh models: {str(e)}")
 
     def on_model_selected(self):
         """Handle model selection"""
-        current_row = self.model_table.currentRow()
-        if current_row >= 0:
-            model_name = self.model_table.item(current_row, 0).text()
-            model_type = self.model_table.item(current_row, 1).text()
-            model_size = self.model_table.item(current_row, 2).text()
-            model_version = self.model_table.item(current_row, 3).text()
-            model_status = self.model_table.item(current_row, 4).text()
+        try:
+            current_row = self.model_table.currentRow()
+            if current_row >= 0:
+                model_name = self.model_table.item(current_row, 0).text()
+                model_type = self.model_table.item(current_row, 1).text()
+                model_size = self.model_table.item(current_row, 2).text()
+                model_version = self.model_table.item(current_row, 3).text()
+                model_status = self.model_table.item(current_row, 4).text()
 
-            info_text = f"""Model: {model_name}
+                info_text = f"""Model: {model_name}
 Type: {model_type}
 Size: {model_size}
 Version: {model_version}
@@ -2968,24 +3263,47 @@ Description: This is a sample {model_type.lower()} model for demonstration purpo
 In a real implementation, this would contain detailed information about the model's
 capabilities, training data, performance metrics, and usage instructions."""
 
-            self.model_info.setPlainText(info_text)
+                self.model_info.setPlainText(info_text)
+        except Exception as e:
+            logger.error(f"Error handling model selection: {str(e)}")
 
     def download_selected_model(self):
         """Download the selected model"""
+        logger.info("Starting model download process")
         current_row = self.model_table.currentRow()
         if current_row < 0:
             QMessageBox.warning(self, "No Selection", "Please select a model to download")
             return
 
         model_name = self.model_table.item(current_row, 0).text()
+        model_type = self.model_table.item(current_row, 1).text()
         model_status = self.model_table.item(current_row, 4).text()
+
+        logger.info(f"Selected model: {model_name}, type: {model_type}, status: {model_status}")
 
         if model_status == "Downloading":
             QMessageBox.information(self, "Already Downloading", f"{model_name} is already being downloaded")
             return
 
+        # Determine download source based on model type or user selection
+        selected_source = self.download_source_combo.currentText().lower()
+        if selected_source == "auto":
+            if "Kaggle" in model_name or self._is_kaggle_model(model_name):
+                download_source = "kaggle"
+            elif "HuggingFace" in model_name or "BERT" in model_name or "GPT" in model_name or "RoBERTa" in model_name:
+                download_source = "huggingface"
+            else:
+                # Default to local download
+                download_source = "local"
+        else:
+            download_source = selected_source
+
+        logger.info(f"Download source determined: {download_source}")
+
         # Update status to downloading
-        self.model_table.item(current_row, 4).setText("Downloading")
+        status_item = QTableWidgetItem("Downloading")
+        status_item.setBackground(QColor(255, 255, 224))  # Light yellow
+        self.model_table.setItem(current_row, 4, status_item)
 
         # Show progress
         self.download_progress.setVisible(True)
@@ -2993,30 +3311,48 @@ capabilities, training data, performance metrics, and usage instructions."""
         self.download_progress.setValue(0)
         self.download_status_label.setText(f"Downloading {model_name}...")
 
-        # Simulate download progress (in real implementation, this would be async)
-        self.download_timer = QTimer()
-        self.download_timer.timeout.connect(lambda: self.update_download_progress(current_row, model_name))
-        self.download_timer.start(500)  # Update every 500ms
+        logger.info(f"Progress bar initialized for {model_name}")
+
+        # Start actual download based on source
+        if download_source == "kaggle":
+            self._download_from_kaggle(current_row, model_name)
+        elif download_source == "huggingface":
+            self._download_from_huggingface(current_row, model_name)
+        else:
+            # Simulate download progress for local models
+            logger.info(f"Starting local download simulation for {model_name}")
+            self.download_timer = QTimer()
+            self.download_timer.timeout.connect(lambda: self.update_download_progress(current_row, model_name))
+            self.download_timer.start(500)
+            logger.debug("Download timer started")
 
     def update_download_progress(self, row, model_name):
         """Update download progress"""
-        current_value = self.download_progress.value()
-        if current_value < 100:
-            self.download_progress.setValue(current_value + 10)
-            self.download_status_label.setText(f"Downloading {model_name}... {current_value + 10}%")
-        else:
-            # Download complete
-            self.download_timer.stop()
-            self.model_table.item(row, 4).setText("Downloaded")
-            self.download_progress.setVisible(False)
-            self.download_status_label.setText(f"{model_name} downloaded successfully")
-            self.status_bar.showMessage(f"Model {model_name} downloaded successfully")
+        try:
+            logger.debug(f"Updating download progress for {model_name}, row {row}")
+            current_value = self.download_progress.value()
+            logger.debug(f"Current progress value: {current_value}")
 
-            # Reset progress for next download
-            self.download_progress.setValue(0)
+            if current_value < 100:
+                new_value = current_value + 10
+                self.download_progress.setValue(new_value)
+                self.download_status_label.setText(f"Downloading {model_name}... {new_value}%")
+                logger.debug(f"Progress updated to {new_value}%")
+            else:
+                # Download complete
+                logger.info(f"Download completed for {model_name}")
+                if hasattr(self, 'download_timer') and self.download_timer.isActive():
+                    self.download_timer.stop()
+                    logger.debug("Download timer stopped")
+
+                # Update status in main thread
+                QTimer.singleShot(0, lambda: self._update_download_complete(row, model_name))
+        except Exception as e:
+            logger.error(f"Error updating download progress: {str(e)}")
 
     def cancel_model_download(self):
         """Cancel the current model download"""
+        logger.info("Cancelling model download")
         current_row = self.model_table.currentRow()
         if current_row < 0:
             QMessageBox.warning(self, "No Selection", "Please select a downloading model to cancel")
@@ -3025,19 +3361,253 @@ capabilities, training data, performance metrics, and usage instructions."""
         model_name = self.model_table.item(current_row, 0).text()
         model_status = self.model_table.item(current_row, 4).text()
 
+        logger.info(f"Cancelling download for {model_name}, status: {model_status}")
+
         if model_status != "Downloading":
             QMessageBox.warning(self, "Not Downloading", f"{model_name} is not currently downloading")
             return
 
         # Stop download timer if running
         if hasattr(self, 'download_timer') and self.download_timer.isActive():
+            logger.debug("Stopping download timer")
             self.download_timer.stop()
 
-        # Reset status
-        self.model_table.item(current_row, 4).setText("Available")
-        self.download_progress.setVisible(False)
-        self.download_status_label.setText("Download cancelled")
-        self.status_bar.showMessage(f"Download of {model_name} cancelled")
+        # Cancel async downloads if any
+        if hasattr(self, 'current_download_task'):
+            # In a real implementation, this would cancel the async task
+            logger.debug("Cancelling async download task")
+            pass
+
+        # Reset status in main thread
+        QTimer.singleShot(0, lambda: self._reset_download_status(current_row, model_name))
+
+    def _reset_download_status(self, row, model_name):
+        """Reset download status in main thread"""
+        try:
+            logger.info(f"Resetting download status for {model_name}")
+
+            # Reset status
+            status_item = QTableWidgetItem("Available")
+            status_item.setBackground(QColor(144, 238, 144))  # Light green
+            self.model_table.setItem(row, 4, status_item)
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText("Download cancelled")
+            self.status_bar.showMessage(f"Download of {model_name} cancelled")
+
+            logger.debug("Download status reset completed")
+        except Exception as e:
+            logger.error(f"Error resetting download status: {str(e)}")
+
+    def _is_kaggle_model(self, model_name):
+        """Check if model is from Kaggle"""
+        # Simple heuristic - in real implementation, this would check a database
+        kaggle_models = [
+            "ResNet-50", "YOLOv5", "EfficientNet", "MobileNetV3",
+            "FaceNet", "Mask-RCNN", "SSD-MobileNet"
+        ]
+        return any(kaggle_model in model_name for kaggle_model in kaggle_models)
+
+    def _download_from_kaggle(self, row, model_name):
+        """Download model from Kaggle"""
+        try:
+            import subprocess
+            import threading
+
+            # Check if kaggle CLI is installed
+            try:
+                subprocess.run(['kaggle', '--version'], capture_output=True, check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                self._download_error(row, model_name, "Kaggle CLI not installed. Please install with: pip install kaggle")
+                return
+
+            # Map model names to Kaggle dataset paths
+            kaggle_datasets = {
+                "ResNet-50": "pytorch/resnet50",
+                "YOLOv5-Small": "ultralytics/yolov5",
+                "EfficientNet-B0": "pytorch/vision",
+                "MobileNetV3-Small": "pytorch/vision",
+                "FaceNet": "timesler/facenet-pytorch",
+                "Tesseract-OCR": "tesseract-ocr/tesseract",
+                "Mask-RCNN": "matterport/mask-rcnn",
+                "SSD-MobileNet": "tensorflow/models"
+            }
+
+            dataset_path = kaggle_datasets.get(model_name, model_name.lower().replace('-', '').replace('_', ''))
+
+            def download_worker():
+                try:
+                    # Create models directory if it doesn't exist
+                    models_dir = os.path.join(self.config.data_dir, "models")
+                    os.makedirs(models_dir, exist_ok=True)
+
+                    # Download command
+                    cmd = ['kaggle', 'datasets', 'download', dataset_path, '-p', models_dir]
+
+                    # Run download
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+
+                    # Monitor progress (simplified)
+                    while process.poll() is None:
+                        time.sleep(1)
+
+                    if process.returncode == 0:
+                        QTimer.singleShot(0, lambda: self._download_success(row, model_name))
+                    else:
+                        stderr = process.stderr.read() if process.stderr else ""
+                        error_msg = f"Kaggle download failed: {stderr}"
+                        QTimer.singleShot(0, lambda: self._download_error(row, model_name, error_msg))
+
+                except Exception as e:
+                    QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+
+            # Start download in background thread
+            threading.Thread(target=download_worker, daemon=True).start()
+
+        except Exception as e:
+            self._download_error(row, model_name, f"Failed to start Kaggle download: {str(e)}")
+
+    def _download_from_huggingface(self, row, model_name):
+        """Download model from Hugging Face"""
+        try:
+            from huggingface_hub import snapshot_download
+            import threading
+
+            # Map model names to HuggingFace model IDs
+            hf_models = {
+                "BERT-Base": "bert-base-uncased",
+                "GPT-2 Small": "gpt2",
+                "DistilBERT": "distilbert-base-uncased",
+                "RoBERTa-Base": "roberta-base",
+                "ALBERT-Base": "albert-base-v2",
+                "XLNet-Base": "xlnet-base-cased",
+                "ELECTRA-Small": "google/electra-small-discriminator",
+                "Sentence-BERT": "sentence-transformers/all-MiniLM-L6-v2",
+                "CLIP-ViT": "openai/clip-vit-base-patch32",
+                "CLIP-RN50": "openai/clip-vit-base-patch32",
+                "VisualBERT": "uclanlp/visualbert-vqa-coco-pre",
+                "ViLBERT": "uclanlp/visualbert-vqa",
+                "LXMERT": "unc-nlp/lxmert-base-uncased",
+                "Oscar": "microsoft/oscar-base-vocab"
+            }
+
+            model_id = hf_models.get(model_name, model_name.lower().replace(' ', '-'))
+
+            def download_worker():
+                try:
+                    # Create models directory
+                    models_dir = os.path.join(self.config.data_dir, "models", model_name.replace(' ', '_'))
+                    os.makedirs(models_dir, exist_ok=True)
+
+                    # Download with progress callback
+                    def progress_callback(size, total):
+                        if total > 0:
+                            progress = int((size / total) * 100)
+                            QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, progress))
+
+                    # Download model
+                    snapshot_download(
+                        repo_id=model_id,
+                        local_dir=models_dir,
+                        local_dir_use_symlinks=False
+                    )
+
+                    QTimer.singleShot(0, lambda: self._download_success(row, model_name))
+
+                except ImportError:
+                    QTimer.singleShot(0, lambda: self._download_error(row, model_name,
+                        "HuggingFace Hub not installed. Install with: pip install huggingface-hub"))
+                except Exception as e:
+                    QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+
+            # Start download in background thread
+            threading.Thread(target=download_worker, daemon=True).start()
+
+        except Exception as e:
+            self._download_error(row, model_name, f"Failed to start HuggingFace download: {str(e)}")
+
+    def _update_kaggle_progress(self, row, model_name):
+        """Update Kaggle download progress"""
+        logger.debug(f"Updating Kaggle progress for {model_name}")
+        # Simplified progress update - in real implementation would parse actual progress
+        current_progress = self.download_progress.value()
+        if current_progress < 90:  # Leave room for final processing
+            new_progress = current_progress + 5
+            self.download_progress.setValue(new_progress)
+            self.download_status_label.setText(f"Downloading {model_name} from Kaggle... {new_progress}%")
+            logger.debug(f"Kaggle progress updated to {new_progress}%")
+
+    def _update_hf_progress(self, row, model_name, progress):
+        """Update HuggingFace download progress"""
+        logger.debug(f"Updating HuggingFace progress for {model_name} to {progress}%")
+        self.download_progress.setValue(progress)
+        self.download_status_label.setText(f"Downloading {model_name} from HuggingFace... {progress}%")
+
+    def _download_success(self, row, model_name):
+        """Handle successful download"""
+        try:
+            logger.info(f"Download success for {model_name}, updating UI in main thread")
+
+            # Update status
+            status_item = QTableWidgetItem("Downloaded")
+            status_item.setBackground(QColor(173, 216, 230))  # Light blue
+            self.model_table.setItem(row, 4, status_item)
+
+            # Hide progress bar
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText(f"{model_name} downloaded successfully")
+            self.status_bar.showMessage(f"Model {model_name} downloaded successfully")
+
+            # Log success
+            self._log_download(f"✓ Successfully downloaded {model_name}")
+
+            # Reset progress for next download
+            self.download_progress.setValue(0)
+            logger.debug("Download success UI update completed")
+        except Exception as e:
+            logger.error(f"Error in download success handler: {str(e)}")
+
+    def _download_error(self, row, model_name, error_msg):
+        """Handle download error"""
+        try:
+            logger.error(f"Download error for {model_name}: {error_msg}")
+
+            # Update status
+            status_item = QTableWidgetItem("Error")
+            status_item.setBackground(QColor(255, 182, 193))  # Light red
+            self.model_table.setItem(row, 4, status_item)
+
+            # Hide progress bar
+            self.download_progress.setVisible(False)
+            self.download_status_label.setText(f"Download failed: {model_name}")
+            self.status_bar.showMessage(f"Download failed for {model_name}")
+
+            # Log error
+            self._log_download(f"✗ Failed to download {model_name}: {error_msg}")
+
+            QMessageBox.warning(self, "Download Error", f"Failed to download {model_name}:\n{error_msg}")
+
+            # Reset progress
+            self.download_progress.setValue(0)
+            logger.debug("Download error UI update completed")
+        except Exception as e:
+            logger.error(f"Error in download error handler: {str(e)}")
+
+    def _log_download(self, message):
+        """Add message to download log"""
+        try:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.download_log.appendPlainText(f"[{timestamp}] {message}")
+        except Exception as e:
+            logger.error(f"Error logging download message: {str(e)}")
+
+    def clear_download_log(self):
+        """Clear the download log"""
+        self.download_log.clear()
 
     def refresh_neural_data(self):
         """Refresh neural network data"""
@@ -3048,40 +3618,46 @@ capabilities, training data, performance metrics, and usage instructions."""
 
         try:
             async def refresh_data():
-                try:
-                    # Get topology
-                    topology_result = await self.client.get_neural_topology()
-                    if topology_result.success:
-                        topology = json.dumps(topology_result.data, indent=2)
-                        self.topology_text.setPlainText(topology)
-                    else:
-                        self.topology_text.setPlainText(f"Error: {topology_result.data.get('error', 'Unknown error')}")
+                # Get topology
+                topology_result = await self.client.get_neural_topology()
+                # Get activity
+                activity_result = await self.client.get_neural_activity()
+                return topology_result, activity_result
 
-                    # Get activity
-                    activity_result = await self.client.get_neural_activity()
-                    if activity_result.success:
-                        if MATPLOTLIB_AVAILABLE:
-                            self.update_neural_plot(activity_result.data)
-                        else:
-                            activity = json.dumps(activity_result.data, indent=2)
-                            self.activity_text.setPlainText(activity)
-                    else:
-                        if MATPLOTLIB_AVAILABLE:
-                            self.activity_canvas.figure.clear()
-                            self.activity_canvas.draw()
-                        else:
-                            self.activity_text.setPlainText(f"Error: {activity_result.data.get('error', 'Unknown error')}")
+            def on_success(results):
+                topology_result, activity_result = results
 
-                except Exception as e:
-                    error_msg = f"Error refreshing neural data: {str(e)}"
-                    self.topology_text.setPlainText(error_msg)
+                # Handle topology
+                if topology_result.success:
+                    topology = json.dumps(topology_result.data, indent=2)
+                    self.topology_text.setPlainText(topology)
+                else:
+                    self.topology_text.setPlainText(f"Error: {topology_result.data.get('error', 'Unknown error')}")
+
+                # Handle activity
+                if activity_result.success:
+                    if MATPLOTLIB_AVAILABLE:
+                        self.update_neural_plot(activity_result.data)
+                    else:
+                        activity = json.dumps(activity_result.data, indent=2)
+                        self.activity_text.setPlainText(activity)
+                else:
                     if MATPLOTLIB_AVAILABLE:
                         self.activity_canvas.figure.clear()
                         self.activity_canvas.draw()
                     else:
-                        self.activity_text.setPlainText(error_msg)
+                        self.activity_text.setPlainText(f"Error: {activity_result.data.get('error', 'Unknown error')}")
 
-            asyncio.create_task(refresh_data())
+            def on_error(error_msg):
+                error_msg_full = f"Error refreshing neural data: {error_msg}"
+                self.topology_text.setPlainText(error_msg_full)
+                if MATPLOTLIB_AVAILABLE:
+                    self.activity_canvas.figure.clear()
+                    self.activity_canvas.draw()
+                else:
+                    self.activity_text.setPlainText(error_msg_full)
+
+            self.async_manager.run_async_task(refresh_data(), on_success, on_error)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to refresh neural data: {str(e)}")
@@ -3114,7 +3690,14 @@ capabilities, training data, performance metrics, and usage instructions."""
 
             # Close client connection
             if self.client:
-                asyncio.create_task(self.client.close())
+                # Use async manager for proper shutdown
+                def close_client():
+                    if hasattr(self.client, 'close'):
+                        asyncio.create_task(self.client.close())
+                self.async_manager.run_async_task(close_client())
+
+            # Shutdown async manager
+            self.async_manager.shutdown()
 
             # Save configuration
             self._save_config()

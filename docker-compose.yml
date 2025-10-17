@@ -98,11 +98,11 @@ services:
     networks:
       - sandbox_network
 
-  centos-sandbox:
+  kali-sandbox:
     build:
       context: .
-      dockerfile: docker/sandbox/Dockerfile.centos
-    container_name: centos_sandbox
+      dockerfile: docker/sandbox/Dockerfile.kali
+    container_name: kali_sandbox
     stdin_open: true
     tty: true
     cap_add:
@@ -116,7 +116,8 @@ services:
       - ./training_data:/training_data
       - ./sandbox_workspace:/workspace
     environment:
-      - SANDBOX_TYPE=centos
+      - DEBIAN_FRONTEND=noninteractive
+      - SANDBOX_TYPE=kali
     networks:
       - sandbox_network
 
@@ -150,7 +151,7 @@ services:
     container_name: ai_trainer
     depends_on:
       - ubuntu-sandbox
-      - centos-sandbox
+      - kali-sandbox
       - alpine-sandbox
     volumes:
       - ./training_data:/training_data

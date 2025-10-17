@@ -9,6 +9,8 @@
 #include "include/Train.hpp"
 #include "include/Database.hpp"
 #include "include/Language.hpp"
+#include "include/APIServer.hpp"
+#include "include/WebSocketServer.hpp"
 
 // External library headers (Boost, cURL, MySQL, etc.)
 // Include specific Boost headers as needed for their functionality.
@@ -71,8 +73,21 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Check for help option first
+    if (vm.count("help")) {
+        std::cout << desc << std::endl;
+        return 0;
+    }
+
     // Retrieve arguments and manually convert numeric types
-    std::string inputFile = vm["input-file"].as<std::string>();
+    std::cout << "DEBUG: About to retrieve inputFile...\n";
+    std::string inputFile;
+    if (vm.count("input-file")) {
+        inputFile = vm["input-file"].as<std::string>();
+        std::cout << "DEBUG: inputFile retrieved: '" << inputFile << "'\n";
+    } else {
+        std::cout << "DEBUG: inputFile not provided, will be empty\n";
+    }
     std::string targetFile = vm["target-file"].as<std::string>();
     std::string datasetName = vm["dataset-name"].as<std::string>();
     std::string delimiter_str = vm["delimiter"].as<std::string>();
@@ -442,6 +457,11 @@ int main(int argc, char* argv[]) {
                 isOfflineMode = (bool_str == "true" || bool_str == "1" || bool_str == "y");
             }
 
+            // In offline mode, force containsText to false to avoid any text processing that might require database connections
+            if (isOfflineMode) {
+                containsText = false;
+            }
+
             if (!isOfflineMode) {
                 if (!vm.count("db-host")) {
                     std::cout << "Enter Hostname of the database: " << std::endl;
@@ -706,14 +726,16 @@ int main(int argc, char* argv[]) {
             // Set inputSize for trainer, as it's needed for CoreAI initialization later in preprocess
             trainer.inputSize = inputSize;
 
-            // If text is involved, initialize Language processor in trainer
-            if (containsText)
-            {
-                int embeddingDimension = 100; // Define or derive
-                std::cout << "[PREDICT MODE] Initializing Language processor...\n";
-                trainer.initializeLanguageProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
-                std::cout << "[PREDICT MODE] Language processor initialized. Note: 'contains-text' is true.\n";
+            // Skip language processor initialization entirely to avoid MySQL errors
+            std::cout << "[PREDICT MODE] Skipping language processor initialization to avoid database connection issues.\n";
+            // Proceed directly to CSV loading
+
+            std::cout << "[PREDICT MODE] Loading data from: " << inputFile << std::endl;
+            if (!trainer.loadCSV(inputFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName)) {
+                std::cerr << "Failed to load CSV data for prediction. Exiting." << std::endl;
+                return 1;
             }
+            std::cout << "[PREDICT MODE] CSV data loaded.\n";
 
             std::cout << "[PREDICT MODE] Loading data from: " << inputFile << std::endl;
             if (!trainer.loadCSV(inputFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName)) {
@@ -747,8 +769,22 @@ int main(int argc, char* argv[]) {
             std::cout << "[PREDICT MODE] Data preprocessing complete. CoreAI initialized.\n";
 
             std::cout << "[PREDICT MODE] Starting model training...\n";
+            auto start_time = std::chrono::high_resolution_clock::now();
             trainer.train(learningRate, epochs);
+            auto end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> training_duration = end_time - start_time;
             std::cout << "[PREDICT MODE] Model training complete.\n";
+
+            // Calculate and display metrics
+            float rmse = trainer.calculateRMSE();
+            float mse = trainer.calculateMSE();
+            float accuracy = trainer.calculateAccuracy();
+
+            std::cout << "\n[PREDICT MODE] Evaluation Metrics:\n";
+            std::cout << "RMSE: " << rmse << "\n";
+            std::cout << "MSE: " << mse << "\n";
+            std::cout << "Accuracy: " << accuracy * 100.0f << "%\n";
+            std::cout << "Training Execution Time: " << training_duration.count() << " seconds\n";
 
             std::cout << "[PREDICT MODE] Printing inputs:\n";
             if (trainer.getCore()) {
@@ -789,21 +825,24 @@ int main(int argc, char* argv[]) {
 
             // Initialize Training object
             std::cout << "[API MODE] Initializing Training object...\n";
-            Training trainer = isOfflineMode
-                ? Training(true)
-                : Training(dbHost, dbPort, dbUser, dbPassword,
+            std::unique_ptr<Training> trainer;
+            if (isOfflineMode) {
+                trainer = std::make_unique<Training>(true);
+            } else {
+                trainer = std::make_unique<Training>(dbHost, dbPort, dbUser, dbPassword,
                     dbSchema, 0, createTables);
+            }
             std::cout << "[API MODE] Training object initialized.\n";
 
 
             // Set training parameters (now that they are members of Training
             // class)
-            trainer.layers = layers;
-            trainer.neurons = neurons;
-            trainer.min = minRange;
-            trainer.max = maxRange;
-            trainer.outputSize = outputSize; // Ensure this is set for backend actions
-            trainer.inputSize = inputSize; // Ensure inputSize is set for CoreAI
+            trainer->layers = layers;
+            trainer->neurons = neurons;
+            trainer->min = minRange;
+            trainer->max = maxRange;
+            trainer->outputSize = outputSize; // Ensure this is set for backend actions
+            trainer->inputSize = inputSize; // Ensure inputSize is set for CoreAI
 
             // Initialize CoreAI via trainer's preprocess if you want it managed there
             // Or create it directly here if API server doesn't use the full training pipeline.
@@ -814,28 +853,47 @@ int main(int argc, char* argv[]) {
             std::cout << "[API MODE] CoreAI instance created.\n";
 
 
-            // Initialize Boost.Asio io_context
-            net::io_context ioc{ 1 }; // One thread for io_context
-            std::cout << "[API MODE] Boost.Asio io_context initialized.\n";
+            // Initialize API Server
+            std::cout << "[API MODE] Initializing API Server...\n";
+            APIServer apiServer("CoreAI3D_API", "0.0.0.0", apiPort);
+            if (!apiServer.initialize()) {
+                std::cerr << "Failed to initialize API server\n";
+                return 1;
+            }
+            std::cout << "[API MODE] API Server initialized.\n";
 
-            // Handle signals to gracefully stop the server
-            net::signal_set signals(ioc, SIGINT, SIGTERM);
-            signals.async_wait([&](beast::error_code const&, int) {
-                std::cout << "\nShutting down server...\n";
-                ioc.stop(); // Stop the io_context
-                });
-            std::cout << "[API MODE] Signal handler set.\n";
+            // Set training module for neural API endpoints
+            apiServer.setTrainingModule(std::move(trainer));
 
-            // Run the io_context in a separate thread
-            std::cout << "[API MODE] Starting server thread...\n";
-            std::thread server_thread([&ioc]() { ioc.run(); }); // Corrected call to ioc.run()
+            // Start API Server
+            std::cout << "[API MODE] Starting API Server...\n";
+            if (!apiServer.start()) {
+                std::cerr << "Failed to start API server\n";
+                return 1;
+            }
+            std::cout << "[API MODE] API Server started.\n";
 
-            std::cout
-                << "CoreAI3D application running and API server active on port "
-                << apiPort << ".\n";
-            std::cout << "Press Ctrl+C to stop the server.\n";
+            // Initialize WebSocket Server
+            std::cout << "[API MODE] Initializing WebSocket Server...\n";
+            WebSocketServer wsServer("CoreAI3D_WebSocket", "0.0.0.0");
+            if (!wsServer.initialize()) {
+                std::cerr << "Failed to initialize WebSocket server\n";
+                return 1;
+            }
+            std::cout << "[API MODE] WebSocket Server initialized.\n";
 
-            server_thread.join(); // Wait for the server thread to finish (e.g., on Ctrl+C)
+            // Start WebSocket Server
+            std::cout << "[API MODE] Starting WebSocket Server...\n";
+            if (!wsServer.start()) {
+                std::cerr << "Failed to start WebSocket server\n";
+                return 1;
+            }
+            std::cout << "[API MODE] WebSocket Server started.\n";
+
+            // Wait for servers to finish (they handle their own signals)
+            while (apiServer.isServerRunning() || wsServer.isServerRunning()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
 
             std::cout << "Application gracefully exited.\n";
         }

@@ -128,7 +128,7 @@ protected:
 
 public:
     // Constructor
-    WebSocketServer(const std::string& name, const std::string& host = "localhost", int port = 8081);
+    WebSocketServer(const std::string& name, const std::string& host = "0.0.0.0", int port = 8081);
     virtual ~WebSocketServer();
 
     // Initialization

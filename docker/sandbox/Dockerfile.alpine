@@ -50,19 +50,23 @@ RUN mkdir -p /workspace /training_data && \
     chown -R sandbox:sandbox /workspace /training_data
 
 # Install Python packages for AI operations
-RUN su - sandbox -c "pip3 install --user \
-    requests aiohttp websockets \
-    psutil docker \
-    opencv-python-headless \
-    numpy pandas scipy \
-    scikit-learn \
-    pillow \
-    pytesseract \
-    speech_recognition \
-    pyttsx3 \
-    beautifulsoup4 \
-    selenium \
-    playwright"
+RUN su - sandbox -c "\
+    python3 -m venv ~/venv && \
+    . ~/venv/bin/activate && \
+    pip install --upgrade pip && \
+    pip install \
+        requests aiohttp websockets \
+        psutil docker \
+        opencv-python-headless \
+        numpy pandas scipy \
+        scikit-learn \
+        pillow \
+        pytesseract \
+        speech_recognition \
+        pyttsx3 \
+        beautifulsoup4 \
+        selenium \
+        playwright"
 
 # Install Node.js packages for web automation
 RUN npm install -g \

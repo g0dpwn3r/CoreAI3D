@@ -116,6 +116,9 @@ bool APIServer::start() {
         }
 
         isRunning = true;
+        std::cout << "[API MODE] Starting server thread..." << std::endl;
+        std::cout << "CoreAI3D application running and API server active on port " << port << "." << std::endl;
+        std::cout << "Press Ctrl+C to stop the server." << std::endl;
         return true;
     }
     catch (const std::exception& e) {
@@ -212,8 +215,18 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             return createErrorResponse("Invalid endpoint", 400);
         }
 
-        std::string module = pathParts[0];
-        std::string action = pathParts.size() > 1 ? pathParts[1] : "status";
+        // Skip API version prefix if present (e.g., /api/v1/vision/classify -> vision/classify)
+        size_t startIndex = 0;
+        if (pathParts.size() >= 2 && pathParts[0] == "api" && pathParts[1] == apiVersion) {
+            startIndex = 2;
+        }
+
+        if (startIndex >= pathParts.size()) {
+            return createErrorResponse("Invalid endpoint", 400);
+        }
+
+        std::string module = pathParts[startIndex];
+        std::string action = pathParts.size() > startIndex + 1 ? pathParts[startIndex + 1] : "status";
 
         // Route to appropriate handler
         if (module == "vision") {
@@ -236,6 +249,13 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         }
         else if (module == "neural") {
             return handleNeuralAPI(action, requestData);
+        }
+        else if (module == "status") {
+            return getAPIStatus();
+        }
+        else if (module.empty() || module == "/") {
+            // Handle root endpoint
+            return getAPIStatus();
         }
         else {
             return createErrorResponse("Unknown module: " + module, 404);

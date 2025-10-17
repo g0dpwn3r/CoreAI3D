@@ -1,0 +1,41 @@
+# Use Python 3.9 slim image as base
+FROM python:3.9-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TRAINING_MODE=true
+ENV LOG_LEVEL=INFO
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    iproute2 \
+    net-tools \
+    procps \
+    htop \
+    traceroute \
+    dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    psutil \
+    aiofiles \
+    requests
+
+# Create necessary directories
+RUN mkdir -p /app /training_data /ai_models /logs /workspace
+
+# Copy training script
+COPY docker/training/train_linux_operations.py /app/train_linux_operations.py
+
+# Make script executable
+RUN chmod +x /app/train_linux_operations.py
+
+# Set working directory
+WORKDIR /app
+
+# Default command
+CMD ["python3", "/app/train_linux_operations.py"]

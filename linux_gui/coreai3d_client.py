@@ -100,9 +100,11 @@ class CoreAI3DClient:
     async def _connect_websocket(self):
         """Establish WebSocket connection"""
         try:
+            # Note: websockets library doesn't support extra_headers in connect()
+            # Headers should be passed differently or handled in the protocol
             self.ws_connection = await websockets.connect(
-                self.config['ws_url'],
-                extra_headers={'Authorization': f'Bearer {self.config["api_key"]}'}
+                self.config['ws_url']
+                # Removed extra_headers as it's not supported in this version
             )
             self.is_connected = True
             logger.info("WebSocket connected")
@@ -135,6 +137,7 @@ class CoreAI3DClient:
     async def _process_message(self, data: Dict[str, Any]):
         """Process incoming WebSocket message"""
         message_type = data.get('type', 'unknown')
+        logger.info(f"Received WebSocket message: type={message_type}, data={data}")
 
         # Call registered handlers
         if message_type in self.message_handlers:
@@ -146,7 +149,14 @@ class CoreAI3DClient:
 
         # Built-in message handling
         if message_type == 'chat_response':
-            logger.info(f"Chat response: {data.get('content', '')}")
+            logger.info(f"Chat response received: {data.get('content', '')}")
+            # Emit chat response to any registered handlers
+            if 'chat_response' in self.message_handlers:
+                for handler in self.message_handlers['chat_response']:
+                    try:
+                        await handler(data)
+                    except Exception as e:
+                        logger.error(f"Error in chat response handler: {e}")
         elif message_type == 'stream_data':
             logger.debug(f"Stream data: {data.get('stream_type', '')}")
         elif message_type == 'error':

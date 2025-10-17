@@ -97,30 +97,18 @@ void CoreAI::populateFields(int numInput, int numOutput) {
     this->z = this->beautifulRandom();
     this->e = this->epsilon;
 
-    // Initialize input matrix
-    initializeMatrix(this->input, numInput, numInput);
-    fillMatrixWithTransform(this->input, [this]() { return this->xTransform2(this->beautifulRandom(), this->e, this->x, 2); });
-
-    // Initialize hidden matrix
-    initializeMatrix(this->hidden, numInput, numInput);
-    fillMatrixWithTransform(this->hidden, [this]() { return this->yTransform2(this->beautifulRandom(), this->e, this->y, 2); });
-
-    // Initialize output matrix
-    initializeMatrix(this->output, numOutput, numOutput);
-    fillMatrixWithTransform(this->output, [this]() { return this->zTransform2(this->z, this->e, this->z, 2); });
-
     // Initialize vectors
-    initializeVector(this->hidden_error, numOutput);
+    initializeVector(this->hidden_error, neurons);
     fillVectorWithTransform(this->hidden_error, [this]() { return this->zTransform(this->x, this->y, this->z, 12, 2); });
 
-    initializeVector(this->hidden_output, numOutput);
+    initializeVector(this->hidden_output, neurons);
     fillVectorWithTransform(this->hidden_output, [this]() { return this->zTransform2(this->z, this->e, this->z, 2); });
 
     // Initialize weight matrices
-    initializeMatrix(this->weigth_output_hidden, numInput, numInput);
+    initializeMatrix(this->weigth_output_hidden, numOutput, neurons);
     fillMatrixWithTransform(this->weigth_output_hidden, [this]() { return this->xTransform2(this->x, this->e, this->y, 2); });
 
-    initializeMatrix(this->weigth_input_hidden, numInput, numInput);
+    initializeMatrix(this->weigth_input_hidden, neurons, numInput);
     fillMatrixWithTransform(this->weigth_input_hidden, [this]() { return this->xTransform2(this->x, this->e, this->y, 2); });
 }
 
@@ -174,50 +162,41 @@ bool CoreAI::safe2DIndex(const std::vector<std::vector<float> >& matrix, int i,
 std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<float> >& inputvalue)
 {
     this->input = inputvalue;
+    this->results.clear();
+    this->hidden.clear();
+    this->output.clear();
 
-    for (int i = 0; i < this->input.size(); ++i)
+    for (size_t i = 0; i < this->input.size(); ++i)
     {
-        std::vector hiddenLayer(this->hidden.size(), 0.0f);
-        std::vector outputLayer(this->output.size(), 0.0f);
+        std::vector<float> hiddenLayer(this->neurons, 0.0f);
+        std::vector<float> outputLayer(this->outputSize, 0.0f);
 
-        for (int j = 0; j < this->hidden.size(); ++j)
+        // Input to hidden layer
+        for (int j = 0; j < this->neurons; ++j)
         {
             float sum = 0.0f;
-            for (int k = 0; k < this->input.size(); ++k)
+            for (size_t k = 0; k < this->input[i].size(); ++k)
             {
-                if (k < this->input[i].size())
+                if (safe2DIndex(this->weigth_input_hidden, j, k))
                 {
-                    if (safe2DIndex(this->input, i, k)
-                        && safe2DIndex(this->weigth_input_hidden, j, k))
-                    {
-                        sum += this->input[i][k]
-                            * this->weigth_input_hidden[j][k];
-                    }
-                    else
-                    {
-                        sum = this->beautifulRandom();
-                    }
+                    sum += this->input[i][k] * this->weigth_input_hidden[j][k];
                 }
             }
-            hiddenLayer[j] = sum;
+            hiddenLayer[j] = this->sigmoid(sum);
         }
 
-        for (int j = 0; j < this->output.size(); ++j)
+        // Hidden to output layer
+        for (int j = 0; j < this->outputSize; ++j)
         {
             float sum = 0.0f;
-            for (int k = 0; k < this->hidden.size(); ++k)
+            for (int k = 0; k < this->neurons; ++k)
             {
                 if (safe2DIndex(this->weigth_output_hidden, j, k))
                 {
-                    sum += hiddenLayer[k]
-                        * this->sigmoid(this->weigth_output_hidden[j][k]);
-                }
-                else
-                {
-                    sum = this->beautifulRandom();
+                    sum += hiddenLayer[k] * this->weigth_output_hidden[j][k];
                 }
             }
-            outputLayer[j] = sum;
+            outputLayer[j] = this->sigmoid(sum);
         }
 
         this->hidden.push_back(hiddenLayer);
@@ -225,149 +204,58 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         this->results.push_back(outputLayer);
     }
 
-    return this->output;
+    return this->results;
 }
 
 void CoreAI::train(const std::vector<std::vector<float> >& inputs,
     const std::vector<std::vector<float> >& targets,
     double learningRate, int& numSamples)
 {
-    float targetVal;
-    for (int i = 0; i < this->output.size(); ++i)
-    {
-        bool skip = false;
-        for (int j = 0; j < this->output[i].size(); ++j)
-        {
-            skip = false;
-            if (safe2DIndex(this->output, i, j))
-            {
-                float outputVal = this->output[i][j];
-                if (safe2DIndex(targets, i, j))
-                {
-                    targetVal = targets[i][j];
-                }
-                else
-                {
-                    skip = true;
-                    break;
-                }
-                this->hidden_output.push_back(
-                    (targetVal - this->sigmoid(outputVal))
-                    * this->sigmoid(outputVal));
-            }
-        }
+    // Ensure forward pass has been run
+    if (this->results.empty()) {
+        this->forward(inputs);
     }
 
-    ;
-    for (int n = 0; n < hidden.size(); ++n)
+    // Backpropagation
+    for (size_t sample = 0; sample < inputs.size(); ++sample)
     {
-        bool skip = false;
-        for (int m = 0; m < hidden[n].size(); ++m)
+        // Output layer error
+        std::vector<float> output_errors(this->outputSize, 0.0f);
+        for (int j = 0; j < this->outputSize; ++j)
+        {
+            float output = this->results[sample][j];
+            float target = targets[sample][j];
+            output_errors[j] = (target - output) * output * (1.0f - output); // Derivative of sigmoid
+        }
+
+        // Hidden layer error
+        std::vector<float> hidden_errors(this->neurons, 0.0f);
+        for (int j = 0; j < this->neurons; ++j)
         {
             float sum = 0.0f;
-            skip = false;
-            for (int o = 0; o < hidden_output.size(); ++o)
+            for (int k = 0; k < this->outputSize; ++k)
             {
-                if (safe2DIndex(weigth_output_hidden, n, o))
-                {
-                    sum += this->sigmoid(hidden_output[o]
-                        * weigth_output_hidden[n][o]);
-                }
-                else
-                {
-                    skip = true;
-                    break;
-                }
+                sum += output_errors[k] * this->weigth_output_hidden[k][j];
             }
+            float hidden = this->hidden[sample][j];
+            hidden_errors[j] = sum * hidden * (1.0f - hidden); // Derivative of sigmoid
+        }
 
-            if (safe2DIndex(hidden, n, m) && safe1DIndex(hidden_error, n))
+        // Update weights output to hidden
+        for (int j = 0; j < this->outputSize; ++j)
+        {
+            for (int k = 0; k < this->neurons; ++k)
             {
-                hidden_error[n] = this->sigmoid(sum * hidden[n][m]);
-            }
-            else
-            {
-                skip = true;
-                break;
+                this->weigth_output_hidden[j][k] += learningRate * output_errors[j] * this->hidden[sample][k];
             }
         }
-    }
 
-    for (int n = 0; n < this->hidden.size(); ++n)
-    {
-        bool skip = false;
-        for (int m = 0; m < this->output.size(); ++m)
+        // Update weights input to hidden
+        for (int j = 0; j < this->neurons; ++j)
         {
-            skip = false;
-            if (safe2DIndex(this->input, n, m)
-                && safe2DIndex(this->output, n, m)
-                && safe2DIndex(this->weigth_input_hidden, n, m)
-                && safe2DIndex(this->weigth_output_hidden, n, m)
-                && safe1DIndex(this->hidden_error, n)
-                && safe1DIndex(this->hidden_output, n))
+            for (size_t k = 0; k < inputs[sample].size(); ++k)
             {
-                this->x = this->xTransform2(this->x, this->e,
-                    this->input.max_size(),
-                    numSamples);
-                this->y = this->yTransform2(this->y, this->e,
-                    this->input.max_size(),
-                    numSamples);
-                this->z = this->zTransform2(this->z, this->e,
-                    this->input.max_size(),
-                    numSamples);
-                float delta
-                    = this->sigmoid(learningRate * this->hidden_output[m]
-                        * this->output[n][m] * this->hidden[n][m]);
-                this->weigth_output_hidden[n][m] += delta;
-            }
-            else
-            {
-                skip = true;
-                break;
-            }
-        }
-    }
-
-    for (int n = 0; n < this->input.size(); ++n)
-    {
-        bool skip = false;
-        for (int m = 0; m < this->hidden[n].size(); ++m)
-        {
-            skip = false;
-            if (safe2DIndex(this->hidden, n, m)
-                && safe2DIndex(this->weigth_output_hidden, n, m)
-                && safe2DIndex(this->output, n, m)
-                && safe2DIndex(this->input, n, m)
-                && safe2DIndex(this->weigth_input_hidden, n, m))
-            {
-                skip = false;
-                this->x = this->xTransform(this->x, this->y, this->z,
-                    this->input.max_size(),
-                    numSamples);
-                this->y = this->yTransform(this->x, this->y, this->z,
-                    this->input.max_size(),
-                    numSamples);
-                this->z = this->zTransform(this->x, this->y, this->z,
-                    this->input.max_size(),
-                    numSamples);
-                if (safe1DIndex(this->hidden_error, n)
-                    && safe2DIndex(this->hidden, n, m)
-                    && safe2DIndex(this->input, n, m)
-                    && safe2DIndex(this->weigth_input_hidden, n, m))
-                {
-                    float delta = this->sigmoid(
-                        learningRate * this->hidden_error[m] * this->hidden[n][m]
-                        * this->input[n][m]);
-                    this->weigth_input_hidden[n][m] += delta;
-                }
-                else
-                {
-                    skip = true;
-                    break;
-                }
-            }
-            else
-            {
-                break;
+                this->weigth_input_hidden[j][k] += learningRate * hidden_errors[j] * inputs[sample][k];
             }
         }
     }
@@ -397,6 +285,10 @@ void CoreAI::normalizeOutput(float min_val, float max_val)
 
 void CoreAI::denormalizeOutput()
 {
+    if (!trainer) {
+        std::cerr << "Error: Trainer not set in CoreAI for denormalization." << std::endl;
+        return;
+    }
     for (auto& row : results)
     { // Denormalize the results/predictions
         for (float& val : row)

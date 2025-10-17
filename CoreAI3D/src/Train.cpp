@@ -100,9 +100,14 @@ void Training::printProgressBar(const std::string& prefix, long long current, lo
 // long long Training::countLines(const std::string& filename, bool hasHeader) is already defined above
 
 bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, int outputSizeParam, bool hasHeader, bool containsText, const char& delimitor, const std::string& datasetName) {
+    std::cout << "[DEBUG] Starting CSV load: filename='" << filename << "', numSamplesToLoad=" << numSamplesToLoad
+              << ", outputSizeParam=" << outputSizeParam << ", hasHeader=" << hasHeader
+              << ", containsText=" << containsText << ", delimiter='" << delimitor << "'" << std::endl;
+
+
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Failed to open input CSV: " << filename << std::endl;
+        std::cerr << "[DEBUG] Failed to open input CSV: " << filename << std::endl;
         return false;
     }
 
@@ -117,167 +122,324 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
     if (hasHeader) {
         std::getline(file, line);
         lineCounter++;
+        std::cout << "[DEBUG] Skipped header line: '" << line << "'" << std::endl;
     }
 
     long long rowIndex = 0;
     bool firstDataRow = true;
+    try {
+        while (true) { 
+            if (!std::getline(file, line)) break;
+            lineCounter++;
+            std::cout << "[DEBUG] Processing line " << lineCounter << ": '" << line << "'" << std::endl;
 
-    while (std::getline(file, line) && (numSamplesToLoad == -1 || rowIndex < numSamplesToLoad)) {
-        lineCounter++;
-        std::stringstream ss(line);
-        std::string cell_str;
-        std::vector<std::string> current_raw_cells;
-        std::vector<float> current_processed_values; // This will hold the converted floats/embeddings
+            // Skip empty lines
+            if (line.empty()) {
+                std::cout << "[DEBUG] Skipping empty line " << lineCounter << std::endl;
+                continue; // Re-enabled continue for empty lines
+            }
 
-        // 1. Read all cells as raw strings first
-        while (std::getline(ss, cell_str, delimitor)) {
-            // Trim whitespace from cell
-            cell_str.erase(0, cell_str.find_first_not_of(" \t\r\n"));
-            cell_str.erase(cell_str.find_last_not_of(" \t\r\n") + 1);
-            current_raw_cells.push_back(cell_str);
-        }
+            // Trim whitespace from the line
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+            if (line.empty()) {
+                std::cout << "[DEBUG] Skipping whitespace-only line " << lineCounter << std::endl;
+                continue; // Re-enabled continue for whitespace-only lines
+            }
 
-        if (current_raw_cells.empty()) {
-            continue; // Skip empty rows
-        }
+            std::cout << "[DEBUG] After trimming: '" << line << "'" << std::endl;
 
-        // 2. Process raw cells into float values or embeddings
-        for (size_t i = 0; i < current_raw_cells.size(); ++i) {
-            const std::string& cell = current_raw_cells[i];
-            bool value_processed = false;
+            // Check if line starts with a number (basic validation)
+            if (!line.empty() && !std::isdigit(line[0]) && line[0] != '-' && line[0] != '+') {
+                std::cout << "[DEBUG] Line doesn't start with digit, minus, or plus - might be invalid data" << std::endl;
+            }
 
-            // Try to parse as datetime first if it looks like one
-            if (cell.find("-") != std::string::npos && (cell.find(":") != std::string::npos || cell.find(";") != std::string::npos) && cell.length() >= 10) {
-                try {
-                    current_processed_values.push_back(convertDateTimeToTimestamp(cell));
-                    value_processed = true;
-                    // Store original date string if this is the date column
-                    // Assuming date is at a known index, e.g., 1 (second column)
-                    if (i == 1) { // Adjust this index if your date column is elsewhere
-                        original_date_strings.push_back(cell);
+            std::cout << "[DEBUG] About to parse cells from line: '" << line << "'" << std::endl;
+
+            // FORCE PROCESSING - let's see what happens if we force it to process
+            std::cout << "[DEBUG] FORCE PROCESSING: Will attempt to process this line anyway" << std::endl;
+
+            // Check if we reached end of file
+            if (file.eof()) {
+                std::cout << "[DEBUG] Reached end of file" << std::endl;
+            }
+
+            // Let's try to force processing by temporarily commenting out the continue statements
+            // This will help us see what happens when we try to process lines that might be skipped
+            std::cout << "[DEBUG] Temporarily forcing processing of all lines..." << std::endl;
+
+            std::vector<std::string> current_raw_cells;
+            std::vector<float> current_processed_values; // This will hold the converted floats/embeddings
+
+            // 1. Read all cells as raw strings first using proper CSV parsing
+            std::cout << "[DEBUG] Parsing cells with delimiter '" << delimitor << "'" << std::endl;
+            current_raw_cells = parseCSVLine(line, delimitor);
+            for (size_t cell_index = 0; cell_index < current_raw_cells.size(); ++cell_index) {
+                std::cout << "[DEBUG]   Raw cell " << cell_index << " before trim: '" << current_raw_cells[cell_index] << "'" << std::endl;
+                // Trim whitespace from cell
+                current_raw_cells[cell_index].erase(0, current_raw_cells[cell_index].find_first_not_of(" \t\r\n"));
+                current_raw_cells[cell_index].erase(current_raw_cells[cell_index].find_last_not_of(" \t\r\n") + 1);
+                std::cout << "[DEBUG]   Parsed cell " << cell_index << ": '" << current_raw_cells[cell_index] << "'" << std::endl;
+            }
+            std::cout << "[DEBUG] Total cells parsed: " << current_raw_cells.size() << std::endl;
+
+            std::cout << "[DEBUG] Parsed " << current_raw_cells.size() << " raw cells: ";
+            for (size_t i = 0; i < current_raw_cells.size(); ++i) {
+                std::cout << "'" << current_raw_cells[i] << "'";
+                if (i < current_raw_cells.size() - 1) std::cout << ", ";
+            }
+            std::cout << std::endl;
+
+            if (current_raw_cells.empty()) {
+                std::cout << "[DEBUG] Skipping empty row at line " << lineCounter << " (no cells after parsing)" << std::endl;
+                continue; // Skip empty rows
+            }
+
+            // 2. Process raw cells into float values or embeddings
+            std::cout << "[DEBUG] Processing cells for row " << rowIndex << " (line " << lineCounter << ")" << std::endl;
+            for (size_t i = 0; i < current_raw_cells.size(); ++i) {
+                const std::string& cell = current_raw_cells[i];
+                bool value_processed = false;
+
+                std::cout << "[DEBUG]   Cell " << i << ": '" << cell << "' -> ";
+
+                // Try to parse as datetime first if it looks like one
+                if ((cell.find("/") != std::string::npos || cell.find("-") != std::string::npos) && cell.length() >= 8) {
+                    try {
+                        float timestamp = convertDateTimeToTimestamp(cell);
+                        current_processed_values.push_back(timestamp);
+                        value_processed = true;
+                        std::cout << "datetime: " << timestamp;
+                        // Store original date string if this is the date column
+                        // Assuming date is at a known index, e.g., 0 (first column)
+                        if (i == 0) { // Adjust this index if your date column is elsewhere
+                            original_date_strings.push_back(cell);
+                        }
+                    }
+                    catch (const std::runtime_error& e) {
+                        std::cout << "not datetime (" << e.what() << ") -> ";
+                        // Not a valid datetime, fall through to float or text processing
+                        // std::cerr << "Debug: Not a datetime string or conversion error: " << cell << " - " << e.what() << std::endl;
                     }
                 }
-                catch (const std::runtime_error& e) {
-                    // Not a valid datetime, fall through to float or text processing
-                    // std::cerr << "Debug: Not a datetime string or conversion error: " << cell << " - " << e.what() << std::endl;
-                }
-            }
 
-            if (!value_processed) {
-                // Try to parse as float
-                try {
-                    current_processed_values.push_back(std::stof(cell));
-                    value_processed = true;
+                if (!value_processed) {
+                    // Special parsing for Vol (column 5) and Change % (column 6)
+                    if (i == 5) { // Vol column
+                        std::string vol_str = cell;
+                        if (vol_str.empty()) {
+                            current_processed_values.push_back(0.0f);
+                            value_processed = true;
+                            std::cout << "vol empty -> 0.0f";
+                        } else {
+                            if (vol_str.back() == 'K') {
+                                vol_str = vol_str.substr(0, vol_str.size() - 1);
+                                try {
+                                    float val = std::stof(vol_str) * 1000.0f;
+                                    current_processed_values.push_back(val);
+                                    value_processed = true;
+                                    std::cout << "vol: " << val;
+                                } catch (const std::exception& e) {
+                                    std::cout << "vol parse error -> 0.0f";
+                                    current_processed_values.push_back(0.0f);
+                                    value_processed = true;
+                                }
+                            } else {
+                                // Assume plain number, remove commas
+                                std::string cleaned = vol_str;
+                                cleaned.erase(std::remove(cleaned.begin(), cleaned.end(), ','), cleaned.end());
+                                try {
+                                    float val = std::stof(cleaned);
+                                    current_processed_values.push_back(val);
+                                    value_processed = true;
+                                    std::cout << "vol plain: " << val;
+                                } catch (const std::exception& e) {
+                                    std::cout << "vol parse error -> 0.0f";
+                                    current_processed_values.push_back(0.0f);
+                                    value_processed = true;
+                                }
+                            }
+                        }
+                    } else if (i == 6) { // Change % column
+                        std::string change_str = cell;
+                        if (change_str.back() == '%') {
+                            change_str = change_str.substr(0, change_str.size() - 1);
+                            try {
+                                float val = std::stof(change_str) / 100.0f;
+                                current_processed_values.push_back(val);
+                                value_processed = true;
+                                std::cout << "change%: " << val;
+                            } catch (const std::exception& e) {
+                                std::cout << "change% parse error -> 0.0f";
+                                current_processed_values.push_back(0.0f);
+                                value_processed = true;
+                            }
+                        } else {
+                            // Assume plain number
+                            try {
+                                float val = std::stof(change_str);
+                                current_processed_values.push_back(val);
+                                value_processed = true;
+                                std::cout << "change plain: " << val;
+                            } catch (const std::exception& e) {
+                                std::cout << "change parse error -> 0.0f";
+                                current_processed_values.push_back(0.0f);
+                                value_processed = true;
+                            }
+                        }
+                    } else {
+                        // Try to parse as float, remove commas first
+                        std::string cleaned_cell = cell;
+                        cleaned_cell.erase(std::remove(cleaned_cell.begin(), cleaned_cell.end(), ','), cleaned_cell.end());
+                        try {
+                            float float_val = std::stof(cleaned_cell);
+                            current_processed_values.push_back(float_val);
+                            value_processed = true;
+                            std::cout << "float: " << float_val;
+                        }
+                        catch (const std::invalid_argument& e) {
+                            std::cout << "not float (" << e.what() << ") -> ";
+                            // Not a valid float, fall through to text processing
+                            // std::cerr << "Debug: Not a float: " << cell << " - " << e.what() << std::endl;
+                        }
+                        catch (const std::out_of_range& e) {
+                            std::cerr << "Warning: Number out of range in CSV at line " << lineCounter << ", cell '" << cell << "'. Defaulting to 0.0f. Error: " << e.what() << std::endl;
+                            current_processed_values.push_back(0.0f);
+                            value_processed = true;
+                            std::cout << "out_of_range -> 0.0f";
+                        }
+                    }
                 }
-                catch (const std::invalid_argument& e) {
-                    // Not a valid float, fall through to text processing
-                    // std::cerr << "Debug: Not a float: " << cell << " - " << e.what() << std::endl;
+
+                if (!value_processed && containsText) {
+                    // If it contains text, encode it. Assuming entire column or specific column is text.
+                    // For simplicity, let's assume the current cell is text if not numeric/date.
+                    if (this->langProc) {
+                        std::vector<float> encoded_vec = this->langProc->encodeText(cell);
+                        current_processed_values.insert(current_processed_values.end(), encoded_vec.begin(), encoded_vec.end());
+                        value_processed = true;
+                        std::cout << "text encoded (" << encoded_vec.size() << " values)";
+                    }
+                    else {
+                        std::cerr << "Error: Language processor not initialized for text encoding at line " << lineCounter << ". Skipping text cell '" << cell << "'." << std::endl;
+                        // Push a placeholder if language processor is not ready
+                        current_processed_values.push_back(0.0f);
+                        value_processed = true;
+                        std::cout << "text (no langProc) -> 0.0f";
+                    }
                 }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Warning: Number out of range in CSV at line " << lineCounter << ", cell '" << cell << "'. Defaulting to 0.0f. Error: " << e.what() << std::endl;
+
+                if (!value_processed) {
+                    // If still not processed, it's an unhandled type, default to 0.0f
                     current_processed_values.push_back(0.0f);
-                    value_processed = true;
+                    std::cout << "unhandled -> 0.0f";
+                }
+                std::cout << std::endl;
+            } // End of for (current_raw_cells)
+
+            std::cout << "[DEBUG] Processed values count: " << current_processed_values.size() << std::endl;
+
+            if (current_processed_values.empty()) {
+                std::cout << "[DEBUG] Skipping row " << rowIndex << " (line " << lineCounter << ") - no processed values" << std::endl;
+                std::cout << "[DEBUG] Raw cells were: ";
+                for (size_t i = 0; i < current_raw_cells.size(); ++i) {
+                    std::cout << "'" << current_raw_cells[i] << "'";
+                    if (i < current_raw_cells.size() - 1) std::cout << ", ";
+                }
+                std::cout << std::endl;
+                continue; // Skip if row became empty after processing
+            }
+
+            // Determine inputSize and outputSize from the first data row
+            if (firstDataRow) {
+                std::cout << "[DEBUG] First data row - determining sizes. Processed values: " << current_processed_values.size()
+                        << ", outputSizeParam: " << outputSizeParam << std::endl;
+
+                if (outputSizeParam > 0 && current_processed_values.size() < (size_t)outputSizeParam) {
+                    std::cerr << "[DEBUG] ERROR: First data row has too few columns (" << current_processed_values.size() << ") for specified outputSize ("
+                        << outputSizeParam << ") at file line " << lineCounter << ". Cannot proceed." << std::endl;
+                    return false;
+                }
+                this->outputSize = outputSizeParam;
+                this->inputSize = current_processed_values.size() - this->outputSize;
+                // If outputSizeParam was 0, calculate input/output based on heuristic (e.g., last column is target)
+                if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
+                    this->outputSize = 1;
+                    this->inputSize = current_processed_values.size() - 1;
+                    std::cout << "[DEBUG] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
+                }
+                else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
+                    this->outputSize = 0; // No target if only one column and not specified
+                    this->inputSize = 1;
+                    std::cout << "[DEBUG] Single column: outputSize=0, inputSize=1" << std::endl;
+                }
+                firstDataRow = false;
+                std::cout << "[DEBUG] Determined Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
+            }
+            else {
+                // Validate subsequent rows against determined sizes
+                size_t expected_columns = (size_t)(this->inputSize + this->outputSize);
+                if (current_processed_values.size() != expected_columns) {
+                    std::cerr << "[DEBUG] WARNING: Row " << rowIndex << " (file line " << lineCounter << ") has " << current_processed_values.size()
+                        << " columns, but expected " << expected_columns
+                        << " columns based on the first data row. Skipping this row." << std::endl;
+                    continue;
                 }
             }
 
-            if (!value_processed && containsText) {
-                // If it contains text, encode it. Assuming entire column or specific column is text.
-                // For simplicity, let's assume the current cell is text if not numeric/date.
-                if (this->langProc) {
-                    std::vector<float> encoded_vec = this->langProc->encodeText(cell);
-                    current_processed_values.insert(current_processed_values.end(), encoded_vec.begin(), encoded_vec.end());
-                    value_processed = true;
+            // Extract inputs and targets
+            std::vector<float> current_input;
+            std::vector<float> current_target;
+
+            std::cout << "[DEBUG] Extracting inputs (all except Price) and targets (Price as column 1)" << std::endl;
+
+            // Target is Price (column 1)
+            current_target.push_back(current_processed_values[1]);
+
+            // Inputs are all except Price
+            for (size_t i = 0; i < current_processed_values.size(); ++i) {
+                if (i != 1) {
+                    current_input.push_back(current_processed_values[i]);
                 }
-                else {
-                    std::cerr << "Error: Language processor not initialized for text encoding at line " << lineCounter << ". Skipping text cell '" << cell << "'." << std::endl;
-                    // Push a placeholder if language processor is not ready
-                    current_processed_values.push_back(0.0f);
-                    value_processed = true;
-                }
             }
 
-            if (!value_processed) {
-                // If still not processed, it's an unhandled type, default to 0.0f
-                current_processed_values.push_back(0.0f);
-            }
-        } // End of for (current_raw_cells)
+            std::cout << "[DEBUG] Row " << rowIndex << " - Input size: " << current_input.size()
+                    << ", Target size: " << current_target.size() << std::endl;
 
-        if (current_processed_values.empty()) {
-            continue; // Skip if row became empty after processing
+            inputs.push_back(current_input);
+            targets.push_back(current_target);
+
+            rowIndex++;
+            if (numSamplesToLoad > 0 && rowIndex >= numSamplesToLoad) break;
         }
-
-        // Determine inputSize and outputSize from the first data row
-        if (firstDataRow) {
-            if (outputSizeParam > 0 && current_processed_values.size() < (size_t)outputSizeParam) {
-                std::cerr << "ERROR: First data row has too few columns (" << current_processed_values.size() << ") for specified outputSize ("
-                    << outputSizeParam << ") at file line " << lineCounter << ". Cannot proceed." << std::endl;
-                return false;
-            }
-            this->outputSize = outputSizeParam;
-            this->inputSize = current_processed_values.size() - this->outputSize;
-            // If outputSizeParam was 0, calculate input/output based on heuristic (e.g., last column is target)
-            if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
-                this->outputSize = 1;
-                this->inputSize = current_processed_values.size() - 1;
-            }
-            else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
-                this->outputSize = 0; // No target if only one column and not specified
-                this->inputSize = 1;
-            }
-            firstDataRow = false;
-            std::cout << "Determined Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
-        }
-        else {
-            // Validate subsequent rows against determined sizes
-            if (current_processed_values.size() != (size_t)(this->inputSize + this->outputSize)) {
-                std::cerr << "WARNING: Row " << rowIndex << " (file line " << lineCounter << ") has " << current_processed_values.size()
-                    << " columns, but expected " << (this->inputSize + this->outputSize)
-                    << " columns based on the first data row. Skipping this row." << std::endl;
-                continue;
-            }
-        }
-
-        // Extract inputs and targets
-        std::vector<float> current_input;
-        std::vector<float> current_target;
-
-        for (size_t i = 0; i < (size_t)this->inputSize; ++i) {
-            current_input.push_back(current_processed_values[i]);
-        }
-        for (size_t i = (size_t)this->inputSize; i < current_processed_values.size(); ++i) {
-            current_target.push_back(current_processed_values[i]);
-        }
-
-        inputs.push_back(current_input);
-        targets.push_back(current_target);
-
-        rowIndex++;
-    }
    
 
     if (inputs.empty()) {
-        std::cerr << "Error: No valid data rows found in CSV or all rows were skipped due to errors." << std::endl;
+        std::cerr << "[DEBUG] Error: No valid data rows found in CSV or all rows were skipped due to errors." << std::endl;
         return false;
     }
 
+    std::cout << "[DEBUG] Final validation - Total rows processed: " << inputs.size() << std::endl;
+
     // Strict Validation
-    for (const auto& row : inputs) {
-        if (row.size() != (size_t)this->inputSize) {
-            std::cerr << "Error: Inconsistent input row size detected after parsing. Expected "
-                << this->inputSize << " columns, but found a row with " << row.size() << " columns.\n";
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        if (inputs[i].size() != (size_t)this->inputSize) {
+            std::cerr << "[DEBUG] Error: Inconsistent input row size detected after parsing. Row " << i << " expected "
+                << this->inputSize << " columns, but found " << inputs[i].size() << " columns.\n";
             inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
         }
     }
-    for (const auto& row : targets) {
-        if (row.size() != (size_t)this->outputSize) {
-            std::cerr << "Error: Inconsistent target row size detected after parsing. Expected "
-                << this->outputSize << " columns, but found a row with " << row.size() << " columns.\n";
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (targets[i].size() != (size_t)this->outputSize) {
+            std::cerr << "[DEBUG] Error: Inconsistent target row size detected after parsing. Row " << i << " expected "
+                << this->outputSize << " columns, but found " << targets[i].size() << " columns.\n";
             inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
         }
     }
 
     this->numSamples = inputs.size();
-    std::cout << "Successfully loaded CSV. Samples: " << this->numSamples << std::endl;
+    std::cout << "[DEBUG] Successfully loaded CSV. Samples: " << this->numSamples
+              << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
 
     // Database Integration
     if (!isOfflineMode && dbManager) {
@@ -309,6 +471,12 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
     std::cout << "Successfully loaded CSV: " << filename << std::endl;
     return true;
+}
+catch (const std::exception& e) {
+    std::cerr << "[DEBUG] Exception during CSV loading at line " << lineCounter << ": " << e.what() << std::endl;
+    file.close();
+    return false;
+}
 }
 
 bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
@@ -760,6 +928,115 @@ float Training::calculateRMSE() {
     return std::sqrt(mse / count);
 }
 
+float Training::calculateMSE() {
+    if (!core || inputs.empty() || targets.empty()) {
+        std::cerr << "Error: CoreAI not initialized or data not loaded for MSE calculation." << std::endl;
+        return -1.0f;
+    }
+
+    core->forward(inputs);
+    core->denormalizeOutput();
+    auto predictions = core->getResults();
+
+    // Denormalize targets using the original data's global min/max stored in Training class
+    std::vector<std::vector<float>> denormalizedTargets = targets;
+    float target_range_min_val = this->min;
+    float target_range_max_val = this->max;
+    float target_range_diff = target_range_max_val - target_range_min_val;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
+
+    // Denormalize target values from the [min, max] range back to the original global min/max
+    for (auto& row : denormalizedTargets) {
+        for (float& val : row) {
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+            }
+            else {
+                val = original_data_global_min;
+            }
+        }
+    }
+
+    float mse = 0.0f;
+    int count = 0;
+
+    for (size_t i = 0; i < denormalizedTargets.size(); ++i) {
+        if (i < predictions.size() && denormalizedTargets[i].size() == predictions[i].size()) {
+            for (size_t j = 0; j < denormalizedTargets[i].size(); ++j) {
+                float error = denormalizedTargets[i][j] - predictions[i][j];
+                mse += error * error;
+                count++;
+            }
+        }
+        else {
+            std::cerr << "Warning: Mismatched row size between targets and predictions at row " << i << ". Skipping for MSE." << std::endl;
+        }
+    }
+
+    if (count == 0) {
+        std::cerr << "Error: No valid data points for MSE calculation." << std::endl;
+        return -1.0f;
+    }
+
+    return mse / count;
+}
+
+float Training::calculateAccuracy(float threshold) {
+    if (!core || inputs.empty() || targets.empty()) {
+        std::cerr << "Error: CoreAI not initialized or data not loaded for accuracy calculation." << std::endl;
+        return -1.0f;
+    }
+
+    core->forward(inputs);
+    core->denormalizeOutput();
+    auto predictions = core->getResults();
+
+    // Denormalize targets using the original data's global min/max stored in Training class
+    std::vector<std::vector<float>> denormalizedTargets = targets;
+    float target_range_min_val = this->min;
+    float target_range_max_val = this->max;
+    float target_range_diff = target_range_max_val - target_range_min_val;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
+
+    // Denormalize target values from the [min, max] range back to the original global min/max
+    for (auto& row : denormalizedTargets) {
+        for (float& val : row) {
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+            }
+            else {
+                val = original_data_global_min;
+            }
+        }
+    }
+
+    int correct = 0;
+    int total = 0;
+
+    for (size_t i = 0; i < denormalizedTargets.size(); ++i) {
+        if (i < predictions.size() && denormalizedTargets[i].size() == predictions[i].size()) {
+            for (size_t j = 0; j < denormalizedTargets[i].size(); ++j) {
+                float actual = denormalizedTargets[i][j];
+                float predicted = predictions[i][j];
+                if (std::abs(actual - predicted) <= threshold) {
+                    correct++;
+                }
+                total++;
+            }
+        }
+        else {
+            std::cerr << "Warning: Mismatched row size between targets and predictions at row " << i << ". Skipping for accuracy." << std::endl;
+        }
+    }
+
+    if (total == 0) {
+        std::cerr << "Error: No valid data points for accuracy calculation." << std::endl;
+        return -1.0f;
+    }
+
+    return static_cast<float>(correct) / total;
+}
+
 CoreAI* Training::getCore() {
     return core.get();
 }
@@ -767,6 +1044,47 @@ CoreAI* Training::getCore() {
 Language* Training::getLanguage()
 {
     return this->langProc.get();
+}
+
+nlohmann::json Training::getNetworkTopology() {
+    nlohmann::json topology;
+    if (!core) {
+        std::cerr << "Error: CoreAI not initialized. Cannot get network topology." << std::endl;
+        return topology;
+    }
+
+    topology["inputSize"] = inputSize;
+    topology["outputSize"] = outputSize;
+    topology["layers"] = layers;
+    topology["neurons"] = neurons;
+
+    // Add weights information
+    topology["weights"] = {
+        {"input_hidden", core->getWeightsHiddenInput()},
+        {"hidden_output", core->getWeightsOutputHidden()}
+    };
+
+    return topology;
+}
+
+nlohmann::json Training::getNetworkActivity() {
+    nlohmann::json activity;
+    if (!core) {
+        std::cerr << "Error: CoreAI not initialized. Cannot get network activity." << std::endl;
+        return activity;
+    }
+
+    // Get current network state
+    activity["input"] = core->getInput();
+    activity["hidden"] = core->getHiddenData();
+    activity["hidden_output"] = core->getHiddenOutputData();
+    activity["output"] = core->getOutput();
+    activity["results"] = core->getResults();
+
+    // Add error information if available
+    activity["hidden_error"] = core->getHiddenErrorData();
+
+    return activity;
 }
 
 bool Training::saveModel(int& datasetId) {
@@ -1124,6 +1442,32 @@ std::string Training::formatValueForDisplay(float value, int customPrecision) co
     return ss.str();
 }
 
+// Helper method to parse a CSV line respecting quotes
+std::vector<std::string> Training::parseCSVLine(const std::string& line, char delimiter) {
+    std::vector<std::string> result;
+    std::string current;
+    bool inQuotes = false;
+    for (size_t i = 0; i < line.size(); ++i) {
+        char c = line[i];
+        if (c == '"') {
+            if (inQuotes && i + 1 < line.size() && line[i + 1] == '"') {
+                // Escaped quote
+                current += '"';
+                ++i;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (c == delimiter && !inQuotes) {
+            result.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    result.push_back(current);
+    return result;
+}
+
 int Training::getDecimalPlacesInString(float value, int precision_for_conversion) {
     std::stringstream ss;
     ss << std::fixed << std::setprecision(precision_for_conversion) << value;
@@ -1242,29 +1586,3 @@ bool Training::loadTextCSV(const std::string& filename, int maxSeqLen, int embed
     return !inputs.empty();
 }
 
-nlohmann::json Training::getNetworkTopology() {
-    nlohmann::json topology;
-    if (!core) {
-        topology["error"] = "CoreAI not initialized";
-        return topology;
-    }
-    topology["inputSize"] = inputSize;
-    topology["outputSize"] = outputSize;
-    topology["layers"] = layers;
-    topology["neurons"] = neurons;
-    return topology;
-}
-
-nlohmann::json Training::getNetworkActivity() {
-    nlohmann::json activity;
-    if (!core) {
-        activity["error"] = "CoreAI not initialized";
-        return activity;
-    }
-    // Get current hidden layer activations
-    auto hiddenData = core->getHiddenData();
-    auto hiddenOutputData = core->getHiddenOutputData();
-    activity["hidden"] = hiddenData;
-    activity["hiddenOutput"] = hiddenOutputData;
-    return activity;
-}

@@ -53,8 +53,10 @@ public:
 
     std::string embedding_file;
     std::string language;
-    // New evaluation method
+    // New evaluation methods
     float calculateRMSE();
+    float calculateMSE();
+    float calculateAccuracy(float threshold = 0.1f);
     const std::vector<std::vector<float>>& getTargets() const { return targets; }
 
     CoreAI* getCore();
@@ -105,6 +107,7 @@ private:
 
     int getDecimalPlacesInString(float value, int precision_for_conversion);
     std::string formatValueForDisplay(float value, int customPrecision) const;
+    static std::vector<std::string> parseCSVLine(const std::string& line, char delimiter);
 
     // NEW: Helper method to denormalize a matrix
 

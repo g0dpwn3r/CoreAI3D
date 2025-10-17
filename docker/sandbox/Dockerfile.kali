@@ -1,0 +1,93 @@
+# Kali Linux Bleeding Edge base
+FROM kalilinux/kali-rolling
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+## 🛠️ FINAL FIX: Force apt to ignore SSL certificate verification failure
+# The Kali mirrors are redirecting HTTP requests to HTTPS, which still fails
+# until 'ca-certificates' is installed. This command temporarily disables
+# certificate verification for the initial apt run.
+RUN echo "deb http://http.kali.org/kali kali-rolling main contrib non-free" > /etc/apt/sources.list \
+    && apt-get -o Acquire::AllowInsecureTls=true update \
+    && apt-get -o Acquire::AllowInsecureTls=true install -y --no-install-recommends ca-certificates apt-transport-https \
+    && rm -rf /var/lib/apt/lists/*
+
+# The system now has 'ca-certificates' installed.
+# The following steps will now work with standard settings.
+
+# Set TZ and install tzdata non-interactively
+ENV TZ=Europe/Amsterdam
+RUN apt-get update && apt-get install -y tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && dpkg-reconfigure -f noninteractive tzdata
+
+RUN date
+
+# Install core packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl wget vim nano htop \
+      build-essential cmake git \
+      procps psmisc lsof strace \
+      net-tools iproute2 iputils-ping traceroute \
+      python3 python3-pip python3-dev \
+      nodejs npm \
+      libffi-dev libssl-dev \
+      sqlite3 \
+      imagemagick sox ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# Create sandbox user
+RUN useradd -m -s /bin/bash sandbox && \
+    echo "sandbox:sandbox" | chpasswd && \
+    usermod -aG sudo sandbox
+
+# Create workspace directories
+RUN mkdir -p /workspace /training_data && \
+    chown -R sandbox:sandbox /workspace /training_data
+
+# Install Python packages for AI/ML
+RUN pip3 install --break-system-packages \
+    requests aiohttp websockets \
+    psutil docker \
+    opencv-python-headless \
+    numpy pandas scipy \
+    scikit-learn \
+    pillow \
+    pytesseract \
+    speech_recognition \
+    pyttsx3 \
+    beautifulsoup4 \
+    selenium \
+    playwright
+
+# Install Node.js packages for web automation
+RUN npm install -g \
+    puppeteer \
+    cheerio \
+    axios \
+    ws
+
+# Supervisor setup
+RUN mkdir -p /etc/supervisor/conf.d
+COPY docker/sandbox/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy training scripts
+COPY docker/training/train_linux_operations.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/train_linux_operations.py
+
+# Working directory
+WORKDIR /workspace
+
+# Switch to sandbox user
+USER sandbox
+
+# Environment variables
+ENV HOME=/home/sandbox
+ENV PATH="/home/sandbox/.local/bin:${PATH}"
+ENV SANDBOX_TYPE=kalibg
+
+# Default command
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

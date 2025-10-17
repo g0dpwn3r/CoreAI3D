@@ -4,16 +4,19 @@ FROM ubuntu:latest
 RUN apt update -y && apt upgrade -y && apt dist-upgrade -y && apt install -y \
     build-essential \
     cmake \
+    curl \
     git \
     libboost-all-dev \
     libmysqlcppconn-dev \
     libmysqlcppconn7t64 \
     libcurl4-openssl-dev \
     libssl-dev \
+    pkg-config \
+    unzip \
     wget \
+    zip \
     zlib1g \
     nlohmann-json3-dev \
-    pkg-config \
     && apt clean
 
 WORKDIR /app

@@ -6,7 +6,7 @@
 #include "Language.hpp"
 
 // Forward declarations for nlohmann::json if needed in header for method signatures
-using json = nlohmann::json;
+// using json = nlohmann::json;
 
 // Simple enum to replace mysqlx::SSLMode
 enum class SSLMode {
