@@ -59,9 +59,9 @@ from PyQt6.QtGui import (
 from coreai3d_client import CoreAI3DClient
 from automation_helper import AutomationHelper
 
-# Configure logging
+# Configure logging with reduced verbosity
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Changed from INFO to WARNING to reduce verbosity
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('logs/dashboard.log'),
@@ -69,6 +69,11 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Reduce verbosity of third-party libraries
+logging.getLogger('websockets.client').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
 
 @dataclass
 class DashboardConfig:
@@ -4224,65 +4229,35 @@ capabilities, training data, performance metrics, and usage instructions."""
             }
 
     def _format_csv_summary(self, csv_data: Dict[str, Any]) -> str:
-        """Format CSV parsing summary for display with improved performance"""
+        """Format CSV parsing summary for display with reduced verbosity"""
         try:
             summary_lines = []
             row_count = csv_data.get('row_count', 0)
             column_count = csv_data.get('column_count', 0)
 
-            summary_lines.append(f"Rows: {row_count:,}")  # Add thousand separators
-            summary_lines.append(f"Columns: {column_count}")
+            # Compact format - combine basic info
+            summary_lines.append(f"CSV: {row_count:,} rows × {column_count} columns")
 
-            # Add file size info for large files
+            # Add file size info only for large files
             if csv_data.get('large_file_limited'):
                 file_size_mb = csv_data.get('total_file_size', 0) / (1024 * 1024)
-                summary_lines.append(f"File Size: {file_size_mb:.1f} MB (showing first 1000 rows)")
-            elif csv_data.get('total_file_size'):
-                file_size_kb = csv_data.get('total_file_size', 0) / 1024
-                if file_size_kb > 1024:
-                    file_size_mb = file_size_kb / 1024
-                    summary_lines.append(f"File Size: {file_size_mb:.1f} MB")
-                else:
-                    summary_lines.append(f"File Size: {file_size_kb:.1f} KB")
+                summary_lines.append(f"Size: {file_size_mb:.1f} MB (showing first 1000 rows)")
+            elif csv_data.get('total_file_size') and csv_data['total_file_size'] > 1024 * 1024:  # Only show if > 1MB
+                file_size_mb = csv_data.get('total_file_size', 0) / (1024 * 1024)
+                summary_lines.append(f"Size: {file_size_mb:.1f} MB")
 
-            if csv_data.get('headers') and len(csv_data['headers']) <= 20:  # Only show if not too many columns
-                summary_lines.append(f"Headers: {', '.join(csv_data['headers'])}")
-            elif csv_data.get('headers') and len(csv_data['headers']) > 20:
-                summary_lines.append(f"Headers: {', '.join(csv_data['headers'][:10])}, ... ({len(csv_data['headers'])-10} more)")
+            # Show column type summary only if meaningful
+            text_count = len(csv_data.get('text_columns', []))
+            numeric_count = len(csv_data.get('numeric_columns', []))
+            if text_count > 0 or numeric_count > 0:
+                summary_lines.append(f"Data types: {text_count} text, {numeric_count} numeric columns")
 
-            if csv_data.get('text_columns'):
-                text_cols = [csv_data['headers'][i] if i < len(csv_data.get('headers', [])) else f'col_{i+1}'
-                            for i in csv_data['text_columns']]
-                if len(text_cols) <= 10:
-                    summary_lines.append(f"Text columns ({len(text_cols)}): {', '.join(text_cols)}")
-                else:
-                    summary_lines.append(f"Text columns ({len(text_cols)}): {', '.join(text_cols[:5])}, ...")
-
-            if csv_data.get('numeric_columns'):
-                numeric_cols = [csv_data['headers'][i] if i < len(csv_data.get('headers', [])) else f'col_{i+1}'
-                              for i in csv_data['numeric_columns']]
-                if len(numeric_cols) <= 10:
-                    summary_lines.append(f"Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols)}")
-                else:
-                    summary_lines.append(f"Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols[:5])}, ...")
-
-            # Show first few rows as preview (limit for performance)
-            if csv_data.get('rows') and len(csv_data['rows']) > 0:
-                preview_rows = min(3, len(csv_data['rows']))  # Limit preview rows
-                summary_lines.append(f"\nFirst {preview_rows} rows preview:")
-
-                for i, row in enumerate(csv_data['rows'][:preview_rows]):
-                    # Truncate long rows for display
-                    if len(row) <= 10:
-                        row_display = ', '.join(row)
-                    else:
-                        row_display = ', '.join(row[:5]) + f", ... ({len(row)-5} more columns)"
-
-                    # Truncate very long cell values
-                    if len(row_display) > 200:
-                        row_display = row_display[:200] + "..."
-
-                    summary_lines.append(f"  Row {i+1}: {row_display}")
+            # Remove detailed headers and preview rows to reduce verbosity
+            # Only show first row preview if small dataset
+            if csv_data.get('rows') and len(csv_data['rows']) <= 10 and len(csv_data['rows'][0]) <= 5:
+                first_row = csv_data['rows'][0]
+                if len(first_row) <= 5:
+                    summary_lines.append(f"Sample: {', '.join(first_row[:5])}")
 
             return "\n".join(summary_lines)
 
@@ -4308,41 +4283,43 @@ capabilities, training data, performance metrics, and usage instructions."""
         except Exception as e:
             return f"Error formatting result: {str(e)}\n\nRaw data: {data}"
 
-    def _format_array_with_truncation(self, key: str, array: list, max_display: int = 5) -> str:
-        """Format array with truncation and summary statistics"""
+    def _format_array_with_truncation(self, key: str, array: list, max_display: int = 3) -> str:
+        """Format array with truncation and compact summary statistics"""
         try:
             total_count = len(array)
 
-            # If array is small, show it fully
+            # If array is very small, show it fully
             if total_count <= max_display:
                 return f"{key}: {array}"
 
-            # Count non-zero elements
-            non_zero_count = sum(1 for x in array if x != 0)
+            # Count non-zero elements (limit to first 1000 for performance)
+            sample_size = min(1000, total_count)
+            non_zero_count = sum(1 for x in array[:sample_size] if x != 0)
 
             # Show first few elements
             displayed_elements = array[:max_display]
-            truncated_display = f"{displayed_elements} ... ({total_count - max_display} more items)"
+            truncated_display = f"{displayed_elements} ... ({total_count - max_display} more)"
 
-            # Create summary
-            summary_parts = [f"{key}: {truncated_display}"]
-            summary_parts.append(f"  Total items: {total_count}")
-            summary_parts.append(f"  Non-zero values: {non_zero_count}")
+            # Compact single-line summary
+            summary = f"{key}: {truncated_display} | Total: {total_count}"
 
-            # Add statistics for numeric arrays
-            if array and isinstance(array[0], (int, float)):
+            # Add non-zero count only if relevant
+            if non_zero_count < sample_size:
+                summary += f" | Non-zero: {non_zero_count}"
+
+            # Add basic statistics for numeric arrays only if small
+            if total_count <= 100 and array and isinstance(array[0], (int, float)):
                 try:
                     numeric_array = [float(x) for x in array if isinstance(x, (int, float))]
                     if numeric_array:
                         min_val = min(numeric_array)
                         max_val = max(numeric_array)
                         avg_val = sum(numeric_array) / len(numeric_array)
-                        summary_parts.append(f"  Range: [{min_val:.4f}, {max_val:.4f}]")
-                        summary_parts.append(f"  Average: {avg_val:.4f}")
+                        summary += f" | Range: [{min_val:.2f}, {max_val:.2f}] | Avg: {avg_val:.2f}"
                 except (ValueError, TypeError):
                     pass  # Skip statistics if conversion fails
 
-            return "\n".join(summary_parts)
+            return summary
 
         except Exception as e:
             return f"{key}: [Error formatting array: {str(e)}] ({len(array)} items)"

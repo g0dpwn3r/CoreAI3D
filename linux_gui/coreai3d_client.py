@@ -16,9 +16,13 @@ from urllib.parse import urljoin
 import os
 from pathlib import Path
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with reduced verbosity
+logging.basicConfig(level=logging.WARNING)  # Changed from INFO to WARNING
 logger = logging.getLogger(__name__)
+
+# Reduce verbosity of third-party libraries
+logging.getLogger('websockets').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
 
 @dataclass
 class APIResponse:
@@ -264,7 +268,9 @@ class CoreAI3DClient:
                         )
 
                 if attempt < self.config['max_retries']:
-                    logger.warning(f"Request failed: {error_msg}, retrying ({attempt + 1}/{self.config['max_retries'] + 1})")
+                    # Reduce verbosity of retry messages - only log every 3rd attempt
+                    if (attempt + 1) % 3 == 0:
+                        logger.warning(f"Request failed: {error_msg}, retrying ({attempt + 1}/{self.config['max_retries'] + 1})")
                     await asyncio.sleep(self.config['retry_delay'] * (2 ** attempt))
                 else:
                     return APIResponse(
