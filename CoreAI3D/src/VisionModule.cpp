@@ -5,67 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
-// #include <opencv2/opencv.hpp>
-// #include <opencv2/imgcodecs.hpp>
-// #include <opencv2/imgproc.hpp>
-
-// OpenCV forward declarations (actual OpenCV includes would be added when available)
-// struct cv_Mat {
-//     int rows, cols, channels;
-//     std::vector<float> data;
-//     cv_Mat(int r, int c, int ch) : rows(r), cols(c), channels(ch), data(r*c*ch, 0.0f) {}
-//     cv_Mat(const cv::Mat& mat) : rows(mat.rows), cols(mat.cols), channels(mat.channels()) {
-//         data.resize(rows * cols * channels);
-//         if (mat.isContinuous()) {
-//             std::memcpy(data.data(), mat.data, data.size() * sizeof(float));
-//         } else {
-//             for (int i = 0; i < rows; ++i) {
-//                 for (int j = 0; j < cols; ++j) {
-//                     for (int k = 0; k < channels; ++k) {
-//                         data[i * cols * channels + j * channels + k] = mat.at<cv::Vec3b>(i, j)[k] / 255.0f;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// };
-
-// struct cv_VideoCapture {
-//     cv::VideoCapture cap;
-//     cv_VideoCapture(const std::string& path) : cap(path) {}
-//     cv_VideoCapture(int device) : cap(device) {}
-//     bool read(cv_Mat& frame) {
-//         cv::Mat cvFrame;
-//         bool success = cap.read(cvFrame);
-//         if (success) {
-//             frame = cv_Mat(cvFrame);
-//         }
-//         return success;
-//     }
-//     bool isOpened() const { return cap.isOpened(); }
-// };
-
-// struct cv_VideoWriter {
-//     cv::VideoWriter writer;
-//     cv_VideoWriter(const std::string& filename, int fourcc, double fps, cv_Mat frame) {
-//         cv::Mat cvFrame(frame.rows, frame.cols, CV_8UC3);
-//         writer.open(filename, fourcc, fps, cvFrame.size());
-//     }
-//     void write(const cv_Mat& frame) {
-//         cv::Mat cvFrame(frame.rows, frame.cols, CV_8UC3);
-//         // Convert float data back to uint8
-//         for (int i = 0; i < frame.rows; ++i) {
-//             for (int j = 0; j < frame.cols; ++j) {
-//                 for (int k = 0; k < frame.channels; ++k) {
-//                     cvFrame.at<cv::Vec3b>(i, j)[k] = static_cast<unsigned char>(
-//                         frame.data[i * frame.cols * frame.channels + j * frame.channels + k] * 255.0f);
-//                 }
-//             }
-//         }
-//         writer.write(cvFrame);
-//     }
-//     bool isOpened() const { return writer.isOpened(); }
-// };
 
 // VisionModule implementation
 VisionModule::VisionModule(const std::string& name, int width, int height, int ch)
@@ -181,8 +120,35 @@ std::vector<float> VisionModule::extractNumericalFeatures(cv_Mat* image) {
 }
 
 std::vector<std::vector<float>> VisionModule::detectObjects(const std::vector<float>& features) {
-    // Base implementation - override in derived classes
-    return {features}; // Return input as single detection
+    if (!visionCore || features.empty()) return {};
+
+    // Use visionCore to process features through neural network
+    std::vector<std::vector<float>> input = {features};
+    auto results = visionCore->forward(input);
+
+    // Interpret neural network output as object detections
+    // Assume output format: [confidence, class_id, x, y, w, h, ...]
+    std::vector<std::vector<float>> detections;
+    if (!results.empty() && !results[0].empty()) {
+        // For base implementation, create detections based on output values
+        for (size_t i = 0; i < results[0].size(); i += 6) { // Assuming 6 values per detection
+            if (i + 5 < results[0].size()) {
+                std::vector<float> detection = {
+                    results[0][i],     // confidence
+                    results[0][i+1],   // class_id
+                    results[0][i+2],   // x
+                    results[0][i+3],   // y
+                    results[0][i+4],   // w
+                    results[0][i+5]    // h
+                };
+                if (detection[0] >= confidenceThreshold) { // Only include confident detections
+                    detections.push_back(detection);
+                }
+            }
+        }
+    }
+
+    return detections;
 }
 
 std::string VisionModule::classifyImage(const std::vector<float>& features) {

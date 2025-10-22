@@ -11,9 +11,6 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_BUILD_TYPE": "Debug",
                 "USE_MYSQL": "ON"
-            },
-            "environment": {
-                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
             }
         },
         {
@@ -26,9 +23,6 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_BUILD_TYPE": "Release",
                 "USE_MYSQL": "ON"
-            },
-            "environment": {
-                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg"
             }
         },
         {
@@ -41,12 +35,7 @@
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_BUILD_PARALLEL_LEVEL": "1",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
                 "USE_MYSQL": "ON"
-            },
-            "environment": {
-                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg",
-                "VCPKG_OVERLAY_PORTS": "/home/carlon/code/CoreAI3D/vcpkg/ports"
             }
         },
         {
@@ -58,12 +47,7 @@
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
                 "USE_MYSQL": "ON"
-            },
-            "environment": {
-                "VCPKG_ROOT": "/home/carlon/code/CoreAI3D/vcpkg",
-                "VCPKG_OVERLAY_PORTS": "/home/carlon/code/CoreAI3D/vcpkg/ports"
             }
         }
     ],

@@ -104,8 +104,6 @@ def perform_git_operations(branch, remotes):
     try:
         # Skip git operations if there are no changes or if we're in a problematic state
         logging.info("Skipping git operations to avoid build failures")
-        return
-
         logging.info("Performing git add .")
         subprocess.run(['git', 'add', '.'], check=True)
 

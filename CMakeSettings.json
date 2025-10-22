@@ -6,7 +6,7 @@
       "configurationType": "Debug",
       "buildRoot": "${projectDir}/out/build/linux-x64-debug-wsl",
       "installRoot": "${projectDir}/out/install/linux-x64-debug-wsl",
-      "cmakeCommandArgs": "-DCMAKE_TOOLCHAIN_FILE=${env.VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cmakeCommandArgs": "",
       "buildCommandArgs": "",
       "inheritEnvironments": [ "linux" ],
       "remoteMachineName": "WSL"
@@ -18,21 +18,9 @@
       "configurationType": "Debug",
       "buildRoot": "${projectDir}/out/build/${name}",
       "installRoot": "${projectDir}/out/install/${name}",
-      "cmakeCommandArgs": "-DCMAKE_TOOLCHAIN_FILE=$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cmakeCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "variables": [
-        {
-          "name": "VCPKG_TARGET_TRIPLET",
-          "value": "x64-windows"
-        },
-        {
-          "name": "VCPKG_VERBOSE",
-          "value": "ON"
-        },
-        {
-            "name": "VCPKG_INSTALL_PREFIX",
-            "value": "D:/code/CoreAI3D/out/build/windows-debug/vcpkg_installed"
-        },
         {
             "name": "CMAKE_EXPORT_COMPILE_COMMANDS",
             "value": "ON"
@@ -40,10 +28,6 @@
         {
             "name": "CMAKE_INSTALL_PREFIX",
             "value": "D:/code/CoreAI3D/out/install/${name}"
-        },
-        {
-            "name": "VCPKG_ROOT",
-            "value": "D:/code/CoreAI3D/vcpkg"
         }
       ]
     }

@@ -13,6 +13,12 @@ set(LOCAL_GOOGLEAPIS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/googleapis")
 if(EXISTS "${LOCAL_GOOGLE_DIR}")
     list(APPEND PROTOBUF_IMPORT_DIRS "${LOCAL_GOOGLE_DIR}")
     message(STATUS "Adding local google proto dir to import dirs: ${LOCAL_GOOGLE_DIR}")
+    if(NOT EXISTS "${CMAKE_CURRENT_BINARY_DIR}/google")
+        file(COPY "${LOCAL_GOOGLE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+        message(STATUS "Copied local googleapis to build dir: ${CMAKE_CURRENT_BINARY_DIR}/google")
+    else()
+        message(STATUS "Build dir already contains googleapis: ${CMAKE_CURRENT_BINARY_DIR}/googleapis")
+    endif()
 endif()
 if(EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
     list(APPEND PROTOBUF_IMPORT_DIRS "${LOCAL_GOOGLEAPIS_DIR}")
@@ -42,38 +48,25 @@ endif()
 # Find MySQL Connector/C++ using system package
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(MYSQLCPP REQUIRED libmysqlcppconn)
+include_directories(${MYSQLCPP_INCLUDE_DIRS})
+link_directories(${MYSQLCPP_LIBRARY_DIRS})
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(ABSL absl)
-if(NOT ABSL_FOUND)
-    message(WARNING "absl not found via pkg-config, trying find_package")
-    find_package(absl CONFIG REQUIRED)
-endif()
-pkg_check_modules(UTF8_RANGE utf8_range)
+find_package(absl CONFIG REQUIRED)
+# pkg_check_modules(UTF8_RANGE utf8_range)
 find_package(ZLIB REQUIRED)
 find_package(CURL REQUIRED)
 pkg_check_modules(ZSTD libzstd)
 if(NOT ZSTD_FOUND)
     message(WARNING "zstd not found, skipping zstd dependency")
 endif()
-pkg_check_modules(NLOHMANN_JSON nlohmann_json)
-if(NOT NLOHMANN_JSON_FOUND)
-    message(WARNING "nlohmann_json not found via pkg-config, trying find_package")
-    find_package(nlohmann_json CONFIG REQUIRED)
-endif()
-find_package(gRPC CONFIG REQUIRED)
-find_package(Protobuf CONFIG REQUIRED)
-pkg_check_modules(GOOGLE_CLOUD_CPP_SPEECH google-cloud-cpp-speech)
-if(NOT GOOGLE_CLOUD_CPP_SPEECH_FOUND)
-    message(WARNING "google-cloud-cpp-speech not found via pkg-config, trying find_package")
-    find_package(google_cloud_cpp_speech CONFIG REQUIRED)
-endif()
-pkg_check_modules(GOOGLE_CLOUD_CPP_COMMON google-cloud-cpp-common)
-if(NOT GOOGLE_CLOUD_CPP_COMMON_FOUND)
-    message(WARNING "google-cloud-cpp-common not found via pkg-config, trying find_package")
-    find_package(google_cloud_cpp_common CONFIG REQUIRED)
-endif()
-# find_package(OpenCV CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+# find_package(google_cloud_cpp_speech CONFIG REQUIRED)
+# find_package(google_cloud_cpp_common CONFIG REQUIRED)
+# find_package(OpenCV REQUIRED)
 pkg_check_modules(LZ4 liblz4)
+
+find_package(gRPC REQUIRED)
+find_package(Protobuf REQUIRED)
 
 # Prefer Protobuf include dir provided by the CMake package
 if(NOT DEFINED PROTOBUF_INCLUDE_DIR OR NOT PROTOBUF_INCLUDE_DIR)
@@ -111,9 +104,13 @@ if(TARGET google-cloud-cpp::speech)
     endif()
 endif()
 
-# Build explicit import dirs list with preferred order (local googleapis first)
+# Build explicit import dirs list with preferred order (system googleapis first)
 set(IMPORT_DIRS_FOR_PROTO "")
-# prefer local googleapis then local google, then protobuf include dir, then project root
+# prefer system googleapis then local googleapis, then local google, then protobuf include dir, then project root
+if(PROTOBUF_INCLUDE_DIR)
+    list(APPEND IMPORT_DIRS_FOR_PROTO "${PROTOBUF_INCLUDE_DIR}/googleapis")
+    list(APPEND IMPORT_DIRS_FOR_PROTO "${PROTOBUF_INCLUDE_DIR}/google")
+endif()
 if(EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
     list(APPEND IMPORT_DIRS_FOR_PROTO "${LOCAL_GOOGLEAPIS_DIR}")
     # also prefer the copied binary location if present
@@ -122,11 +119,6 @@ endif()
 if(EXISTS "${LOCAL_GOOGLE_DIR}")
     list(APPEND IMPORT_DIRS_FOR_PROTO "${LOCAL_GOOGLE_DIR}")
     list(APPEND IMPORT_DIRS_FOR_PROTO "${CMAKE_CURRENT_BINARY_DIR}/google")
-endif()
-if(PROTOBUF_INCLUDE_DIR)
-    list(APPEND IMPORT_DIRS_FOR_PROTO "${PROTOBUF_INCLUDE_DIR}")
-    list(APPEND IMPORT_DIRS_FOR_PROTO "${PROTOBUF_INCLUDE_DIR}/google")
-    list(APPEND IMPORT_DIRS_FOR_PROTO "${PROTOBUF_INCLUDE_DIR}/googleapis")
 endif()
 list(APPEND IMPORT_DIRS_FOR_PROTO "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -267,7 +259,6 @@ target_link_libraries(CoreAI3DLib PUBLIC
     Boost::filesystem
     Boost::system
     Boost::regex
-    ${MYSQLCPP_LIBRARIES}
     absl::absl_check
     absl::absl_log
     absl::algorithm
@@ -305,8 +296,8 @@ target_link_libraries(CoreAI3DLib PUBLIC
     absl::time
     absl::type_traits
     absl::utility
-    utf8_range::utf8_validity
-    utf8_range::utf8_range
+    $<$<TARGET_EXISTS:utf8_range::utf8_validity>:utf8_range::utf8_validity>
+    $<$<TARGET_EXISTS:utf8_range::utf8_range>:utf8_range::utf8_range>
     ZLIB::ZLIB
     CURL::libcurl
     gRPC::grpc++
@@ -318,8 +309,8 @@ target_link_libraries(CoreAI3DLib PUBLIC
     protobuf::libprotobuf
     protobuf::libprotobuf-lite
     nlohmann_json::nlohmann_json
-    google-cloud-cpp::speech
-    google-cloud-cpp::common
+    $<$<TARGET_EXISTS:google-cloud-cpp::speech>:google-cloud-cpp::speech>
+    $<$<TARGET_EXISTS:google-cloud-cpp::common>:google-cloud-cpp::common>
     resolv
     $<$<TARGET_EXISTS:lz4::lz4>:lz4::lz4>
     $<$<TARGET_EXISTS:lz4::lz4_static>:lz4::lz4_static>

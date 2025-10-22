@@ -568,11 +568,11 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 std::cout << "All dataset records added to database for dataset ID: " << currentDatasetId << std::endl;
             }
         }
-        catch (const std::exception& err) {
-            std::cerr << "Database error during CSV loading: " << err.what() << std::endl; return false;
-        }
         catch (const std::runtime_error& err) {
             std::cerr << "Runtime error during CSV loading (database related): " << err.what() << std::endl; return false;
+        }
+        catch (const std::exception& err) {
+            std::cerr << "Database error during CSV loading: " << err.what() << std::endl; return false;
         }
     }
     else if (!dbManager && !isOfflineMode) {
@@ -722,11 +722,11 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
             }
             std::cout << "All target records updated in database for dataset ID: " << datasetId << std::endl;
         }
-        catch (const std::exception& err) {
-            std::cerr << "Database error during target CSV loading/saving: " << err.what() << std::endl; return false;
-        }
         catch (const std::runtime_error& err) {
             std::cerr << "Runtime error during target CSV loading/saving (database related): " << err.what() << std::endl; return false;
+        }
+        catch (const std::exception& err) {
+            std::cerr << "Database error during target CSV loading/saving: " << err.what() << std::endl; return false;
         }
     }
     else if (!dbManager && !isOfflineMode && datasetId != -1) {
@@ -786,11 +786,11 @@ bool Training::loadDatasetFromDB(int& datasetId) {
             << "' (ID: " << this->currentDatasetId << ") from database.\n";
         return true;
     }
-    catch (const std::exception& err) {
-        std::cerr << "Database error loading dataset: " << err.what() << std::endl; return false;
-    }
     catch (const std::runtime_error& err) {
         std::cerr << "Runtime error loading dataset from database: " << err.what() << std::endl; return false;
+    }
+    catch (const std::exception& err) {
+        std::cerr << "Database error loading dataset: " << err.what() << std::endl; return false;
     }
 }
 
