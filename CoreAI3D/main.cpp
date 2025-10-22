@@ -13,69 +13,75 @@
 
 // External library headers (Boost, cURL, MySQL, etc.)
 // Include specific Boost headers as needed for their functionality.
-
 namespace po = boost::program_options; // Alias for convenience
 
 int main(int argc, char* argv[]) {
-    // --- START DEBUG PRINTS (Argc/Argv) ---
-    // First, parse arguments to get verbose flag
-    po::options_description desc("CoreAI3D Opties");
-    desc.add_options()
-        ("help,h", "produce help message")
-        ("verbose,v", po::bool_switch()->default_value(false), "Enable verbose debug output.")
-        ("input-file,i", po::value<std::string>(), "Input filename...")
-        ("target-file,t", po::value<std::string>()->default_value(""), "Optional: Filename containing separate target values for evaluation (only target columns)")
-        ("delimiter,d", po::value<std::string>()->default_value(","), "CSV file delimiter (e.g., ',' or ';')")
-        ("samples,s", po::value<std::string>()->default_value("0"), "Number of samples in the dataset (number of rows to process/train on).")
-        ("language", po::value<std::string>()->default_value("en"), "A code for the language aka en or nl or ru")
-        ("embedding-file", po::value<std::string>()->default_value("embedding.txt"), "the path to your embedding file for text")
-        ("epochs,e", po::value<std::string>()->default_value("10"), "Number of training epochs.")
-        ("learning-rate,lr", po::value<std::string>()->default_value("0.01"), "Learning rate for the neural network.")
-        ("layers,l", po::value<std::string>()->default_value("3"), "Number of hidden layers in the neural network.")
-        ("neurons,n", po::value<std::string>()->default_value("10"), "Number of neurons per hidden layer.")
-        ("min", po::value<std::string>()->default_value("0.0"), "Minimum value for data normalization.")
-        ("max", po::value<std::string>()->default_value("1.0"), "Maximum value for data normalization.")
-        ("input-size,iz", po::value<std::string>()->default_value("1"), "Number of input columns (feature values).")
-        ("output-size,oz", po::value<std::string>()->default_value("1"), "Number of output columns (target values).")
-#ifdef USE_MYSQL
-        ("db-host", po::value<std::string>()->default_value("localhost"), "Database host for MySQL X DevAPI.")
-        ("db-port", po::value<std::string>()->default_value("33060"), "Database port for MySQL X DevAPI.")
-        ("db-user", po::value<std::string>()->default_value("user"), "Database user for MySQL X DevAPI.")
-        ("db-password", po::value<std::string>()->default_value("password"), "Database password for MySQL X DevAPI.")
-        ("db-schema", po::value<std::string>()->default_value("coreai_db"), "Database schema name.")
-        ("ssl-mode", po::value<std::string>()->default_value("DISABLED"), "SSL mode for database connection (DISABLED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY).")
-#endif
-        ("dataset-name", po::value<std::string>()->default_value("online-1a"), "Name for the dataset")
-#ifdef USE_MYSQL
-        ("create-tables", po::bool_switch()->default_value(false), "Create database tables if they don't exist.")
-#endif
-        ("offline", po::bool_switch()->default_value(false), "Run in offline mode (no database connection).")
-        ("dataset-id,di", po::value<std::string>()->default_value("-1"), "Specific dataset ID for database operations (load/save model/data).")
-        ("output-csv,o", po::value<std::string>()->default_value(""), "Output CSV filename for results (predictions, actuals).")
-        ("contains-header", po::bool_switch()->default_value(true), "Specify if the input CSV file contains a header row.")
-        ("contains-text", po::bool_switch()->default_value(false), "Specify if the input CSV file contains text data that needs embedding.")
-        ("start-chat", po::bool_switch()->default_value(false), "Start a chat with the AI")
-        ("start-predict", po::bool_switch()->default_value(false), "Calculate and predict using a CSV file.")
-        ("api-port", po::value<std::string>()->default_value("8080"), "Port for the HTTP API server to listen on.");
+    // Simple argument parsing without Boost
+    bool verbose = false;
+    std::string inputFile;
+    std::string targetFile;
+    std::string delimiter = ",";
+    std::string samples = "0";
+    std::string language = "en";
+    std::string embeddingFile = "embedding.txt";
+    std::string epochs = "10";
+    std::string learningRate = "0.01";
+    std::string layers = "3";
+    std::string neurons = "10";
+    std::string minRange = "0.0";
+    std::string maxRange = "1.0";
+    std::string inputSize = "1";
+    std::string outputSize = "1";
+    std::string datasetName = "online-1a";
+    std::string datasetId = "-1";
+    std::string outputCsvFile;
+    std::string apiPort = "8080";
+    bool hasHeader = true;
+    bool containsText = false;
+    bool startChat = false;
+    bool startPredict = false;
+    bool isOfflineMode = false;
 
-    po::variables_map vm;
-    try {
-        po::store(po::parse_command_line(argc, argv, desc), vm);
-        po::notify(vm);
-    }
-    catch (const po::error& e) {
-        std::cerr << "ERROR: Error parsing arguments: " << e.what() << std::endl;
-        std::cerr << desc << std::endl; // Print help message from Boost.Program_options
-        return 1;
-    }
-
-    // Check for help option first
-    if (vm.count("help")) {
-        std::cout << desc << std::endl;
-        return 0;
+    // Basic argument parsing
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            std::cout << "CoreAI3D Help\n";
+            std::cout << "--verbose,-v: Enable verbose output\n";
+            std::cout << "--input-file,-i: Input file\n";
+            std::cout << "--output-csv,-o: Output CSV file\n";
+            std::cout << "--api-port: API server port (default: 8080)\n";
+            std::cout << "--start-predict: Start prediction mode\n";
+            std::cout << "--offline: Run in offline mode\n";
+            return 0;
+        } else if (arg == "--verbose" || arg == "-v") {
+            verbose = true;
+        } else if (arg == "--input-file" || arg == "-i") {
+            if (i + 1 < argc) inputFile = argv[++i];
+        } else if (arg == "--output-csv" || arg == "-o") {
+            if (i + 1 < argc) outputCsvFile = argv[++i];
+        } else if (arg == "--api-port") {
+            if (i + 1 < argc) apiPort = argv[++i];
+        } else if (arg == "--start-predict") {
+            startPredict = true;
+        } else if (arg == "--offline") {
+            isOfflineMode = true;
+        }
     }
 
-    bool verbose = vm["verbose"].as<bool>();
+    // po::variables_map vm;
+    // try {
+    //     po::store(po::parse_command_line(argc, argv, desc), vm);
+    //     po::notify(vm);
+    // }
+    // catch (const po::error& e) {
+    //     std::cerr << "ERROR: Error parsing arguments: " << e.what() << std::endl;
+    //     std::cerr << desc << std::endl; // Print help message from Boost.Program_options
+    //     return 1;
+    // }
+
+    // Help already handled above
+    // bool verbose = vm["verbose"].as<bool>();
 
     // --- START DEBUG PRINTS (Argc/Argv) ---
     if (verbose) {
@@ -87,149 +93,104 @@ int main(int argc, char* argv[]) {
     }
     // --- END DEBUG PRINTS (Argc/Argv) ---
 
-    // Check for help option first
-    if (vm.count("help")) {
-        std::cout << desc << std::endl;
-        return 0;
-    }
+    // Help already handled above
 
-    // Retrieve arguments and manually convert numeric types
-    if (verbose) std::cout << "DEBUG: About to retrieve inputFile...\n";
-    std::string inputFile;
-    if (vm.count("input-file")) {
-        inputFile = vm["input-file"].as<std::string>();
-        if (verbose) std::cout << "DEBUG: inputFile retrieved: '" << inputFile << "'\n";
-    } else {
-        if (verbose) std::cout << "DEBUG: inputFile not provided, will be empty\n";
-    }
-    std::string targetFile = vm["target-file"].as<std::string>();
-    std::string datasetName = vm["dataset-name"].as<std::string>();
-    std::string delimiter_str = vm["delimiter"].as<std::string>();
-    char delimiter = delimiter_str.empty() ? ',' : delimiter_str[0];
+    // Convert string arguments to appropriate types
+    char delimiter_char = delimiter.empty() ? ',' : delimiter[0];
 
-    int numSamples;
-    std::string numSamples_str = vm["samples"].as<std::string>();
-    try { numSamples = std::stoi(numSamples_str); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --samples: \"" << numSamples_str << "\". Defaulting to 0. Error: " << e.what() << std::endl; numSamples = 0; }
+    int numSamples_val = 0;
+    try { numSamples_val = std::stoi(samples); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for samples. Defaulting to 0.\n"; numSamples_val = 0; }
 
-    std::string language = vm["language"].as<std::string>();
-    std::string embeddingFile = vm["embedding-file"].as<std::string>();
+    int epochs_val = 10;
+    try { epochs_val = std::stoi(epochs); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for epochs. Defaulting to 10.\n"; epochs_val = 10; }
 
-    int epochs;
-    std::string epochs_str = vm["epochs"].as<std::string>();
-    try { epochs = std::stoi(epochs_str); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --epochs: \"" << epochs_str << "\". Defaulting to 10. Error: " << e.what() << std::endl; epochs = 10; }
-
-    double learningRate;
-    std::string learningRate_str = vm["learning-rate"].as<std::string>();
+    double learningRate_val = 0.01;
     try {
-        std::replace(learningRate_str.begin(), learningRate_str.end(), ',', '.');
-        learningRate = std::stod(learningRate_str);
+        std::string lr_str = learningRate;
+        std::replace(lr_str.begin(), lr_str.end(), ',', '.');
+        learningRate_val = std::stod(lr_str);
     }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --learning-rate: \"" << learningRate_str << "\". Defaulting to 0.01. Error: " << e.what() << std::endl; learningRate = 0.01; }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for learning-rate. Defaulting to 0.01.\n"; learningRate_val = 0.01; }
 
-    int layers;
-    std::string layers_str = vm["layers"].as<std::string>();
-    try { layers = std::stoi(layers_str); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --layers: \"" << layers_str << "\". Defaulting to 3. Error: " << e.what() << std::endl; layers = 3; }
+    int layers_val = 3;
+    try { layers_val = std::stoi(layers); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for layers. Defaulting to 3.\n"; layers_val = 3; }
 
-    int neurons;
-    std::string neurons_str = vm["neurons"].as<std::string>();
-    try { neurons = std::stoi(neurons_str); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --neurons: \"" << neurons_str << "\". Defaulting to 10. Error: " << e.what() << std::endl; neurons = 10; }
+    int neurons_val = 10;
+    try { neurons_val = std::stoi(neurons); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for neurons. Defaulting to 10.\n"; neurons_val = 10; }
 
-    float minRange;
-    std::string minRange_str_arg = vm["min"].as<std::string>();
+    float minRange_val = 0.0f;
     try {
-        std::replace(minRange_str_arg.begin(), minRange_str_arg.end(), ',', '.');
-        minRange = std::stof(minRange_str_arg);
+        std::string min_str = minRange;
+        std::replace(min_str.begin(), min_str.end(), ',', '.');
+        minRange_val = std::stof(min_str);
     }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --min: \"" << minRange_str_arg << "\". Defaulting to 0.0f. Error: " << e.what() << std::endl; minRange = 0.0f; }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for min. Defaulting to 0.0.\n"; minRange_val = 0.0f; }
 
-    float maxRange;
-    std::string maxRange_str_arg = vm["max"].as<std::string>();
+    float maxRange_val = 1.0f;
     try {
-        std::replace(maxRange_str_arg.begin(), maxRange_str_arg.end(), ',', '.');
-        maxRange = std::stof(maxRange_str_arg);
+        std::string max_str = maxRange;
+        std::replace(max_str.begin(), max_str.end(), ',', '.');
+        maxRange_val = std::stof(max_str);
     }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --max: \"" << maxRange_str_arg << "\". Defaulting to 1.0f. Error: " << e.what() << std::endl; maxRange = 1.0f; }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for max. Defaulting to 1.0.\n"; maxRange_val = 1.0f; }
 
-    int inputSize;
-    std::string inputSize_str_arg = vm["input-size"].as<std::string>();
-    try { inputSize = std::stoi(inputSize_str_arg); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --input-size: \"" << inputSize_str_arg << "\". Defaulting to 1. Error: " << e.what() << std::endl; inputSize = 1; }
+    int inputSize_val = 1;
+    try { inputSize_val = std::stoi(inputSize); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for input-size. Defaulting to 1.\n"; inputSize_val = 1; }
 
-    int outputSize;
-    std::string outputSize_str_arg = vm["output-size"].as<std::string>();
-    try { outputSize = std::stoi(outputSize_str_arg); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --output-size: \"" << outputSize_str_arg << "\". Defaulting to 1. Error: " << e.what() << std::endl; outputSize = 1; }
+    int outputSize_val = 1;
+    try { outputSize_val = std::stoi(outputSize); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for output-size. Defaulting to 1.\n"; outputSize_val = 1; }
 
-    bool hasHeader = vm["contains-header"].as<bool>();
-    bool containsText = vm["contains-text"].as<bool>();
-    bool startChat = vm["start-chat"].as<bool>();
-    bool startPredict = vm["start-predict"].as<bool>();
+    int datasetId_val = -1;
+    try { datasetId_val = std::stoi(datasetId); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for dataset-id. Defaulting to -1.\n"; datasetId_val = -1; }
 
-#ifdef USE_MYSQL
-    std::string dbHost = vm["db-host"].as<std::string>();
-    int dbPort;
-    std::string dbPort_str_arg = vm["db-port"].as<std::string>();
-    try { dbPort = std::stoi(dbPort_str_arg); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --db-port: \"" << dbPort_str_arg << "\". Defaulting to 33060. Error: " << e.what() << std::endl; dbPort = 33060; }
-
-    std::string dbUser = vm["db-user"].as<std::string>();
-    std::string dbPassword = vm["db-password"].as<std::string>();
-    std::string dbSchema = vm["db-schema"].as<std::string>();
-    std::string sslModeStr = vm["ssl-mode"].as<std::string>();
-
-    bool createTables = vm["create-tables"].as<bool>();
-#endif
-    bool isOfflineMode = vm["offline"].as<bool>();
-
-    int datasetId;
-    std::string datasetId_str_arg = vm["dataset-id"].as<std::string>();
-    try { datasetId = std::stoi(datasetId_str_arg); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --dataset-id: \"" << datasetId_str_arg << "\". Defaulting to -1. Error: " << e.what() << std::endl; datasetId = -1; }
-
-    std::string outputCsvFile = vm["output-csv"].as<std::string>();
-
-    int apiPort;
-    std::string apiPort_str_arg = vm["api-port"].as<std::string>();
-    try { apiPort = std::stoi(apiPort_str_arg); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --api-port: \"" << apiPort_str_arg << "\". Defaulting to 8080. Error: " << e.what() << std::endl; apiPort = 8080; }
+    int apiPort_val = 8080;
+    try { apiPort_val = std::stoi(apiPort); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for api-port. Defaulting to 8080.\n"; apiPort_val = 8080; }
 
     if (verbose) std::cout << "DEBUG: All arguments retrieved. Proceeding to logic.\n";
 
 
 #ifdef USE_MYSQL
+    // MySQL variables (commented out since MySQL is disabled)
+    // std::string dbHost = "localhost";
+    // int dbPort = 3306;
+    // std::string dbUser = "root";
+    // std::string dbPassword = "password";
+    // std::string dbSchema = "coreai_db";
+    // bool createTables = false;
+    // std::string sslModeStr = "DISABLED";
+
     // Map string to SSLMode enum
     SSLMode ssl = SSLMode::DISABLED; // Default
-    if (sslModeStr == "DISABLED") {
-        ssl = SSLMode::DISABLED;
-    }
-    else if (sslModeStr == "REQUIRED") {
-        ssl = SSLMode::REQUIRED;
-    }
-    else if (sslModeStr == "VERIFY_CA") {
-        ssl = SSLMode::VERIFY_CA;
-    }
-    else if (sslModeStr == "VERIFY_IDENTITY") {
-        ssl = SSLMode::VERIFY_IDENTITY;
-    }
-    else {
-        std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
-            << "'. Defaulting to DISABLED." << std::endl;
-        ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
-    }
+    // if (sslModeStr == "DISABLED") {
+    //     ssl = SSLMode::DISABLED;
+    // }
+    // else if (sslModeStr == "REQUIRED") {
+    //     ssl = SSLMode::REQUIRED;
+    // }
+    // else if (sslModeStr == "VERIFY_CA") {
+    //     ssl = SSLMode::VERIFY_CA;
+    // }
+    // else if (sslModeStr == "VERIFY_IDENTITY") {
+    //     ssl = SSLMode::VERIFY_IDENTITY;
+    // }
+    // else {
+    //     std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
+    //         << "'. Defaulting to DISABLED." << std::endl;
+    //     ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
+    // }
 #endif
 
     // --- Mode Check ---
-    // Must specify one of --start-chat, --start-predict, or --api-port for API server mode.
-    bool api_port_is_used = vm.count("api-port");
-    if (!startChat && !startPredict && !api_port_is_used)
-    {
-        std::cerr << "Error: Must specify one of --start-chat, --start-predict, or --api-port for API server mode." << std::endl;
-        return 1;
-    }
+    // Default to API server mode if no other mode is specified
+    bool apiMode = (!startChat && !startPredict);
 
     // --- Main Logic Branches ---
     try
@@ -238,77 +199,25 @@ int main(int argc, char* argv[]) {
         {
             if (verbose) std::cout << "Starting chat mode...\n";
 
-            // Check for required arguments
-            if (!vm.count("db-host")) {
-                std::cerr << "Error: --db-host is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("db-port")) {
-                std::cerr << "Error: --db-port is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("db-user")) {
-                std::cerr << "Error: --db-user is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("db-password")) {
-                std::cerr << "Error: --db-password is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("db-schema")) {
-                std::cerr << "Error: --db-schema is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("ssl-mode")) {
-                std::cerr << "Error: --ssl-mode is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("layers")) {
-                std::cerr << "Error: --layers is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("neurons")) {
-                std::cerr << "Error: --neurons is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("input-size")) {
-                std::cerr << "Error: --input-size is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("output-size")) {
-                std::cerr << "Error: --output-size is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("learning-rate")) {
-                std::cerr << "Error: --learning-rate is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("embedding-file")) {
-                std::cerr << "Error: --embedding-file is required for chat mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("language")) {
-                std::cerr << "Error: --language is required for chat mode." << std::endl;
-                return 1;
-            }
+            // Chat mode disabled due to MySQL dependencies
+            std::cerr << "Error: Chat mode is disabled due to removed MySQL dependencies." << std::endl;
+            return 1;
 
 #ifdef USE_MYSQL
-            // Assuming embedding dimension is fixed or passed as an argument.
-            // For this example, let's assume it's 100 as per previous context.
-            int embeddingDimension = 100; // This should match your embedding file's dimension.
-            Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
+            // MySQL code commented out
+            // int embeddingDimension = 100; // This should match your embedding file's dimension.
+            // Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
 #endif
 
 #ifdef USE_MYSQL
-            // Load embeddings for the specified language.
-            std::string actualEmbeddingFile = embeddingFile.empty()
-                ? std::string(language) + "_embeddings.csv" // Fixed string concat
-                : embeddingFile;
-            std::cout << "Loading embeddings from: " << actualEmbeddingFile
-                << " for language: " << language << std::endl;
-            langProcessor.setCurrentLanguage(language);
-
-            langProcessor.chat(inputFile);
+            // MySQL code commented out
+            // std::string actualEmbeddingFile = embeddingFile.empty()
+            //     ? std::string(language) + "_embeddings.csv" // Fixed string concat
+            //     : embeddingFile;
+            // std::cout << "Loading embeddings from: " << actualEmbeddingFile
+            //     << " for language: " << language << std::endl;
+            // langProcessor.setCurrentLanguage(language);
+            // langProcessor.chat(inputFile);
 #endif
         }
         else if (startPredict)
@@ -316,117 +225,12 @@ int main(int argc, char* argv[]) {
             if (verbose) std::cout << "[PREDICT MODE] Starting prediction mode...\n";
 
             // Check for required arguments
-            if (!vm.count("input-file")) {
+            if (inputFile.empty()) {
                 std::cerr << "Error: --input-file is required for predict mode." << std::endl;
                 return 1;
             }
-            if (!vm.count("output-csv")) {
+            if (outputCsvFile.empty()) {
                 std::cerr << "Error: --output-csv is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("language")) {
-                std::cerr << "Error: --language is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("embedding-file")) {
-                std::cerr << "Error: --embedding-file is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("offline")) {
-                std::cerr << "Error: --offline is required for predict mode." << std::endl;
-                return 1;
-            }
-
-            // In offline mode, force containsText to false to avoid any text processing that might require database connections
-            if (isOfflineMode) {
-                containsText = false;
-            }
-
-            if (!isOfflineMode) {
-                if (!vm.count("db-host")) {
-                    std::cerr << "Error: --db-host is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("db-port")) {
-                    std::cerr << "Error: --db-port is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("db-user")) {
-                    std::cerr << "Error: --db-user is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("db-password")) {
-                    std::cerr << "Error: --db-password is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("db-schema")) {
-                    std::cerr << "Error: --db-schema is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("ssl-mode")) {
-                    std::cerr << "Error: --ssl-mode is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("dataset-name")) {
-                    std::cerr << "Error: --dataset-name is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("dataset-id")) {
-                    std::cerr << "Error: --dataset-id is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-                if (!vm.count("create-tables")) {
-                    std::cerr << "Error: --create-tables is required for predict mode when not offline." << std::endl;
-                    return 1;
-                }
-            }
-
-            if (!vm.count("delimiter")) {
-                std::cerr << "Error: --delimiter is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("layers")) {
-                std::cerr << "Error: --layers is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("neurons")) {
-                std::cerr << "Error: --neurons is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("input-size")) {
-                std::cerr << "Error: --input-size is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("output-size")) {
-                std::cerr << "Error: --output-size is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("learning-rate")) {
-                std::cerr << "Error: --learning-rate is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("samples")) {
-                std::cerr << "Error: --samples is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("epochs")) {
-                std::cerr << "Error: --epochs is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("min")) {
-                std::cerr << "Error: --min is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("max")) {
-                std::cerr << "Error: --max is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("contains-header")) {
-                std::cerr << "Error: --contains-header is required for predict mode." << std::endl;
-                return 1;
-            }
-            if (!vm.count("contains-text")) {
-                std::cerr << "Error: --contains-text is required for predict mode." << std::endl;
                 return 1;
             }
 
@@ -438,34 +242,27 @@ int main(int argc, char* argv[]) {
             }
 
             std::cout << "[PREDICT MODE] Initializing Training object...\n";
-#ifdef USE_MYSQL
-            Training trainer = isOfflineMode
-                ? Training(true, verbose)
-                : Training(dbHost, dbPort, dbUser, dbPassword,
-                    dbSchema, 0, createTables, verbose);
-#else
             Training trainer = Training(true, verbose);
-#endif
             std::cout << "[PREDICT MODE] Training object initialized.\n";
 
             // Set training parameters (important for model structure if loading from DB)
-            trainer.layers = layers;
+            trainer.layers = layers_val;
             trainer.embedding_file = embeddingFile;
             trainer.language = language;
-            trainer.neurons = neurons;
-            trainer.min = minRange;
-            trainer.max = maxRange;
-            trainer.outputSize = outputSize; // Ensure this is set for backend actions
-            trainer.numSamples = numSamples;
+            trainer.neurons = neurons_val;
+            trainer.min = minRange_val;
+            trainer.max = maxRange_val;
+            trainer.outputSize = outputSize_val; // Ensure this is set for backend actions
+            trainer.numSamples = numSamples_val;
             // Set inputSize for trainer, as it's needed for CoreAI initialization later in preprocess
-            trainer.inputSize = inputSize;
+            trainer.inputSize = inputSize_val;
 
             // Skip language processor initialization entirely to avoid MySQL errors
             std::cout << "[PREDICT MODE] Skipping language processor initialization to avoid database connection issues.\n";
             // Proceed directly to CSV loading
 
             std::cout << "[PREDICT MODE] Loading data from: " << inputFile << std::endl;
-            if (!trainer.loadCSV(inputFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName)) {
+            if (!trainer.loadCSV(inputFile, numSamples_val, outputSize_val, hasHeader, containsText, delimiter_char, datasetName)) {
                 std::cerr << "Failed to load CSV data for prediction. Exiting." << std::endl;
                 return 1;
             }
@@ -474,7 +271,7 @@ int main(int argc, char* argv[]) {
             // If target-file is provided, load targets separately
             if (!targetFile.empty()) {
                 std::cout << "[PREDICT MODE] Loading targets from: " << targetFile << std::endl;
-                if (!trainer.loadTargetsCSV(targetFile, delimiter, hasHeader, containsText, datasetId)) {
+                if (!trainer.loadTargetsCSV(targetFile, delimiter_char, hasHeader, containsText, datasetId_val)) {
                     std::cerr << "Failed to load target CSV data for prediction. Exiting." << std::endl;
                     return 1;
                 }
@@ -483,26 +280,26 @@ int main(int argc, char* argv[]) {
 
 
             std::cout << "[PREDICT MODE] Attempting to load model from database (if datasetId is specified)....\n";
-            if (datasetId != -1)
+            if (datasetId_val != -1)
             {
-                std::cout << "[PREDICT MODE] Using dataset ID " << datasetId
+                std::cout << "[PREDICT MODE] Using dataset ID " << datasetId_val
                     << " (likely to load a pre-trained model).\n";
-                if (!trainer.loadDatasetFromDB(datasetId)) { // Pass datasetId by value or correct reference
-                    std::cerr << "[PREDICT MODE] Failed to load dataset from DB for ID " << datasetId << ". Proceeding without pre-loaded data/model from DB." << std::endl;
+                if (!trainer.loadDatasetFromDB(datasetId_val)) { // Pass datasetId by value or correct reference
+                    std::cerr << "[PREDICT MODE] Failed to load dataset from DB for ID " << datasetId_val << ". Proceeding without pre-loaded data/model from DB." << std::endl;
                 }
-                bool model_loaded_success = trainer.loadModel(datasetId); // Capture the bool return value
+                bool model_loaded_success = trainer.loadModel(datasetId_val); // Capture the bool return value
                 if (model_loaded_success) { // Use the captured bool in the conditional
-                    std::cout << "[PREDICT MODE] Model loaded from database for ID " << datasetId << ".\n";
+                    std::cout << "[PREDICT MODE] Model loaded from database for ID " << datasetId_val << ".\n";
                 }
                 else {
-                    std::cerr << "[PREDICT MODE] Failed to load model from DB for ID " << datasetId << ". Will initialize new model for training.\n";
+                    std::cerr << "[PREDICT MODE] Failed to load model from DB for ID " << datasetId_val << ". Will initialize new model for training.\n";
                 }
             }
             std::cout << "[PREDICT MODE] Model loading check complete.\n";
 
 
             std::cout << "[PREDICT MODE] Preprocessing data (normalization, CoreAI initialization)....\n";
-            trainer.preprocess(minRange, maxRange); // This re-normalizes and initializes CoreAI
+            trainer.preprocess(minRange_val, maxRange_val); // This re-normalizes and initializes CoreAI
             std::cout << "[PREDICT MODE] Data preprocessing complete. CoreAI initialized.\n";
 
             // DEBUG: Log data statistics after preprocessing
@@ -516,7 +313,7 @@ int main(int argc, char* argv[]) {
 
             std::cout << "[PREDICT MODE] Starting model training...\n";
             auto start_time = std::chrono::high_resolution_clock::now();
-            trainer.train(learningRate, epochs);
+            trainer.train(learningRate_val, epochs_val);
             auto end_time = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> training_duration = end_time - start_time;
             std::cout << "[PREDICT MODE] Model training complete.\n";
@@ -534,7 +331,7 @@ int main(int argc, char* argv[]) {
 
 
             std::cout << "[PREDICT MODE] Saving prediction results to: " << outputCsvFile << std::endl;
-            if (trainer.saveResultsToCSV(outputCsvFile, inputFile, hasHeader, delimiter)) {
+            if (trainer.saveResultsToCSV(outputCsvFile, inputFile, hasHeader, delimiter_char)) {
                 std::cout << "[PREDICT MODE] Results saved successfully.\n";
             }
             else {
@@ -544,12 +341,8 @@ int main(int argc, char* argv[]) {
 
             std::cout << "Prediction mode finished.\n";
         }
-        else
-        { // Default to API server mode if no other mode is selected
-            if (!vm.count("api-port")) {
-                std::cerr << "Error: --api-port is required for API server mode." << std::endl;
-                return 1;
-            }
+        else if (apiMode)
+        { // API server mode
 
             std::cout << "Starting API server mode...\n";
 
@@ -562,36 +355,30 @@ int main(int argc, char* argv[]) {
 
             // Set training parameters (now that they are members of Training
             // class)
-            trainer->layers = layers;
-            trainer->neurons = neurons;
-            trainer->min = minRange;
-            trainer->max = maxRange;
-            trainer->outputSize = outputSize; // Ensure this is set for backend actions
-            trainer->inputSize = inputSize; // Ensure inputSize is set for CoreAI
+            trainer->layers = layers_val;
+            trainer->neurons = neurons_val;
+            trainer->min = minRange_val;
+            trainer->max = maxRange_val;
+            trainer->outputSize = outputSize_val; // Ensure this is set for backend actions
+            trainer->inputSize = inputSize_val; // Ensure inputSize is set for CoreAI
+            trainer->numSamples = numSamples_val;
 
             // Initialize CoreAI via trainer's preprocess if you want it managed there
             // Or create it directly here if API server doesn't use the full training pipeline.
             // Assuming the API server will need a CoreAI instance.
             // If CoreAI is only created here, remember it won't be part of the `trainer` object.
             std::cout << "[API MODE] Creating CoreAI instance for API...\n";
-            CoreAI core_api_instance(inputSize, layers, neurons, outputSize, minRange, maxRange);
+            CoreAI core_api_instance(inputSize_val, layers_val, neurons_val, outputSize_val, minRange_val, maxRange_val);
             std::cout << "[API MODE] CoreAI instance created.\n";
 
 
             // Initialize API Server
             std::cout << "[API MODE] Initializing API Server...\n";
-            APIServer apiServer("CoreAI3D_API", "0.0.0.0", apiPort);
-#ifdef USE_MYSQL
-            if (!apiServer.initialize("config.json", dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, createTables)) {
-                std::cerr << "Failed to initialize API server\n";
-                return 1;
-            }
-#else
+            APIServer apiServer("CoreAI3D_API", "0.0.0.0", apiPort_val);
             if (!apiServer.initialize("config.json")) {
                 std::cerr << "Failed to initialize API server\n";
                 return 1;
             }
-#endif
             std::cout << "[API MODE] API Server initialized.\n";
 
             // Set training module for neural API endpoints

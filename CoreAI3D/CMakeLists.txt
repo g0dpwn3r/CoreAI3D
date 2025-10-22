@@ -32,46 +32,48 @@ if(POLICY CMP0167)
 endif()
 
 # --- Find and Link Boost Components ---
-# Use only vcpkg Boost to avoid version conflicts
-find_package(boost_program_options CONFIG REQUIRED)
-find_package(boost_filesystem CONFIG REQUIRED)
-find_package(boost_system CONFIG REQUIRED)
-find_package(boost_regex CONFIG REQUIRED)
-# Use vcpkg Boost CONFIG mode only
+find_package(Boost REQUIRED COMPONENTS program_options filesystem system regex)
 if(Boost_FOUND)
     message(STATUS "Found Boost include dirs: ${Boost_INCLUDE_DIRS}")
     message(STATUS "Found Boost libraries: ${Boost_LIBRARIES}")
 else()
-    message(WARNING "Boost not found. Install Boost via vcpkg or ensure Boost is available in your system paths.")
+    message(WARNING "Boost not found. Install Boost via system package manager.")
 endif()
-# Force vcpkg paths to come first for MySQL connector and other vcpkg packages
-list(INSERT CMAKE_PREFIX_PATH 0 "/home/carlon/code/CoreAI3D/vcpkg_installed/x64-linux/share")
-list(INSERT CMAKE_PREFIX_PATH 0 "/home/carlon/code/CoreAI3D/vcpkg_installed/x64-linux")
-# Find MySQL connector using vcpkg
-find_package(unofficial-mysql-connector-cpp CONFIG)
-find_package(absl CONFIG REQUIRED)
-find_package(utf8_range CONFIG)
+# Find MySQL Connector/C++ using system package
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MYSQLCPP REQUIRED libmysqlcppconn)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ABSL absl)
+if(NOT ABSL_FOUND)
+    message(WARNING "absl not found via pkg-config, trying find_package")
+    find_package(absl CONFIG REQUIRED)
+endif()
+pkg_check_modules(UTF8_RANGE utf8_range)
 find_package(ZLIB REQUIRED)
 find_package(CURL REQUIRED)
-find_package(zstd CONFIG)
-if(NOT zstd_FOUND)
-    message(WARNING "zstd CONFIG not found, trying MODULE mode")
-    find_package(zstd MODULE)
-    if(NOT zstd_FOUND)
-        message(WARNING "zstd not found, skipping zstd dependency")
-    endif()
+pkg_check_modules(ZSTD libzstd)
+if(NOT ZSTD_FOUND)
+    message(WARNING "zstd not found, skipping zstd dependency")
 endif()
-find_package(nlohmann_json CONFIG REQUIRED)
+pkg_check_modules(NLOHMANN_JSON nlohmann_json)
+if(NOT NLOHMANN_JSON_FOUND)
+    message(WARNING "nlohmann_json not found via pkg-config, trying find_package")
+    find_package(nlohmann_json CONFIG REQUIRED)
+endif()
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
-find_package(google_cloud_cpp_speech CONFIG REQUIRED)
-find_package(google_cloud_cpp_common CONFIG REQUIRED)
-find_package(OpenCV CONFIG REQUIRED)
-find_package(lz4 CONFIG)
-if(NOT lz4_FOUND)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(lz4 REQUIRED liblz4)
+pkg_check_modules(GOOGLE_CLOUD_CPP_SPEECH google-cloud-cpp-speech)
+if(NOT GOOGLE_CLOUD_CPP_SPEECH_FOUND)
+    message(WARNING "google-cloud-cpp-speech not found via pkg-config, trying find_package")
+    find_package(google_cloud_cpp_speech CONFIG REQUIRED)
 endif()
+pkg_check_modules(GOOGLE_CLOUD_CPP_COMMON google-cloud-cpp-common)
+if(NOT GOOGLE_CLOUD_CPP_COMMON_FOUND)
+    message(WARNING "google-cloud-cpp-common not found via pkg-config, trying find_package")
+    find_package(google_cloud_cpp_common CONFIG REQUIRED)
+endif()
+# find_package(OpenCV CONFIG REQUIRED)
+pkg_check_modules(LZ4 liblz4)
 
 # Prefer Protobuf include dir provided by the CMake package
 if(NOT DEFINED PROTOBUF_INCLUDE_DIR OR NOT PROTOBUF_INCLUDE_DIR)
@@ -235,30 +237,38 @@ if(PROTOBUF_INCLUDE_DIR)
     target_include_directories(CoreAI3DLib PUBLIC ${PROTOBUF_INCLUDE_DIR})
 endif()
 
-# Build library list conditionally to avoid referencing missing Boost targets
-set(PROJECT_LIBS)
-if(TARGET Boost::program_options)
-    list(APPEND PROJECT_LIBS Boost::program_options)
+# Add include directories for system packages
+if(ABSL_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${ABSL_INCLUDE_DIRS})
 endif()
-if(TARGET Boost::filesystem)
-    list(APPEND PROJECT_LIBS Boost::filesystem)
+if(UTF8_RANGE_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${UTF8_RANGE_INCLUDE_DIRS})
 endif()
-if(TARGET Boost::system)
-    list(APPEND PROJECT_LIBS Boost::system)
+if(ZSTD_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${ZSTD_INCLUDE_DIRS})
 endif()
-if(TARGET Boost::regex)
-    list(APPEND PROJECT_LIBS Boost::regex)
+if(NLOHMANN_JSON_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${NLOHMANN_JSON_INCLUDE_DIRS})
+endif()
+if(GOOGLE_CLOUD_CPP_SPEECH_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${GOOGLE_CLOUD_CPP_SPEECH_INCLUDE_DIRS})
+endif()
+if(GOOGLE_CLOUD_CPP_COMMON_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${GOOGLE_CLOUD_CPP_COMMON_INCLUDE_DIRS})
+endif()
+if(LZ4_FOUND)
+    target_include_directories(CoreAI3DLib PUBLIC ${LZ4_INCLUDE_DIRS})
 endif()
 
 # Link libraries to CoreAI3DLib
 target_link_libraries(CoreAI3DLib PUBLIC
     proto_objs
-    ${PROJECT_LIBS}
-    unofficial::mysql-connector-cpp::connector
-    mysqlcppconn
-    mysqlcppconnx
     Boost::program_options
-    absl::absl_check # Example Abseil targets, link what's needed by your code/protobuf
+    Boost::filesystem
+    Boost::system
+    Boost::regex
+    ${MYSQLCPP_LIBRARIES}
+    absl::absl_check
     absl::absl_log
     absl::algorithm
     absl::base
@@ -303,25 +313,27 @@ target_link_libraries(CoreAI3DLib PUBLIC
     $<$<TARGET_EXISTS:zstd::libzstd>:zstd::libzstd>
     $<$<TARGET_EXISTS:zstd::libzstd_shared>:zstd::libzstd_shared>
     $<$<TARGET_EXISTS:zstd::libzstd_static>:zstd::libzstd_static>
-    $<$<BOOL:${zstd_FOUND}>:zstd::libzstd>
+    $<$<BOOL:${ZSTD_FOUND}>:${ZSTD_LIBRARIES}>
     protobuf::libprotoc
     protobuf::libprotobuf
     protobuf::libprotobuf-lite
     nlohmann_json::nlohmann_json
     google-cloud-cpp::speech
     google-cloud-cpp::common
-    ${OpenCV_LIBS}
     resolv
     $<$<TARGET_EXISTS:lz4::lz4>:lz4::lz4>
     $<$<TARGET_EXISTS:lz4::lz4_static>:lz4::lz4_static>
+    $<$<BOOL:${LZ4_FOUND}>:${LZ4_LIBRARIES}>
 )
 
-# Add MySQL libraries if found
-if(TARGET unofficial::mysql-connector-cpp::connector)
-    target_link_libraries(CoreAI3DLib PUBLIC unofficial::mysql-connector-cpp::connector)
-    message(STATUS "MySQL connector-cpp found and linked")
+# Add MySQL Connector/C++ libraries if found
+if(MYSQLCPP_FOUND)
+    target_link_libraries(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARIES})
+    target_include_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_INCLUDE_DIRS})
+    target_link_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARY_DIRS})
+    message(STATUS "MySQL Connector/C++ found and linked")
 else()
-    message(WARNING "MySQL connector-cpp not found - database functionality may not work")
+    message(WARNING "MySQL Connector/C++ not found - database functionality may not work")
 endif()
 
 add_executable(CoreAI3D main.cpp)
@@ -334,7 +346,7 @@ target_include_directories(CoreAI3D PRIVATE
 )
 
 # Link the executable against CoreAI3DLib
-target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib Boost::program_options)
+target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib)
 
 # Add post-build automation script
 add_custom_command(TARGET CoreAI3D POST_BUILD
