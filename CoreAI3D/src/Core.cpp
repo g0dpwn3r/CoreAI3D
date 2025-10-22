@@ -5,7 +5,43 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     : inputSize(inputSize_), layers(layers_), neurons(neurons_),
     outputSize(outputSize_), minVal(min_), maxVal(max_)
 {
-    this->populateFields(inputSize_, outputSize_);
+    std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI constructor with params: "
+              << "inputSize=" << inputSize_ << ", layers=" << layers_
+              << ", neurons=" << neurons_ << ", outputSize=" << outputSize_
+              << ", min=" << min_ << ", max=" << max_ << std::endl;
+
+    // Parameter validation
+    if (inputSize_ <= 0 || layers_ <= 0 || neurons_ <= 0 || outputSize_ <= 0) {
+        std::cout << "[DEBUG CONSTRUCTOR] Parameter validation failed: sizes must be positive" << std::endl;
+        throw std::invalid_argument("CoreAI: All size parameters must be positive integers");
+    }
+    if (min_ >= max_) {
+        std::cout << "[DEBUG CONSTRUCTOR] Parameter validation failed: min >= max" << std::endl;
+        throw std::invalid_argument("CoreAI: minVal must be less than maxVal");
+    }
+
+    std::cout << "[DEBUG CONSTRUCTOR] Parameter validation passed" << std::endl;
+
+    // Initialize weights and biases directly instead of using populateFields
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<float> weight_dist(-0.1f, 0.1f);
+
+    // Initialize vectors with small random values
+    initializeVector(this->hidden_error, neurons);
+    fillVectorWithTransform(this->hidden_error, [&]() { return weight_dist(gen); });
+
+    initializeVector(this->hidden_output, neurons);
+    fillVectorWithTransform(this->hidden_output, [&]() { return weight_dist(gen); });
+
+    // Initialize weight matrices with uniform random distribution between -0.1 and 0.1
+    initializeMatrix(this->weigth_output_hidden, outputSize, neurons);
+    fillMatrixWithTransform(this->weigth_output_hidden, [&]() { return weight_dist(gen); });
+
+    initializeMatrix(this->weigth_input_hidden, neurons, inputSize);
+    fillMatrixWithTransform(this->weigth_input_hidden, [&]() { return weight_dist(gen); });
+
+    // Initialize trainer pointer to nullptr
+    this->trainer = nullptr;
 }
 std::vector<std::vector<float>>& CoreAI::getInput()
 {
@@ -87,30 +123,6 @@ void CoreAI::setWeightsOutputHidden(const std::vector<std::vector<float> >& data
     this->weigth_output_hidden = data;
 }
 
-void CoreAI::populateFields(int numInput, int numOutput) {
-    std::mt19937 gen(std::random_device{}());
-    std::uniform_real_distribution<float> weight_dist(-0.1f, 0.1f);
-
-    // Initialize transformation parameters (no longer needed for weights, but kept for compatibility)
-    this->x = this->beautifulRandom();
-    this->y = this->beautifulRandom();
-    this->z = this->beautifulRandom();
-    this->e = this->epsilon;
-
-    // Initialize vectors with small random values instead of transformations
-    initializeVector(this->hidden_error, neurons);
-    fillVectorWithTransform(this->hidden_error, [&]() { return weight_dist(gen); });
-
-    initializeVector(this->hidden_output, neurons);
-    fillVectorWithTransform(this->hidden_output, [&]() { return weight_dist(gen); });
-
-    // Initialize weight matrices with uniform random distribution between -0.1 and 0.1
-    initializeMatrix(this->weigth_output_hidden, numOutput, neurons);
-    fillMatrixWithTransform(this->weigth_output_hidden, [&]() { return weight_dist(gen); });
-
-    initializeMatrix(this->weigth_input_hidden, neurons, numInput);
-    fillMatrixWithTransform(this->weigth_input_hidden, [&]() { return weight_dist(gen); });
-}
 
 // Helper functions to make the code cleaner:
 void CoreAI::initializeMatrix(std::vector<std::vector<float>>& matrix, int rows, int cols) {
@@ -142,7 +154,7 @@ void CoreAI::fillVectorWithTransform(std::vector<float>& vec, Func transform) {
 
 float CoreAI::beautifulRandom()
 {
-    static std::mt19937 generator(std::random_device{}());
+    static std::mt19937 generator(42);
     static std::uniform_real_distribution<float> distribution(this->minVal,
         this->maxVal);
     return distribution(generator);
@@ -166,6 +178,17 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
     this->hidden.clear();
     this->output.clear();
 
+    // DEBUG: Log input statistics
+    if (!inputvalue.empty() && !inputvalue[0].empty()) {
+        std::cout << "[DEBUG FORWARD] Input size: " << inputvalue.size() << " samples, "
+                  << inputvalue[0].size() << " features per sample" << std::endl;
+        std::cout << "[DEBUG FORWARD] First input sample: ";
+        for (size_t k = 0; k < std::min(size_t(5), inputvalue[0].size()); ++k) {
+            std::cout << inputvalue[0][k] << " ";
+        }
+        std::cout << "..." << std::endl;
+    }
+
     for (size_t i = 0; i < this->input.size(); ++i)
     {
         std::vector<float> hiddenLayer(this->neurons, 0.0f);
@@ -185,6 +208,15 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             hiddenLayer[j] = this->sigmoid(sum);
         }
 
+        // DEBUG: Log hidden layer activation for first sample
+        if (i == 0) {
+            std::cout << "[DEBUG FORWARD] Hidden layer activations (first 5): ";
+            for (int j = 0; j < std::min(5, this->neurons); ++j) {
+                std::cout << hiddenLayer[j] << " ";
+            }
+            std::cout << "..." << std::endl;
+        }
+
         // Hidden to output layer
         for (int j = 0; j < this->outputSize; ++j)
         {
@@ -199,6 +231,15 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             outputLayer[j] = this->sigmoid(sum);
         }
 
+        // DEBUG: Log output layer activation for first sample
+        if (i == 0) {
+            std::cout << "[DEBUG FORWARD] Output layer activations: ";
+            for (int j = 0; j < this->outputSize; ++j) {
+                std::cout << outputLayer[j] << " ";
+            }
+            std::cout << std::endl;
+        }
+
         this->hidden.push_back(hiddenLayer);
         this->output.push_back(outputLayer);
         this->results.push_back(outputLayer);
@@ -211,6 +252,27 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
     const std::vector<std::vector<float> >& targets,
     double learningRate, int& numSamples)
 {
+    // Parameter validation
+    if (learningRate <= 0.0 || learningRate > 1.0) {
+        throw std::invalid_argument("CoreAI::train: learningRate must be between 0 and 1");
+    }
+    if (inputs.empty() || targets.empty()) {
+        throw std::invalid_argument("CoreAI::train: inputs and targets cannot be empty");
+    }
+    if (inputs.size() != targets.size()) {
+        throw std::invalid_argument("CoreAI::train: inputs and targets must have the same number of samples");
+    }
+    for (const auto& input : inputs) {
+        if (input.size() != (size_t)inputSize) {
+            throw std::invalid_argument("CoreAI::train: input sample size must match inputSize");
+        }
+    }
+    for (const auto& target : targets) {
+        if (target.size() != (size_t)outputSize) {
+            throw std::invalid_argument("CoreAI::train: target sample size must match outputSize");
+        }
+    }
+
     // Ensure forward pass has been run
     if (this->results.empty()) {
         this->forward(inputs);
@@ -289,14 +351,47 @@ void CoreAI::denormalizeOutput()
         std::cerr << "Error: Trainer not set in CoreAI for denormalization." << std::endl;
         return;
     }
+
+    // Validation
+    if (results.empty()) {
+        std::cerr << "Warning: No results to denormalize." << std::endl;
+        return;
+    }
+
+    // DEBUG: Log denormalization parameters
+    std::cout << "[DEBUG DENORMALIZE] original_data_global_min: " << trainer->original_data_global_min
+              << ", original_data_global_max: " << trainer->original_data_global_max
+              << ", range: " << (trainer->original_data_global_max - trainer->original_data_global_min)
+              << ", minVal: " << this->minVal << ", maxVal: " << this->maxVal << std::endl;
+
+    float normalized_range_diff = this->maxVal - this->minVal;
+    float original_range_diff = trainer->original_data_global_max - trainer->original_data_global_min;
+
+    // Check for valid ranges
+    if (std::abs(normalized_range_diff) < std::numeric_limits<float>::epsilon()) {
+        std::cerr << "Warning: Normalized range is zero, cannot denormalize properly." << std::endl;
+        return;
+    }
+    if (std::abs(original_range_diff) < std::numeric_limits<float>::epsilon()) {
+        std::cerr << "Warning: Original data range is zero, denormalizing to constant value." << std::endl;
+    }
+
     for (auto& row : results)
     { // Denormalize the results/predictions
         for (float& val : row)
         {
-            val = val
-                * (trainer->original_data_global_max
-                    - trainer->original_data_global_min)
-                + trainer->original_data_global_min;
+            float original_val = val;
+            if (std::abs(original_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - this->minVal) / normalized_range_diff) * original_range_diff + trainer->original_data_global_min;
+            } else {
+                val = trainer->original_data_global_min; // If original range is zero, map to original min
+            }
+
+            // DEBUG: Log first few denormalizations (per call, not static)
+            static int call_count = 0;
+            if (call_count++ < 5) {
+                std::cout << "[DEBUG DENORMALIZE] prediction " << original_val << " -> " << val << std::endl;
+            }
         }
     }
 }
@@ -365,4 +460,29 @@ float CoreAI::zTransform2(float z, float e, float n, float m)
 {
     float result = ((std::pow(z, n) * e) / 3.69);
     return (std::isnan(result) || std::isinf(result)) ? this->z : result;
+}
+
+void CoreAI::setInputSize(int size)
+{
+    this->inputSize = size;
+    this->resizeWeights();
+}
+
+void CoreAI::setOutputSize(int size)
+{
+    this->outputSize = size;
+    this->resizeWeights();
+}
+
+void CoreAI::resizeWeights()
+{
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<float> weight_dist(-0.1f, 0.1f);
+
+    // Resize weight matrices
+    initializeMatrix(this->weigth_output_hidden, outputSize, neurons);
+    fillMatrixWithTransform(this->weigth_output_hidden, [&]() { return weight_dist(gen); });
+
+    initializeMatrix(this->weigth_input_hidden, neurons, inputSize);
+    fillMatrixWithTransform(this->weigth_input_hidden, [&]() { return weight_dist(gen); });
 }

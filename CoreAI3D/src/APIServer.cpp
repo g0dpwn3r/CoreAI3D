@@ -56,7 +56,9 @@ private:
 APIServer::APIServer(const std::string& name, const std::string& host, int port)
     : serverName(name), host(host), port(port), numThreads(4), isInitialized(false), isRunning(false),
       apiVersion("v1"), corsOrigin("*"), requestTimeout(30), maxRequestSize(1024 * 1024),
-      enableLogging(true), logFilePath("api_server.log") {
+      enableLogging(true), logFilePath("api_server.log"),
+      dbHost("localhost"), dbPort(33060), dbUser("user"), dbPassword("password"),
+      dbSchema("coreai_db"), dbSSLMode(SSLMode::DISABLED), createTables(false) {
 }
 
 // Destructor
@@ -65,18 +67,88 @@ APIServer::~APIServer() {
 }
 
 // Initialization
-bool APIServer::initialize(const std::string& configPath) {
+bool APIServer::initialize(const std::string& configPath,
+                          const std::string& dbHost,
+                          unsigned int dbPort,
+                          const std::string& dbUser,
+                          const std::string& dbPassword,
+                          const std::string& dbSchema,
+                          SSLMode dbSSLMode,
+                          bool createTables) {
     try {
         if (isInitialized) {
             return true;
         }
+
+        // Set database configuration
+        this->dbHost = dbHost;
+        this->dbPort = dbPort;
+        this->dbUser = dbUser;
+        this->dbPassword = dbPassword;
+        this->dbSchema = dbSchema;
+        this->dbSSLMode = dbSSLMode;
+        this->createTables = createTables;
 
         // Initialize orchestrator
         orchestrator = std::make_unique<ModuleOrchestrator>(serverName + "_orchestrator");
 
         // Load configuration if provided
         if (!configPath.empty()) {
-            // TODO: Load configuration from file
+            std::ifstream configFile(configPath);
+            if (configFile.is_open()) {
+                json config;
+                configFile >> config;
+
+                // Load server configuration
+                if (config.contains("server")) {
+                    auto serverConfig = config["server"];
+                    if (serverConfig.contains("host")) host = serverConfig["host"];
+                    if (serverConfig.contains("port")) port = serverConfig["port"];
+                    if (serverConfig.contains("threads")) numThreads = serverConfig["threads"];
+                    if (serverConfig.contains("api_version")) apiVersion = serverConfig["api_version"];
+                    if (serverConfig.contains("cors_origin")) corsOrigin = serverConfig["cors_origin"];
+                    if (serverConfig.contains("request_timeout")) requestTimeout = serverConfig["request_timeout"];
+                    if (serverConfig.contains("max_request_size")) maxRequestSize = serverConfig["max_request_size"];
+                    if (serverConfig.contains("enable_logging")) enableLogging = serverConfig["enable_logging"];
+                    if (serverConfig.contains("log_file")) logFilePath = serverConfig["log_file"];
+                }
+
+                // Load database configuration from JSON (overrides command-line args)
+                if (config.contains("database")) {
+                    auto dbConfig = config["database"];
+                    if (dbConfig.contains("host")) this->dbHost = dbConfig["host"];
+                    if (dbConfig.contains("port")) this->dbPort = dbConfig["port"];
+                    if (dbConfig.contains("user")) this->dbUser = dbConfig["user"];
+                    if (dbConfig.contains("password")) this->dbPassword = dbConfig["password"];
+                    if (dbConfig.contains("schema")) this->dbSchema = dbConfig["schema"];
+                    if (dbConfig.contains("ssl_mode")) {
+                        std::string sslModeStr = dbConfig["ssl_mode"];
+                        if (sslModeStr == "DISABLED") this->dbSSLMode = SSLMode::DISABLED;
+                        else if (sslModeStr == "REQUIRED") this->dbSSLMode = SSLMode::REQUIRED;
+                        else if (sslModeStr == "VERIFY_CA") this->dbSSLMode = SSLMode::VERIFY_CA;
+                        else if (sslModeStr == "VERIFY_IDENTITY") this->dbSSLMode = SSLMode::VERIFY_IDENTITY;
+                        else this->dbSSLMode = SSLMode::DISABLED;
+                    }
+                    if (dbConfig.contains("create_tables")) this->createTables = dbConfig["create_tables"];
+                }
+
+                std::cout << "Configuration loaded from " << configPath << std::endl;
+            } else {
+                std::cout << "Configuration file not found, using defaults" << std::endl;
+            }
+        }
+
+        // Initialize database if not in offline mode
+        if (!this->dbHost.empty() && this->dbPort > 0) {
+            try {
+                database = std::make_unique<Database>(this->dbHost, this->dbPort, this->dbUser,
+                                                     this->dbPassword, this->dbSchema, this->dbSSLMode, this->createTables);
+                std::cout << "Database connection initialized" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: Failed to initialize database connection: " << e.what() << std::endl;
+                std::cerr << "Continuing in offline mode" << std::endl;
+                database.reset();
+            }
         }
 
         // Set default configuration
@@ -395,6 +467,38 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
     catch (const std::exception& e) {
         return createErrorResponse("Neural API error: " + std::string(e.what()), 500);
     }
+}
+
+json APIServer::getNeuralTopology() {
+    json topology = {
+        {"message", "Neural topology not yet implemented"}
+    };
+
+    if (trainingModule) {
+        topology = trainingModule->getNetworkTopology();
+        topology["status"] = "success";
+    } else {
+        topology["status"] = "error";
+        topology["message"] = "Training module not initialized";
+    }
+
+    return topology;
+}
+
+json APIServer::getNeuralActivity() {
+    json activity = {
+        {"message", "Neural activity not yet implemented"}
+    };
+
+    if (trainingModule) {
+        activity = trainingModule->getNetworkActivity();
+        activity["status"] = "success";
+    } else {
+        activity["status"] = "error";
+        activity["message"] = "Training module not initialized";
+    }
+
+    return activity;
 }
 
 // HTTP request handling
@@ -953,6 +1057,20 @@ json APIServer::getModuleStatus(const std::string& moduleName) {
         {"status", "unknown"},
         {"message", "Module status not yet implemented"}
     };
+
+    // Check if training module is available
+    if (trainingModule) {
+        if (moduleName == "neural" || moduleName == "training") {
+            status["status"] = "available";
+            status["message"] = "Neural network training module is available";
+            status["input_size"] = trainingModule->inputSize;
+            status["output_size"] = trainingModule->outputSize;
+            status["layers"] = trainingModule->layers;
+            status["neurons"] = trainingModule->neurons;
+            status["learning_rate"] = trainingModule->learningRate;
+        }
+    }
+
     return status;
 }
 

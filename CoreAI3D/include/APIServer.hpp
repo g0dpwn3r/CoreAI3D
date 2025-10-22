@@ -9,6 +9,7 @@
 #include "WebModule.hpp"
 #include "MathModule.hpp"
 #include "Train.hpp"
+#include "Database.hpp"
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
@@ -56,6 +57,16 @@ private:
     bool enableLogging;
     std::string logFilePath;
 
+    // Database configuration
+    std::string dbHost;
+    unsigned int dbPort;
+    std::string dbUser;
+    std::string dbPassword;
+    std::string dbSchema;
+    SSLMode dbSSLMode;
+    bool createTables;
+    std::unique_ptr<Database> database;
+
 protected:
     // Core API processing
     virtual json processAPIRequest(const std::string& endpoint, const std::string& method, const json& requestData);
@@ -94,7 +105,14 @@ public:
     virtual ~APIServer();
 
     // Initialization
-    bool initialize(const std::string& configPath = "");
+    bool initialize(const std::string& configPath = "config.json",
+                   const std::string& dbHost = "localhost",
+                   unsigned int dbPort = 33060,
+                   const std::string& dbUser = "user",
+                   const std::string& dbPassword = "password",
+                   const std::string& dbSchema = "coreai_db",
+                   SSLMode dbSSLMode = SSLMode::DISABLED,
+                   bool createTables = false);
     bool start();
     void stop();
     bool isServerRunning() const { return isRunning; }
@@ -117,6 +135,16 @@ public:
     bool addWebModule(const std::string& name, std::unique_ptr<WebModule> module);
     bool addMathModule(const std::string& name, std::unique_ptr<MathModule> module);
     void setTrainingModule(std::unique_ptr<Training> training);
+
+    // Database configuration getters
+    const std::string& getDBHost() const { return dbHost; }
+    unsigned int getDBPort() const { return dbPort; }
+    const std::string& getDBUser() const { return dbUser; }
+    const std::string& getDBPassword() const { return dbPassword; }
+    const std::string& getDBSchema() const { return dbSchema; }
+    SSLMode getDBSSLMode() const { return dbSSLMode; }
+    bool getCreateTables() const { return createTables; }
+    Database* getDatabase() const { return database.get(); }
 
     // API endpoints
     struct APIEndpoint {
@@ -164,6 +192,10 @@ public:
     // Neural API endpoints
     json neuralGetTopology(const std::string& sessionId);
     json neuralGetActivity(const std::string& sessionId);
+
+    // Neural API helper methods
+    json getNeuralTopology();
+    json getNeuralActivity();
 
     // Orchestrator API endpoints
     json orchestratorSubmitTask(const std::string& sessionId, const std::string& taskType, const std::string& description, const json& parameters);

@@ -59,6 +59,23 @@ private:
     float precision;
     int maxIterations;
     float convergenceThreshold;
+
+    // Configurable mathematical constants
+    double pi;
+    double e;
+    double goldenRatio;
+
+    // Algorithm choices
+    std::string optimizationAlgorithm;
+    std::string integrationMethod;
+    std::string differentiationMethod;
+    std::string randomDistribution;
+
+    // Additional precision settings
+    float numericalDerivativeStep;
+    int integrationSteps;
+    int randomSeed;
+
     std::map<std::string, MatrixInfo> matrices;
     std::map<std::string, std::vector<float>> vectors;
 
@@ -134,6 +151,7 @@ public:
 
     // Initialization
     bool initialize(const std::string& configPath = "");
+    bool loadConfiguration(const std::string& configPath);
     void setPrecision(float precision);
     void setMaxIterations(int iterations);
     void setConvergenceThreshold(float threshold);

@@ -171,6 +171,11 @@ public:
     std::string analyzeMultiModalContent(const std::string& content, const std::vector<std::string>& analysisTypes);
     std::vector<float> extractMultiModalFeatures(const std::string& contentType, const std::vector<float>& data);
 
+    // Video processing integration
+    std::vector<float> processVideoData(const std::string& videoPath, const std::vector<std::string>& requiredModules);
+    std::string analyzeVideoContent(const std::string& videoPath, const std::vector<std::string>& analysisTypes);
+    std::vector<float> extractVideoFeatures(const std::string& videoPath, int frameSamplingRate = 30);
+
     // Intelligent routing
     std::string routeToOptimalModule(const std::string& taskType, const std::map<std::string, std::string>& parameters);
     std::vector<std::string> getCapableModules(const std::string& capability);

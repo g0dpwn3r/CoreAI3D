@@ -135,7 +135,7 @@ class SandboxManager(QObject):
             # Docker uses command-line options and container configurations
             self.sandbox_config = {
                 'container_name': self.sandbox_name,
-                'image': config.get('image', 'ubuntu:latest'),
+                'image': config.get('image', 'kali:latest'),
                 'host_folder': config.get('host_folder', '/tmp'),
                 'startup_command': config.get('startup_command', 'echo "Container started"'),
                 'networking': config.get('networking', 'enable'),
@@ -720,7 +720,7 @@ class CoreAI3DDashboard(QMainWindow):
         # Chat response handler
         self.chat_response_handler = None
 
-        # Initialize training argument variables
+        # Initialize training argument variables - consolidated learning settings
         self.norm_min = 0.0
         self.norm_max = 1.0
         self.neurons = 10
@@ -728,6 +728,24 @@ class CoreAI3DDashboard(QMainWindow):
         self.epochs = 10
         self.layers = 3
         self.learning_rate = 0.01
+
+        # Learning configuration settings
+        self.learning_config = {
+            'normalization_min': self.norm_min,
+            'normalization_max': self.norm_max,
+            'neurons_per_layer': self.neurons,
+            'training_samples': self.samples,
+            'epochs': self.epochs,
+            'hidden_layers': self.layers,
+            'learning_rate': self.learning_rate,
+            'data_source': 'file',  # file, database, web, etc.
+            'model_type': 'neural_network',
+            'enable_early_stopping': True,
+            'validation_split': 0.2,
+            'batch_size': 32,
+            'optimizer': 'adam',
+            'loss_function': 'mse'
+        }
 
         # Initialize UI
         self.setup_ui()
@@ -784,6 +802,7 @@ class CoreAI3DDashboard(QMainWindow):
         # Create tabs
         self.create_dashboard_tab()
         self.create_training_tab()
+        self.create_training_configuration_tab()
         self.create_testing_tab()
         self.create_predict_tab()
         self.create_sandbox_tab()
@@ -793,9 +812,6 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_code_generation_tab()
         self.create_chat_tab()
         self.create_neural_tab()
-        self.create_data_normalization_tab()
-        self.create_network_architecture_tab()
-        self.create_training_parameters_tab()
         self.create_settings_tab()
 
         # Create status bar
@@ -1338,7 +1354,10 @@ class CoreAI3DDashboard(QMainWindow):
             "Text Processing",
             "Permissions and Security",
             "System Monitoring",
-            "Scripting and Automation"
+            "Scripting and Automation",
+            "hacking-white",
+            "hacking-gray",
+            "hacking-black"
         ])
         training_layout.addWidget(QLabel("Training Scenario:"))
         training_layout.addWidget(self.scenario_combo)
@@ -2467,15 +2486,24 @@ if __name__ == "__main__":
 
         layout.addWidget(activity_group)
 
-    def create_data_normalization_tab(self):
-        """Create data normalization tab"""
+    def create_training_configuration_tab(self):
+        """Create consolidated training configuration tab"""
         tab = QWidget()
-        self.tab_widget.addTab(tab, "Data Normalization")
+        self.tab_widget.addTab(tab, "Training Configuration")
 
         layout = QVBoxLayout(tab)
 
-        # Normalization parameters group
-        norm_group = QGroupBox("Normalization Parameters")
+        # Main configuration group - consolidated learning settings
+        config_group = QGroupBox("Consolidated Learning Configuration")
+        config_layout = QVBoxLayout(config_group)
+
+        # Create scroll area for all settings
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+
+        # Data Normalization Section
+        norm_group = QGroupBox("Data Normalization")
         norm_layout = QFormLayout(norm_group)
 
         # Min value input
@@ -2496,36 +2524,10 @@ if __name__ == "__main__":
         self.norm_max_spin.valueChanged.connect(self.on_norm_max_changed)
         norm_layout.addRow("Maximum (--max):", self.norm_max_spin)
 
-        layout.addWidget(norm_group)
+        scroll_layout.addWidget(norm_group)
 
-        # Information group
-        info_group = QGroupBox("Information")
-        info_layout = QVBoxLayout(info_group)
-
-        info_text = QLabel("Data normalization scales input values to a specified range.\n\n"
-                          "• Minimum: Lower bound of the normalization range\n"
-                          "• Maximum: Upper bound of the normalization range\n\n"
-                          "Common ranges:\n"
-                          "• [0, 1]: Standard normalization\n"
-                          "• [-1, 1]: Symmetric around zero\n"
-                          "• [0, 255]: Image pixel values")
-        info_text.setWordWrap(True)
-        info_layout.addWidget(info_text)
-
-        layout.addWidget(info_group)
-
-        # Stretch to fill space
-        layout.addStretch()
-
-    def create_network_architecture_tab(self):
-        """Create network architecture tab"""
-        tab = QWidget()
-        self.tab_widget.addTab(tab, "Network Architecture")
-
-        layout = QVBoxLayout(tab)
-
-        # Network parameters group
-        network_group = QGroupBox("Network Parameters")
+        # Network Architecture Section
+        network_group = QGroupBox("Network Architecture")
         network_layout = QFormLayout(network_group)
 
         # Neurons input
@@ -2557,33 +2559,9 @@ if __name__ == "__main__":
         self.layers_spin.valueChanged.connect(self.on_layers_changed)
         network_layout.addRow("Layers (-l):", self.layers_spin)
 
-        layout.addWidget(network_group)
+        scroll_layout.addWidget(network_group)
 
-        # Information group
-        info_group = QGroupBox("Information")
-        info_layout = QVBoxLayout(info_group)
-
-        info_text = QLabel("Network architecture parameters define the neural network structure.\n\n"
-                          "• Neurons (-n): Number of neurons in each layer\n"
-                          "• Samples (-s): Number of training samples (0 = use all available)\n"
-                          "• Epochs (-e): Number of training iterations\n"
-                          "• Layers (-l): Number of hidden layers in the network")
-        info_text.setWordWrap(True)
-        info_layout.addWidget(info_text)
-
-        layout.addWidget(info_group)
-
-        # Stretch to fill space
-        layout.addStretch()
-
-    def create_training_parameters_tab(self):
-        """Create training parameters tab"""
-        tab = QWidget()
-        self.tab_widget.addTab(tab, "Training Parameters")
-
-        layout = QVBoxLayout(tab)
-
-        # Training parameters group
+        # Training Parameters Section
         training_group = QGroupBox("Training Parameters")
         training_layout = QFormLayout(training_group)
 
@@ -2596,24 +2574,234 @@ if __name__ == "__main__":
         self.learning_rate_spin.valueChanged.connect(self.on_learning_rate_changed)
         training_layout.addRow("Learning Rate (--learning-rate):", self.learning_rate_spin)
 
-        layout.addWidget(training_group)
+        # Batch size input
+        self.batch_size_spin = QSpinBox()
+        self.batch_size_spin.setRange(1, 10000)
+        self.batch_size_spin.setValue(self.learning_config.get('batch_size', 32))
+        self.batch_size_spin.valueChanged.connect(lambda v: self.update_learning_config('batch_size', v))
+        training_layout.addRow("Batch Size:", self.batch_size_spin)
 
-        # Information group
-        info_group = QGroupBox("Information")
-        info_layout = QVBoxLayout(info_group)
+        # Validation split input
+        self.validation_split_spin = QDoubleSpinBox()
+        self.validation_split_spin.setRange(0.0, 0.5)
+        self.validation_split_spin.setValue(self.learning_config.get('validation_split', 0.2))
+        self.validation_split_spin.setSingleStep(0.01)
+        self.validation_split_spin.setDecimals(2)
+        self.validation_split_spin.valueChanged.connect(lambda v: self.update_learning_config('validation_split', v))
+        training_layout.addRow("Validation Split:", self.validation_split_spin)
 
-        info_text = QLabel("Training parameters control how the neural network learns.\n\n"
-                          "• Learning Rate: Controls how much the model adjusts during training\n"
-                          "  - Higher values (0.1): Faster learning, may overshoot optimal solution\n"
-                          "  - Lower values (0.001): Slower learning, more stable convergence\n"
-                          "  - Typical range: 0.0001 to 0.1")
-        info_text.setWordWrap(True)
-        info_layout.addWidget(info_text)
+        # Model type selection
+        self.model_type_combo = QComboBox()
+        self.model_type_combo.addItems([
+            "neural_network", "convolutional_network", "recurrent_network",
+            "transformer", "autoencoder", "generative_adversarial"
+        ])
+        current_model_type = self.learning_config.get('model_type', 'neural_network')
+        index = self.model_type_combo.findText(current_model_type)
+        if index >= 0:
+            self.model_type_combo.setCurrentIndex(index)
+        self.model_type_combo.currentTextChanged.connect(lambda v: self.update_learning_config('model_type', v))
+        training_layout.addRow("Model Type:", self.model_type_combo)
 
-        layout.addWidget(info_group)
+        # Optimizer selection
+        self.optimizer_combo = QComboBox()
+        self.optimizer_combo.addItems([
+            "adam", "sgd", "rmsprop", "adagrad", "adadelta", "adamax", "nadam"
+        ])
+        current_optimizer = self.learning_config.get('optimizer', 'adam')
+        index = self.optimizer_combo.findText(current_optimizer)
+        if index >= 0:
+            self.optimizer_combo.setCurrentIndex(index)
+        self.optimizer_combo.currentTextChanged.connect(lambda v: self.update_learning_config('optimizer', v))
+        training_layout.addRow("Optimizer:", self.optimizer_combo)
 
-        # Stretch to fill space
-        layout.addStretch()
+        # Loss function selection
+        self.loss_function_combo = QComboBox()
+        self.loss_function_combo.addItems([
+            "mse", "mae", "binary_crossentropy", "categorical_crossentropy",
+            "sparse_categorical_crossentropy", "huber_loss"
+        ])
+        current_loss = self.learning_config.get('loss_function', 'mse')
+        index = self.loss_function_combo.findText(current_loss)
+        if index >= 0:
+            self.loss_function_combo.setCurrentIndex(index)
+        self.loss_function_combo.currentTextChanged.connect(lambda v: self.update_learning_config('loss_function', v))
+        training_layout.addRow("Loss Function:", self.loss_function_combo)
+
+        # Early stopping checkbox
+        self.early_stopping_check = QCheckBox("Enable Early Stopping")
+        self.early_stopping_check.setChecked(self.learning_config.get('enable_early_stopping', True))
+        self.early_stopping_check.stateChanged.connect(lambda v: self.update_learning_config('enable_early_stopping', v == 2))
+        training_layout.addWidget(self.early_stopping_check)
+
+        scroll_layout.addWidget(training_group)
+
+        # Data Configuration Section
+        data_group = QGroupBox("Data Configuration")
+        data_layout = QFormLayout(data_group)
+
+        # Data source selection
+        self.data_source_combo = QComboBox()
+        self.data_source_combo.addItems([
+            "file", "database", "web", "stream", "generated"
+        ])
+        current_data_source = self.learning_config.get('data_source', 'file')
+        index = self.data_source_combo.findText(current_data_source)
+        if index >= 0:
+            self.data_source_combo.setCurrentIndex(index)
+        self.data_source_combo.currentTextChanged.connect(lambda v: self.update_learning_config('data_source', v))
+        data_layout.addRow("Data Source:", self.data_source_combo)
+
+        # Data path input
+        self.data_file_edit = QLineEdit()
+        self.data_file_edit.setText(self.learning_config.get('data_path', ''))
+        self.data_file_edit.textChanged.connect(lambda v: self.update_learning_config('data_path', v))
+        data_layout.addRow("Data Path:", self.data_file_edit)
+
+        # Browse button
+        browse_data_btn = QPushButton("Browse...")
+        browse_data_btn.clicked.connect(self.browse_data_file)
+        data_layout.addWidget(browse_data_btn)
+
+        scroll_layout.addWidget(data_group)
+
+        # Set scroll area content
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        config_layout.addWidget(scroll_area)
+
+        layout.addWidget(config_group)
+
+        # Training controls
+        controls_layout = QHBoxLayout()
+
+        start_training_btn = QPushButton("Start Training")
+        start_training_btn.clicked.connect(self.start_training)
+        controls_layout.addWidget(start_training_btn)
+
+        stop_training_btn = QPushButton("Stop Training")
+        stop_training_btn.clicked.connect(self.stop_training)
+        controls_layout.addWidget(stop_training_btn)
+
+        save_config_btn = QPushButton("Save Configuration")
+        save_config_btn.clicked.connect(self.save_training_config)
+        controls_layout.addWidget(save_config_btn)
+
+        load_config_btn = QPushButton("Load Configuration")
+        load_config_btn.clicked.connect(self.load_training_config)
+        controls_layout.addWidget(load_config_btn)
+
+        layout.addLayout(controls_layout)
+
+        # Training progress
+        self.training_progress = QProgressBar()
+        self.training_progress.setVisible(False)
+        layout.addWidget(self.training_progress)
+
+        # Training log
+        log_group = QGroupBox("Training Log")
+        log_layout = QVBoxLayout(log_group)
+
+        self.training_log = QPlainTextEdit()
+        self.training_log.setMaximumHeight(200)
+        self.training_log.setReadOnly(True)
+        log_layout.addWidget(self.training_log)
+
+        clear_log_btn = QPushButton("Clear Log")
+        clear_log_btn.clicked.connect(self.clear_training_log)
+        log_layout.addWidget(clear_log_btn)
+
+        layout.addWidget(log_group)
+
+    def update_learning_config(self, key, value):
+        """Update learning configuration setting"""
+        self.learning_config[key] = value
+        # Update individual variables for backward compatibility
+        if key == 'normalization_min':
+            self.norm_min = value
+        elif key == 'normalization_max':
+            self.norm_max = value
+        elif key == 'neurons_per_layer':
+            self.neurons = value
+        elif key == 'epochs':
+            self.epochs = value
+        elif key == 'hidden_layers':
+            self.layers = value
+        elif key == 'learning_rate':
+            self.learning_rate = value
+
+    def save_training_config(self):
+        """Save training configuration to file"""
+        try:
+            config_file, _ = QFileDialog.getSaveFileName(
+                self, "Save Training Configuration",
+                "", "JSON files (*.json);;All files (*.*)"
+            )
+            if config_file:
+                with open(config_file, 'w') as f:
+                    json.dump(self.learning_config, f, indent=2)
+                QMessageBox.information(self, "Success", "Training configuration saved successfully")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to save configuration: {str(e)}")
+
+    def load_training_config(self):
+        """Load training configuration from file"""
+        try:
+            config_file, _ = QFileDialog.getOpenFileName(
+                self, "Load Training Configuration",
+                "", "JSON files (*.json);;All files (*.*)"
+            )
+            if config_file:
+                with open(config_file, 'r') as f:
+                    loaded_config = json.load(f)
+                    self.learning_config.update(loaded_config)
+                    self.update_ui_from_config()
+                QMessageBox.information(self, "Success", "Training configuration loaded successfully")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load configuration: {str(e)}")
+
+    def update_ui_from_config(self):
+        """Update UI elements from loaded configuration"""
+        try:
+            # Update spin boxes and combo boxes
+            self.norm_min_spin.setValue(self.learning_config.get('normalization_min', 0.0))
+            self.norm_max_spin.setValue(self.learning_config.get('normalization_max', 1.0))
+            self.neurons_spin.setValue(self.learning_config.get('neurons_per_layer', 10))
+            self.epochs_spin.setValue(self.learning_config.get('epochs', 10))
+            self.layers_spin.setValue(self.learning_config.get('hidden_layers', 3))
+            self.learning_rate_spin.setValue(self.learning_config.get('learning_rate', 0.01))
+            self.batch_size_spin.setValue(self.learning_config.get('batch_size', 32))
+            self.validation_split_spin.setValue(self.learning_config.get('validation_split', 0.2))
+
+            # Update combo boxes
+            model_type = self.learning_config.get('model_type', 'neural_network').replace('_', ' ').title()
+            index = self.model_type_combo.findText(model_type)
+            if index >= 0:
+                self.model_type_combo.setCurrentIndex(index)
+
+            data_source = self.learning_config.get('data_source', 'file').replace('_', ' ').title()
+            index = self.data_source_combo.findText(data_source)
+            if index >= 0:
+                self.data_source_combo.setCurrentIndex(index)
+
+            optimizer = self.learning_config.get('optimizer', 'adam')
+            index = self.optimizer_combo.findText(optimizer)
+            if index >= 0:
+                self.optimizer_combo.setCurrentIndex(index)
+
+            loss_function = self.learning_config.get('loss_function', 'mse')
+            index = self.loss_function_combo.findText(loss_function)
+            if index >= 0:
+                self.loss_function_combo.setCurrentIndex(index)
+
+            # Update checkboxes
+            self.early_stopping_check.setChecked(self.learning_config.get('enable_early_stopping', True))
+
+            # Update text fields
+            self.data_file_edit.setText(self.learning_config.get('data_path', ''))
+
+        except Exception as e:
+            logger.error(f"Error updating UI from config: {str(e)}")
 
     def create_settings_tab(self):
         """Create settings configuration tab"""
@@ -3963,6 +4151,84 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Clear the download log"""
         self.download_log.clear()
 
+    def start_training(self):
+        """Start training with current configuration"""
+        if not self.client:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                return
+
+        try:
+            # Show progress
+            self.training_progress.setVisible(True)
+            self.training_progress.setRange(0, 0)  # Indeterminate progress
+
+            # Log training start
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
+            self.training_log.appendPlainText(json.dumps(self.learning_config, indent=2))
+
+            async def train():
+                # Call training with consolidated configuration
+                result = await self.client.start_training(self.learning_config)
+                return result
+
+            def on_success(result):
+                self.training_progress.setVisible(False)
+                if result.success:
+                    self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training completed successfully")
+                    if result.data:
+                        self.training_log.appendPlainText(f"Training results: {json.dumps(result.data, indent=2)}")
+                    QMessageBox.information(self, "Training Complete", "Training completed successfully")
+                else:
+                    error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                    self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training failed: {error_msg}")
+                    QMessageBox.warning(self, "Training Failed", error_msg)
+
+            def on_error(error_msg):
+                self.training_progress.setVisible(False)
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {error_msg}")
+                QMessageBox.warning(self, "Training Error", error_msg)
+
+            self.async_manager.run_async_task(train(), on_success, on_error)
+
+        except Exception as e:
+            self.training_progress.setVisible(False)
+            QMessageBox.warning(self, "Error", f"Failed to start training: {str(e)}")
+
+    def stop_training(self):
+        """Stop current training"""
+        if not self.client:
+            QMessageBox.warning(self, "Connection Error", "No active client connection")
+            return
+
+        try:
+            async def stop():
+                result = await self.client.stop_training()
+                return result
+
+            def on_success(result):
+                if result.success:
+                    self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training stopped successfully")
+                    self.training_progress.setVisible(False)
+                    QMessageBox.information(self, "Training Stopped", "Training stopped successfully")
+                else:
+                    error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                    self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to stop training: {error_msg}")
+                    QMessageBox.warning(self, "Stop Failed", error_msg)
+
+            def on_error(error_msg):
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {error_msg}")
+                QMessageBox.warning(self, "Stop Error", error_msg)
+
+            self.async_manager.run_async_task(stop(), on_success, on_error)
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to stop training: {str(e)}")
+
+    def clear_training_log(self):
+        """Clear training log"""
+        self.training_log.clear()
+
     def browse_predict_input_file(self):
         """Browse for prediction input file"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -4529,24 +4795,41 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 # Handle topology
                 if topology_result.success:
-                    topology = json.dumps(topology_result.data, indent=2)
-                    self.topology_text.setPlainText(topology)
+                    topology_data = topology_result.data
+                    if isinstance(topology_data, dict) and topology_data.get('status') == 'success':
+                        # Format topology data nicely
+                        formatted_topology = self._format_topology_data(topology_data)
+                        self.topology_text.setPlainText(formatted_topology)
+                    else:
+                        topology = json.dumps(topology_data, indent=2)
+                        self.topology_text.setPlainText(topology)
                 else:
-                    self.topology_text.setPlainText(f"Error: {topology_result.data.get('error', 'Unknown error')}")
+                    error_msg = topology_result.data.get('error', 'Unknown error') if isinstance(topology_result.data, dict) else 'Unknown error'
+                    self.topology_text.setPlainText(f"Error: {error_msg}")
 
                 # Handle activity
                 if activity_result.success:
-                    if MATPLOTLIB_AVAILABLE:
-                        self.update_neural_plot(activity_result.data)
+                    activity_data = activity_result.data
+                    if isinstance(activity_data, dict) and activity_data.get('status') == 'active':
+                        # Format activity data nicely
+                        formatted_activity = self._format_activity_data(activity_data)
+                        if MATPLOTLIB_AVAILABLE:
+                            self.update_neural_plot(activity_data)
+                        else:
+                            self.activity_text.setPlainText(formatted_activity)
                     else:
-                        activity = json.dumps(activity_result.data, indent=2)
-                        self.activity_text.setPlainText(activity)
+                        if MATPLOTLIB_AVAILABLE:
+                            self.update_neural_plot(activity_data)
+                        else:
+                            activity = json.dumps(activity_data, indent=2)
+                            self.activity_text.setPlainText(activity)
                 else:
+                    error_msg = activity_result.data.get('error', 'Unknown error') if isinstance(activity_result.data, dict) else 'Unknown error'
                     if MATPLOTLIB_AVAILABLE:
                         self.activity_canvas.figure.clear()
                         self.activity_canvas.draw()
                     else:
-                        self.activity_text.setPlainText(f"Error: {activity_result.data.get('error', 'Unknown error')}")
+                        self.activity_text.setPlainText(f"Error: {error_msg}")
 
             def on_error(error_msg):
                 error_msg_full = f"Error refreshing neural data: {error_msg}"
@@ -4561,6 +4844,97 @@ capabilities, training data, performance metrics, and usage instructions."""
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to refresh neural data: {str(e)}")
+
+    def _format_topology_data(self, data):
+        """Format neural network topology data for display"""
+        try:
+            lines = []
+            lines.append("Neural Network Topology")
+            lines.append("=" * 30)
+
+            if 'layers' in data:
+                lines.append(f"Layers: {data['layers']}")
+            if 'neurons' in data:
+                lines.append(f"Neurons per Layer: {data['neurons']}")
+            if 'input_size' in data:
+                lines.append(f"Input Size: {data['input_size']}")
+            if 'output_size' in data:
+                lines.append(f"Output Size: {data['output_size']}")
+            if 'learning_rate' in data:
+                lines.append(f"Learning Rate: {data['learning_rate']}")
+            if 'num_samples' in data:
+                lines.append(f"Training Samples: {data['num_samples']}")
+
+            if 'normalization_range' in data:
+                norm_range = data['normalization_range']
+                if isinstance(norm_range, dict):
+                    min_val = norm_range.get('min', 'N/A')
+                    max_val = norm_range.get('max', 'N/A')
+                    lines.append(f"Normalization Range: [{min_val}, {max_val}]")
+
+            if 'core_initialized' in data:
+                status = "Yes" if data['core_initialized'] else "No"
+                lines.append(f"Core Initialized: {status}")
+
+            if 'network_structure' in data:
+                struct = data['network_structure']
+                if isinstance(struct, dict):
+                    lines.append("")
+                    lines.append("Network Structure:")
+                    if 'input_layer' in struct:
+                        lines.append(f"  Input Layer: {struct['input_layer']} neurons")
+                    if 'hidden_layers' in struct:
+                        lines.append(f"  Hidden Layers: {struct['hidden_layers']}")
+                    if 'output_layer' in struct:
+                        lines.append(f"  Output Layer: {struct['output_layer']} neurons")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Error formatting topology data: {str(e)}\n\nRaw data: {json.dumps(data, indent=2)}"
+
+    def _format_activity_data(self, data):
+        """Format neural network activity data for display"""
+        try:
+            lines = []
+            lines.append("Neural Network Activity")
+            lines.append("=" * 30)
+
+            if 'status' in data:
+                lines.append(f"Status: {data['status']}")
+            if 'samples_processed' in data:
+                lines.append(f"Samples Processed: {data['samples_processed']}")
+            if 'timestamp' in data:
+                # Convert timestamp to readable format
+                try:
+                    import datetime
+                    dt = datetime.datetime.fromtimestamp(data['timestamp'] / 1000000000)  # nanoseconds to seconds
+                    lines.append(f"Last Update: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                except:
+                    lines.append(f"Timestamp: {data['timestamp']}")
+
+            # Show current metrics if available
+            if 'current_metrics' in data:
+                metrics = data['current_metrics']
+                if isinstance(metrics, dict):
+                    lines.append("")
+                    lines.append("Current Metrics:")
+                    for key, value in metrics.items():
+                        lines.append(f"  {key}: {value}")
+
+            # Show recent activity if available
+            if 'recent_activity' in data:
+                activity = data['recent_activity']
+                if isinstance(activity, dict):
+                    lines.append("")
+                    lines.append("Recent Activity:")
+                    for key, value in activity.items():
+                        lines.append(f"  {key}: {value}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Error formatting activity data: {str(e)}\n\nRaw data: {json.dumps(data, indent=2)}"
 
     def update_neural_plot(self, activity_data):
         """Update neural network activity plot"""
@@ -4651,6 +5025,25 @@ capabilities, training data, performance metrics, and usage instructions."""
 def main():
     """Main application entry point"""
     try:
+        # Parse command line arguments
+        import argparse
+        parser = argparse.ArgumentParser(description='CoreAI3D Linux GUI Dashboard')
+        parser.add_argument('-v', '--verbose', action='store_true',
+                           help='Enable debug messages')
+        args = parser.parse_args()
+
+        # Set logging level based on verbose flag
+        if args.verbose:
+            logging.getLogger().setLevel(logging.DEBUG)
+            # Also set specific loggers to DEBUG for more detailed output
+            logging.getLogger('coreai3d_client').setLevel(logging.DEBUG)
+            logging.getLogger('automation_helper').setLevel(logging.DEBUG)
+            logger.info("Debug messages enabled via -v flag")
+        else:
+            # For release builds, ensure only WARNING and above are shown
+            logging.getLogger().setLevel(logging.WARNING)
+            logger.info("Running in release mode - debug messages disabled")
+
         # Create logs directory
         os.makedirs('logs', exist_ok=True)
 

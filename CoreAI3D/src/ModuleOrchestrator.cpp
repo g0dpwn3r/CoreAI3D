@@ -354,6 +354,81 @@ std::vector<float> ModuleOrchestrator::extractMultiModalFeatures(const std::stri
     return data;
 }
 
+// Video processing integration
+std::vector<float> ModuleOrchestrator::processVideoData(const std::string& videoPath, const std::vector<std::string>& requiredModules) {
+    try {
+        std::vector<float> results;
+
+        for (const auto& moduleName : requiredModules) {
+            if (visionModules.find(moduleName) != visionModules.end()) {
+                auto* module = visionModules[moduleName].get();
+                if (module && module->isReady()) {
+                    // Process video through vision module
+                    auto videoFeatures = module->extractVideoFeatures(videoPath, 30);
+                    for (const auto& featureVec : videoFeatures) {
+                        results.insert(results.end(), featureVec.begin(), featureVec.end());
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error processing video data: " << e.what() << std::endl;
+        return {};
+    }
+}
+
+std::string ModuleOrchestrator::analyzeVideoContent(const std::string& videoPath, const std::vector<std::string>& analysisTypes) {
+    try {
+        std::stringstream analysis;
+
+        for (const auto& moduleName : analysisTypes) {
+            if (visionModules.find(moduleName) != visionModules.end()) {
+                auto* module = visionModules[moduleName].get();
+                if (module && module->isReady()) {
+                    // Analyze video content through vision module
+                    auto videoAnalysis = module->analyzeVideo(videoPath, 30, true);
+                    analysis << "Video Analysis (" << moduleName << "):\n";
+                    analysis << "Duration: " << videoAnalysis.duration << "s\n";
+                    analysis << "Frames: " << videoAnalysis.frames.size() << "\n";
+                    analysis << "Objects detected: " << videoAnalysis.objectCounts.size() << "\n";
+                    analysis << "Text segments: " << videoAnalysis.extractedText.size() << "\n\n";
+                }
+            }
+        }
+
+        return analysis.str();
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error analyzing video content: " << e.what() << std::endl;
+        return "Analysis failed: " + std::string(e.what());
+    }
+}
+
+std::vector<float> ModuleOrchestrator::extractVideoFeatures(const std::string& videoPath, int frameSamplingRate) {
+    try {
+        std::vector<float> combinedFeatures;
+
+        for (const auto& pair : visionModules) {
+            if (pair.second && pair.second->isReady()) {
+                auto features = pair.second->extractVideoFeatures(videoPath, frameSamplingRate);
+                // Flatten the vector<vector<float>> into vector<float>
+                for (const auto& featureVec : features) {
+                    combinedFeatures.insert(combinedFeatures.end(), featureVec.begin(), featureVec.end());
+                }
+            }
+        }
+
+        return combinedFeatures;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error extracting video features: " << e.what() << std::endl;
+        return {};
+    }
+}
+
 // Intelligent routing
 std::string ModuleOrchestrator::routeToOptimalModule(const std::string& taskType, const std::map<std::string, std::string>& parameters) {
     try {

@@ -1,0 +1,46 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "threads": 4,
+    "api_version": "v1",
+    "cors_origin": "*",
+    "request_timeout": 30,
+    "max_request_size": 1048576,
+    "enable_logging": true,
+    "log_file": "api_server.log"
+  },
+  "database": {
+    "host": "localhost",
+    "port": 33060,
+    "user": "user",
+    "password": "password",
+    "schema": "coreai_db",
+    "ssl_mode": "DISABLED",
+    "create_tables": false
+  },
+  "math": {
+    "precision": 1e-10,
+    "max_iterations": 1000,
+    "convergence_threshold": 1e-8,
+    "learning_rate": 0.01,
+    "batch_size": 32,
+    "epochs": 100,
+    "constants": {
+      "pi": 3.14159265358979323846,
+      "e": 2.71828182845904523536,
+      "golden_ratio": 1.618033988749895
+    },
+    "algorithms": {
+      "optimization": "gradient_descent",
+      "integration": "trapezoidal",
+      "differentiation": "finite_difference",
+      "random_distribution": "uniform"
+    },
+    "precision_settings": {
+      "numerical_derivative_step": 1e-5,
+      "integration_steps": 1000,
+      "random_seed": 42
+    }
+  }
+}

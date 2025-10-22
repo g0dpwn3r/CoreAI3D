@@ -221,19 +221,29 @@ public:
     virtual std::vector<std::string> getMonitoringUpdates();
     virtual bool isMonitoringActive(const std::string& url);
 
+private:
+    // Monitoring data structures
+    std::map<std::string, std::thread> monitoringThreads;
+    std::map<std::string, bool> monitoringActive;
+    std::map<std::string, std::vector<std::string>> monitoringUpdates;
+    std::mutex monitoringMutex;
+
     // Web automation
     virtual bool automateWebInteraction(const std::string& url, const std::vector<std::string>& actions);
     virtual std::vector<float> extractDataFromWebForm(const std::string& url, const std::map<std::string, std::string>& formData);
 
     // Status and information
-    bool isReady() const { return isInitialized; }
     std::string getModuleName() const { return moduleName; }
     int getTimeout() const { return timeoutSeconds; }
     size_t getCacheSize() const { return cachedPages.size(); }
 
     // Memory management
-    void clearCache();
     void clearIndex();
+
+public:
+    // Public status and memory methods
+    bool isReady() const { return isInitialized; }
+    void clearCache();
     size_t getMemoryUsage() const;
 
     // Training interface for web-specific learning

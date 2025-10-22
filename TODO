@@ -1,11 +1,34 @@
 ## v1.0 - Core Setup and Basic Features
 - Add offline mode
 - Add loading datasets from database
+- Linux_gui should change the docker sanbox centos to kali
+- linux_gui should have datanormalization networkarchitecture and training parameters under one tab in the dashboard
+- linux_gui add training secnario hacking-white hacking-gray and hacking-black
+- Add saveDatasetToDatabase functions
+- linux_gui and coreai3d should have debug message show up on the dashbaord debugging tab without -v flag -
 - Add loadTargetCsv to save to database
 - Remove populate fields
 - Add set Input and Output length dynamically
 - API Load configuration from file from APIServer initialize
 - MATH Load configuration from file
+- fix --create-tables
+- fix database connection issues
+- fix dataset loading issues
+- fix model saving issues
+- fix training issues
+- fix chat issues
+- add learn from conversations
+- add learn from files
+- add learn from internet
+- add learn from videos
+- add learn from audio
+- add learn from images
+- add learn from 3d models
+- add learn from music
+- dashboard should work
+- network topology should be working
+- change the dashboard to include all learing settings like learning rate, batch size, epochs learing-rate, etc. in one place
+- Remove DEBUG merssages with a -v flag to show them and not being able to use them in the release verison of this program
 
 ## v2.1 - Testing and Optimization
 - Add matrix multiplication Moosbauwer poole algorithm
@@ -37,6 +60,7 @@
 - Add connectivity to bard it should learn from it
 - add connectivity to bing it should learn from it
 - Add connectivity to other ai models like llama2, qwen, v0 pentestgpt and grok
+- Also connectivity to other ai models with the linux_gui
 - Add a way to update the models
 - Add Patching system
 - Add a way to add custom models
@@ -44,7 +68,7 @@
 - add a way to update the software from the dashboard
 
 ## v2.3 - Learning Capabilities
-- Add kaggle datasets for learning to windows_gui
+- Add kaggle datasets for learning to linux_gui
 - Add a way to learn from browsing the internet
 - Add a way for it to learn from youtube and other video platforms
 - Add a way for it to listen and learn from music

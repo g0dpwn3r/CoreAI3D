@@ -1,43 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.16)
 project(CoreAI3D)
 
-# If vcpkg toolchain exists next to the repo, use it so find_package(CONFIG) can find packages installed by vcpkg
-if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/scripts/buildsystems/vcpkg.cmake")
-    message(STATUS "Using vcpkg toolchain: ${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/scripts/buildsystems/vcpkg.cmake")
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "Vcpkg toolchain file" FORCE)
-endif()
-
-# Ensure there's a sensible vcpkg triplet defined for constructing prefixes
-if(NOT DEFINED VCPKG_TARGET_TRIPLET)
-    if(WIN32)
-        set(VCPKG_TARGET_TRIPLET "x64-windows")
-    else()
-        set(VCPKG_TARGET_TRIPLET "x64-linux")
-    endif()
-endif()
-
-# If a vcpkg install prefix exists, add it to CMAKE_PREFIX_PATH so find_package can locate packages like Boost/Protobuf
-if(NOT DEFINED _VCPKG_PROBED)
-    set(_VCPKG_PROBED TRUE CACHE INTERNAL "internal flag")
-    if(DEFINED ENV{VCPKG_ROOT})
-        set(_vcpkg_root $ENV{VCPKG_ROOT})
-    elseif(EXISTS "${CMAKE_SOURCE_DIR}/vcpkg")
-        set(_vcpkg_root "${CMAKE_SOURCE_DIR}/vcpkg")
-    else()
-        set(_vcpkg_root "")
-    endif()
-
-    if(_vcpkg_root)
-        set(_vcpkg_installed "${_vcpkg_root}/installed/${VCPKG_TARGET_TRIPLET}")
-        if(EXISTS "${_vcpkg_installed}")
-            list(APPEND CMAKE_PREFIX_PATH "${_vcpkg_installed}")
-            message(STATUS "Appended vcpkg installed prefix to CMAKE_PREFIX_PATH: ${_vcpkg_installed}")
-            # set Boost_ROOT to help FindBoost in CONFIG mode
-            set(Boost_ROOT "${_vcpkg_installed}")
-            set(Boost_NO_SYSTEM_PATHS ON)
-        endif()
-    endif()
-endif()
 
 # Zorg dat protoc beide dirs kan zien
 set(PROTOBUF_IMPORT_DIRS
@@ -63,26 +26,52 @@ if(EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
     endif()
 endif()
 
-# --- Find and Link Boost Components ---
-# Use Boost CONFIG mode
-find_package(Boost CONFIG REQUIRED COMPONENTS program_options filesystem system regex)
-if(Boost_FOUND)
-    message(STATUS "Found Boost include dirs: ${Boost_INCLUDE_DIRS}")
-else()
-    message(WARNING "Boost not found. Install Boost via vcpkg (e.g. 'vcpkg install boost-program-options boost-filesystem boost-system boost-regex') and ensure the vcpkg toolchain is used.")
+# Set Boost policy to avoid version mismatch warnings
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
 endif()
 
-# find_package(mysql-concpp CONFIG REQUIRED)
+# --- Find and Link Boost Components ---
+# Use only vcpkg Boost to avoid version conflicts
+find_package(boost_program_options CONFIG REQUIRED)
+find_package(boost_filesystem CONFIG REQUIRED)
+find_package(boost_system CONFIG REQUIRED)
+find_package(boost_regex CONFIG REQUIRED)
+# Use vcpkg Boost CONFIG mode only
+if(Boost_FOUND)
+    message(STATUS "Found Boost include dirs: ${Boost_INCLUDE_DIRS}")
+    message(STATUS "Found Boost libraries: ${Boost_LIBRARIES}")
+else()
+    message(WARNING "Boost not found. Install Boost via vcpkg or ensure Boost is available in your system paths.")
+endif()
+# Force vcpkg paths to come first for MySQL connector and other vcpkg packages
+list(INSERT CMAKE_PREFIX_PATH 0 "/home/carlon/code/CoreAI3D/vcpkg_installed/x64-linux/share")
+list(INSERT CMAKE_PREFIX_PATH 0 "/home/carlon/code/CoreAI3D/vcpkg_installed/x64-linux")
+# Find MySQL connector using vcpkg
+find_package(unofficial-mysql-connector-cpp CONFIG)
 find_package(absl CONFIG REQUIRED)
-find_package(utf8_range CONFIG REQUIRED)
+find_package(utf8_range CONFIG)
 find_package(ZLIB REQUIRED)
 find_package(CURL REQUIRED)
-find_package(zstd CONFIG REQUIRED)
+find_package(zstd CONFIG)
+if(NOT zstd_FOUND)
+    message(WARNING "zstd CONFIG not found, trying MODULE mode")
+    find_package(zstd MODULE)
+    if(NOT zstd_FOUND)
+        message(WARNING "zstd not found, skipping zstd dependency")
+    endif()
+endif()
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
 find_package(google_cloud_cpp_speech CONFIG REQUIRED)
 find_package(google_cloud_cpp_common CONFIG REQUIRED)
+find_package(OpenCV CONFIG REQUIRED)
+find_package(lz4 CONFIG)
+if(NOT lz4_FOUND)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(lz4 REQUIRED liblz4)
+endif()
 
 # Prefer Protobuf include dir provided by the CMake package
 if(NOT DEFINED PROTOBUF_INCLUDE_DIR OR NOT PROTOBUF_INCLUDE_DIR)
@@ -102,27 +91,13 @@ if(NOT DEFINED PROTOBUF_INCLUDE_DIR OR NOT PROTOBUF_INCLUDE_DIR)
     endif()
 endif()
 
-# If still not found, probe common vcpkg locations as a fallback
-if(NOT PROTOBUF_INCLUDE_DIR)
-    find_path(PROTOBUF_INCLUDE_DIR google/protobuf/runtime_version.h
-        PATHS
-            "D:/code/vcpkg/installed/x64-windows/include"
-            "C:/vcpkg/installed/x64-windows/include"
-            "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
-            "${CMAKE_SOURCE_DIR}/vcpkg_installed/installed/${VCPKG_TARGET_TRIPLET}/include"
-            "$ENV{USERPROFILE}/vcpkg/installed/x64-windows/include"
-            "D:/vcpkg/installed/x64-windows/include"
-            "C:/Program Files/vcpkg/installed/x64-windows/include"
-        NO_DEFAULT_PATH
-    )
-endif()
 
 if(PROTOBUF_INCLUDE_DIR)
     message(STATUS "Found protobuf include dir: ${PROTOBUF_INCLUDE_DIR}")
     list(APPEND PROTOBUF_IMPORT_DIRS ${PROTOBUF_INCLUDE_DIR})
     list(APPEND PROTOBUF_IMPORT_DIRS ${PROTOBUF_INCLUDE_DIR}/google ${PROTOBUF_INCLUDE_DIR}/googleapis)
 else()
-    message(WARNING "Could not find protobuf include directory; proto import may fail if google/googleapis are not available. Install protobuf via vcpkg and ensure the vcpkg toolchain is used.")
+    message(WARNING "Could not find protobuf include directory; proto import may fail if google/googleapis are not available. Install protobuf via system package manager.")
 endif()
 
 # Find google-cloud-cpp include dirs
@@ -191,7 +166,7 @@ if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
         COMMENT "Copying protobuf include directories to build directory"
     )
 else()
-    message(STATUS "Skipping copy of google/googleapis into build tree because local directories are missing; using Protobuf include paths from vcpkg/system")
+    message(STATUS "Skipping copy of google/googleapis into build tree because local directories are missing; using Protobuf include paths from system")
 endif()
 
 target_include_directories(proto_objs PUBLIC
@@ -236,6 +211,12 @@ target_include_directories(CoreAI3DLib PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+# Add USE_MYSQL preprocessor definition conditionally
+option(USE_MYSQL "Enable MySQL support" OFF)
+if(USE_MYSQL)
+    target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
+endif()
+
 # If we copied local google/googleapis into the build tree, include them too
 if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
     target_include_directories(CoreAI3DLib PUBLIC
@@ -243,7 +224,7 @@ if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
         ${CMAKE_CURRENT_BINARY_DIR}/googleapis
     )
 else()
-    # Otherwise include protobuf include dir detected earlier (from vcpkg/system)
+    # Otherwise include protobuf include dir detected earlier (from system)
     if(PROTOBUF_INCLUDE_DIR)
         target_include_directories(CoreAI3DLib PUBLIC ${PROTOBUF_INCLUDE_DIR})
     endif()
@@ -265,11 +246,18 @@ endif()
 if(TARGET Boost::system)
     list(APPEND PROJECT_LIBS Boost::system)
 endif()
+if(TARGET Boost::regex)
+    list(APPEND PROJECT_LIBS Boost::regex)
+endif()
 
 # Link libraries to CoreAI3DLib
 target_link_libraries(CoreAI3DLib PUBLIC
     proto_objs
     ${PROJECT_LIBS}
+    unofficial::mysql-connector-cpp::connector
+    mysqlcppconn
+    mysqlcppconnx
+    Boost::program_options
     absl::absl_check # Example Abseil targets, link what's needed by your code/protobuf
     absl::absl_log
     absl::algorithm
@@ -292,6 +280,8 @@ target_link_libraries(CoreAI3DLib PUBLIC
     absl::log_initialize
     absl::log_globals
     absl::log_severity
+    absl::log_internal_message
+    absl::log_internal_check_op
     absl::memory
     absl::node_hash_map
     absl::node_hash_set
@@ -310,14 +300,29 @@ target_link_libraries(CoreAI3DLib PUBLIC
     ZLIB::ZLIB
     CURL::libcurl
     gRPC::grpc++
-    zstd::libzstd
+    $<$<TARGET_EXISTS:zstd::libzstd>:zstd::libzstd>
+    $<$<TARGET_EXISTS:zstd::libzstd_shared>:zstd::libzstd_shared>
+    $<$<TARGET_EXISTS:zstd::libzstd_static>:zstd::libzstd_static>
+    $<$<BOOL:${zstd_FOUND}>:zstd::libzstd>
     protobuf::libprotoc
     protobuf::libprotobuf
     protobuf::libprotobuf-lite
     nlohmann_json::nlohmann_json
     google-cloud-cpp::speech
     google-cloud-cpp::common
+    ${OpenCV_LIBS}
+    resolv
+    $<$<TARGET_EXISTS:lz4::lz4>:lz4::lz4>
+    $<$<TARGET_EXISTS:lz4::lz4_static>:lz4::lz4_static>
 )
+
+# Add MySQL libraries if found
+if(TARGET unofficial::mysql-connector-cpp::connector)
+    target_link_libraries(CoreAI3DLib PUBLIC unofficial::mysql-connector-cpp::connector)
+    message(STATUS "MySQL connector-cpp found and linked")
+else()
+    message(WARNING "MySQL connector-cpp not found - database functionality may not work")
+endif()
 
 add_executable(CoreAI3D main.cpp)
 
@@ -329,7 +334,14 @@ target_include_directories(CoreAI3D PRIVATE
 )
 
 # Link the executable against CoreAI3DLib
-target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib)
+target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib Boost::program_options)
+
+# Add post-build automation script
+add_custom_command(TARGET CoreAI3D POST_BUILD
+    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${CMAKE_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
+    COMMENT "Running post-build automation script"
+    VERBATIM
+)
 
 # After computing VALID_PROTOBUF_IMPORT_DIRS, print them for diagnostics
 message(STATUS "Proto import dirs used for generation: ${VALID_PROTOBUF_IMPORT_DIRS}")

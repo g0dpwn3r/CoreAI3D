@@ -6,20 +6,22 @@
 #include "Core.hpp"
 #include "Database.hpp"
 #include "Language.hpp"
+#include "VisionModule.hpp"
 #include <nlohmann/json.hpp>
 
 class Language;
 class CoreAI;
 class Database;
+class VisionModule;
 
 class Training {
 public:
     // Constructor for online mode (with database)
     Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
-        const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables);
+        const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose = true);
 
     // Constructor for offline mode (no database)
-    Training(bool isOffline);
+    Training(bool isOffline, bool verbose = true);
 
     void initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort, std::string& dbUser, std::string& dbPassword, std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
 
@@ -86,6 +88,7 @@ private:
 
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Language> langProc;
+public:
     std::unique_ptr<Database> dbManager; // Changed to unique_ptr
     std::vector<std::vector<float>> normalizeData(const std::vector<std::vector<float>>& data_to_normalize,
         float original_min, float original_max,
@@ -93,6 +96,48 @@ private:
 
     float last_known_timestamp;
     bool loadTextCSV(const std::string& filename, int maxSeqLen, int embeddingDim);
+
+    // New methods for learning from various file types
+    bool loadTextFile(const std::string& filename, int maxSeqLen, int embeddingDim);
+    bool loadJSONFile(const std::string& filename, const std::string& dataPath, int maxSeqLen, int embeddingDim);
+    bool loadXMLFile(const std::string& filename, const std::string& xpath, int maxSeqLen, int embeddingDim);
+    bool loadDocumentFile(const std::string& filename, int maxSeqLen, int embeddingDim);
+    bool loadFile(const std::string& filename, int maxSeqLen, int embeddingDim); // General method that detects file type and routes to appropriate loader
+
+    // New methods for learning from web content
+    bool loadFromWebURL(const std::string& url, int maxSeqLen, int embeddingDim);
+    bool loadFromWebSearch(const std::string& query, int maxResults, int maxSeqLen, int embeddingDim);
+    bool trainOnWebContent(const std::string& url, int epochs = 10);
+    bool trainOnWebSearchResults(const std::string& query, int maxResults, int epochs = 10);
+
+    // New methods for learning from video content
+    bool loadFromVideoFile(const std::string& videoPath, int maxSeqLen, int embeddingDim, int frameSamplingRate = 30);
+    bool loadFromVideoAnalysis(const std::string& videoPath, int maxSeqLen, int embeddingDim, bool includeOCR = true, bool includeDetections = true);
+    bool trainOnVideoContent(const std::string& videoPath, int epochs = 10, int frameSamplingRate = 30);
+    bool trainOnVideoDataset(const std::string& videoPath, int epochs = 10, int frameSamplingRate = 30);
+    bool analyzeVideoContent(const std::string& videoPath);
+    std::vector<std::vector<float>> extractVideoFeatures(const std::string& videoPath, int temporalWindow = 5);
+
+    // New methods for learning from image content
+    bool loadFromImageFile(const std::string& imagePath, int maxSeqLen, int embeddingDim);
+    bool loadFromImageDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim);
+    bool trainOnImageContent(const std::string& imagePath, int epochs = 10);
+    bool trainOnImageDataset(const std::string& datasetPath, int epochs = 10);
+    bool analyzeImageContent(const std::string& imagePath);
+    std::vector<float> extractImageFeatures(const std::string& imagePath);
+
+    // New methods for learning from audio content
+    bool loadFromAudioFile(const std::string& audioPath, int maxSeqLen, int embeddingDim);
+    bool loadFromAudioTranscription(const std::string& audioPath, int maxSeqLen, int embeddingDim);
+    bool trainOnAudioContent(const std::string& audioPath, int epochs = 10);
+    bool trainOnAudioFile(const std::string& audioPath, int epochs = 10);
+    bool analyzeAudioContent(const std::string& audioPath);
+    std::vector<float> extractAudioFeatures(const std::string& audioPath, int temporalWindow = 5);
+    bool loadAudioDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim);
+    bool trainOnAudioDataset(const std::string& datasetPath, int epochs = 10);
+
+    // Database integration for file datasets
+    bool saveFileDataset(int& datasetId, const std::string& datasetName, const std::string& fileType);
 
     bool isOfflineMode; // New member to track offline status
     int currentDatasetId; // Stores the ID of the currently loaded/saved dataset

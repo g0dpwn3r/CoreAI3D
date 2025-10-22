@@ -93,6 +93,41 @@ public:
     virtual bool processVideoFile(const std::string& inputPath, const std::string& outputPath, int frameInterval = 1);
     virtual std::vector<std::vector<float>> processVideoFrames(const std::string& videoPath, int maxFrames = -1);
 
+    // Video learning interface
+    struct VideoFrame {
+        int frameNumber;
+        double timestamp;
+        std::vector<float> imageData;
+        std::string ocrText;
+        std::vector<DetectionResult> detections;
+        std::vector<float> features;
+    };
+
+    struct VideoAnalysis {
+        std::string videoPath;
+        double duration;
+        int totalFrames;
+        int fps;
+        std::vector<VideoFrame> frames;
+        std::vector<std::string> sceneChanges;
+        std::map<std::string, int> objectCounts;
+        std::vector<std::string> extractedText;
+    };
+
+    // Video format support and processing
+    virtual bool isVideoFormatSupported(const std::string& videoPath);
+    virtual VideoAnalysis analyzeVideo(const std::string& videoPath, int frameSamplingRate = 30, bool extractText = true);
+    virtual std::vector<VideoFrame> extractVideoFrames(const std::string& videoPath, int maxFrames = -1, int samplingRate = 1);
+
+    // Advanced video processing
+    virtual std::vector<std::string> detectSceneChanges(const std::string& videoPath);
+    virtual std::map<std::string, int> countObjectsInVideo(const std::string& videoPath);
+    virtual std::vector<std::string> extractTextFromVideo(const std::string& videoPath, int frameInterval = 30);
+
+    // Video content analysis
+    virtual std::vector<float> analyzeVideoContent(const std::string& videoPath);
+    virtual std::vector<std::vector<float>> extractVideoFeatures(const std::string& videoPath, int temporalWindow = 10);
+
     // OCR interface
     virtual std::string performOCR(const std::string& imagePath);
     virtual std::string performOCROnData(const std::vector<float>& imageData);

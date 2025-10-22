@@ -9,6 +9,22 @@ RUN apk update && apk upgrade && apk add --no-cache \
     py3-numpy py3-scipy shadow && \
     rm -rf /var/cache/apk/*
 
+RUN apk add --no-cache \
+      build-base \
+      python3-dev \
+      py3-pip \
+      py3-setuptools \
+      py3-wheel \
+      openblas-dev \
+      gfortran \
+      meson \
+      ninja \
+      musl-dev
+
+RUN apk add --no-cache \
+    build-base gfortran lapack-dev openblas-dev \
+    cython py3-numpy py3-scipy py3-pandas \
+    meson ninja pkgconfig
 
 # Create sandbox user
 RUN adduser -D -s /bin/ash sandbox && \
@@ -34,22 +50,20 @@ RUN eval "$(pyenv init --path)" && \
     python --version
 
 # Install Python packages for AI operations
-RUN python3 -m venv ~/venv && \
-    . ~/venv/bin/activate && \
-    pip install --upgrade pip && \
-    pip install \
+# Install build deps
+RUN apk add --no-cache \
+    build-base gfortran lapack-dev openblas-dev \
+    cython py3-numpy meson ninja pkgconfig
+
+RUN python3 -m venv /root/venv && \
+    /root/venv/bin/pip install --upgrade pip && \
+    /root/venv/bin/pip install --no-cache-dir \
+        "scikit-learn<1.6" \
         requests aiohttp websockets \
-        psutil docker \
-        opencv-python-headless \
-        numpy pandas scipy \
-        scikit-learn \
-        pillow \
-        pytesseract \
-        speech_recognition \
-        pyttsx3 \
-        beautifulsoup4 \
-        selenium \
-        playwright
+        psutil docker opencv-python-headless \
+        numpy pandas scipy pillow pytesseract SpeechRecognition \
+        pyttsx3 beautifulsoup4 selenium
+
 
 # Install Node.js packages for web automation
 RUN npm install -g \

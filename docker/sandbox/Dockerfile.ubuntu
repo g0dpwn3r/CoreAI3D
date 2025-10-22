@@ -20,8 +20,6 @@ RUN apt-get install -y nodejs && npm install -g npm@latest
 
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g puppeteer cheerio axios ws
-
 RUN apt-get update && apt-get install -y \
     git curl ca-certificates build-essential \
     libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
@@ -66,11 +64,6 @@ RUN pip3 install  \
     beautifulsoup4 \
     selenium \
     playwright
-
-RUN git clone https://github.com/nodejs/node.git /tmp/node \
- && cd /tmp/node && git checkout v22.9.0 \
- && ./configure && make -j$(nproc) && make install \
- && npm install -g npm@latest
 
 # Install Node.js packages for web automation
 RUN npm install -g \

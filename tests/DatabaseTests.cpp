@@ -20,7 +20,7 @@ TEST_CASE("Database smoke and dataset flow (requires real DB)", "[database][!may
     const std::string schema = "coreai3d_test";
 
     // Try to create a Database instance; if it throws, fail.
-    Database db(host, port, user, password, schema, SSLMode::DISABLED);
+    Database db(host, port, user, password, schema, SSLMode::DISABLED, true);
 
     SECTION("Create tables and CRUD dataset") {
         REQUIRE_NOTHROW(db.createTables());

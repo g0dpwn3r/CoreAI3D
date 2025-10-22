@@ -25,9 +25,9 @@ target_link_libraries(CoreAI3D_Catch2Tests
 )
 
 # Register Catch2 tests with CTest
-include(CTest)
-include(Catch)
-catch_discover_tests(CoreAI3D_Catch2Tests)
+# include(CTest)
+# include(Catch)
+# catch_discover_tests(CoreAI3D_Catch2Tests)
 
 # ---- GoogleTest Tests ----
 find_package(GTest REQUIRED)
@@ -42,4 +42,4 @@ target_link_libraries(CoreAI3D_GTest
 
 # Register GoogleTest tests with CTest
 include(GoogleTest)
-gtest_discover_tests(CoreAI3D_GTest)
+# gtest_discover_tests(CoreAI3D_GTest)

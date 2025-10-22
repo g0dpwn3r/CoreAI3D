@@ -16,7 +16,7 @@ const int DEFAULT_HOP_SIZE = 512;
 
 // Constructor
 AudioModule::AudioModule(const std::string& name, int sr, int ch, int bufSize)
-    : moduleName(name), sampleRate(sr), channels(ch), bufferSize(bufSize),
+    : moduleName(name), sampleRate(sr), channels(ch), bitsPerSample(16), bufferSize(bufSize),
       isInitialized(false), gain(1.0f), noiseGateThreshold(-40.0f), noiseReductionEnabled(false) {
     audioBuffer.resize(bufferSize * channels, 0.0f);
     frequencyBuffer.resize(bufferSize / 2 + 1);
@@ -487,12 +487,13 @@ AudioModule::SpeechResult AudioModule::recognizeSpeech(const std::string& audioP
 
 AudioModule::SpeechResult AudioModule::recognizeSpeechFromData(const std::vector<float>& audioData) {
     try {
-        // TODO: Implement actual speech recognition
+        // TODO: Implement speech recognition using Google Cloud Speech API
+        // For now, return placeholder result
         SpeechResult result;
-        result.text = "Speech recognition not implemented";
+        result.text = "Speech recognition not yet implemented with Google Cloud API";
         result.confidence = 0.0f;
         result.timestamps = {0.0f, static_cast<float>(audioData.size()) / sampleRate};
-        result.alternatives = {"Speech recognition not available"};
+        result.alternatives = {"Speech recognition service unavailable"};
 
         return result;
     }
@@ -504,12 +505,37 @@ AudioModule::SpeechResult AudioModule::recognizeSpeechFromData(const std::vector
 
 std::vector<AudioModule::SpeechResult> AudioModule::recognizeContinuousSpeech(const std::string& audioPath) {
     try {
-        // TODO: Implement continuous speech recognition
-        return {SpeechResult{"Continuous speech recognition not implemented", 0.0f, {}, {}}};
+        // Load audio data
+        auto audioData = audioPathToNumericalData(audioPath);
+        if (audioData.empty()) {
+            return {SpeechResult{"Failed to load audio data", 0.0f, {}, {}}};
+        }
+
+        // Split audio into segments for continuous recognition
+        const size_t segmentSize = sampleRate * 10; // 10-second segments
+        std::vector<SpeechResult> results;
+
+        for (size_t i = 0; i < audioData.size(); i += segmentSize) {
+            size_t endIdx = std::min(i + segmentSize, audioData.size());
+            std::vector<float> segment(audioData.begin() + i, audioData.begin() + endIdx);
+
+            // Recognize speech in this segment
+            auto segmentResult = recognizeSpeechFromData(segment);
+
+            // Adjust timestamps to account for segment position
+            float timeOffset = static_cast<float>(i) / sampleRate;
+            for (auto& timestamp : segmentResult.timestamps) {
+                timestamp += timeOffset;
+            }
+
+            results.push_back(segmentResult);
+        }
+
+        return results;
     }
     catch (const std::exception& e) {
         std::cerr << "Error recognizing continuous speech: " << e.what() << std::endl;
-        return {};
+        return {SpeechResult{"Error in continuous speech recognition", 0.0f, {}, {}}};
     }
 }
 
@@ -995,9 +1021,41 @@ void AudioModule::stopRealTimeProcessing() {
 // Utility functions
 std::vector<float> AudioModule::audioPathToNumericalData(const std::string& audioPath) {
     try {
-        // TODO: Implement proper audio file loading
-        // For now, generate a simple test signal
-        return generateTone(440.0f, 1.0f, 0.5f);
+        // Check if file exists
+        std::ifstream file(audioPath, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open audio file: " + audioPath);
+        }
+
+        // Get file size
+        file.seekg(0, std::ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // Read file header to determine format
+        char header[44];
+        if (fileSize < 44) {
+            throw std::runtime_error("File too small to be a valid audio file");
+        }
+
+        file.read(header, 44);
+
+        // Check for WAV format
+        if (std::string(header, 4) == "RIFF" && std::string(header + 8, 4) == "WAVE") {
+            return loadWAVFile(audioPath);
+        }
+        // Check for MP3 format (basic check)
+        else if (fileSize > 3 && header[0] == (char)0xFF && (header[1] & 0xE0) == 0xE0) {
+            return loadMP3File(audioPath);
+        }
+        // Check for FLAC format
+        else if (std::string(header, 4) == "fLaC") {
+            return loadFLACFile(audioPath);
+        }
+        else {
+            // Try to load as raw PCM data
+            return loadRawPCMFile(audioPath);
+        }
     }
     catch (const std::exception& e) {
         std::cerr << "Error loading audio file: " << e.what() << std::endl;
@@ -1007,13 +1065,198 @@ std::vector<float> AudioModule::audioPathToNumericalData(const std::string& audi
 
 std::string AudioModule::numericalDataToAudioPath(const std::vector<float>& data, const std::string& outputPath, int sampleRate) {
     try {
-        // TODO: Implement proper audio file saving
-        return outputPath;
+        // Determine output format from file extension
+        std::string extension = outputPath.substr(outputPath.find_last_of(".") + 1);
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+        if (extension == "wav") {
+            return saveWAVFile(data, outputPath, sampleRate);
+        }
+        else if (extension == "mp3") {
+            return saveMP3File(data, outputPath, sampleRate);
+        }
+        else if (extension == "flac") {
+            return saveFLACFile(data, outputPath, sampleRate);
+        }
+        else {
+            // Default to WAV
+            return saveWAVFile(data, outputPath, sampleRate);
+        }
     }
     catch (const std::exception& e) {
         std::cerr << "Error saving audio file: " << e.what() << std::endl;
         return std::string();
     }
+}
+
+// Audio format loading implementations
+std::vector<float> AudioModule::loadWAVFile(const std::string& audioPath) {
+    std::vector<float> audioData;
+
+    try {
+        std::ifstream file(audioPath, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open WAV file: " + audioPath);
+        }
+
+        // Read WAV header
+        char header[44];
+        file.read(header, 44);
+
+        // Parse header
+        int channels = *reinterpret_cast<int16_t*>(&header[22]);
+        int sampleRate = *reinterpret_cast<int32_t*>(&header[24]);
+        int bitsPerSample = *reinterpret_cast<int16_t*>(&header[34]);
+        int dataSize = *reinterpret_cast<int32_t*>(&header[40]);
+
+        // Update module parameters
+        this->sampleRate = sampleRate;
+        this->channels = channels;
+        this->bitsPerSample = bitsPerSample;
+
+        // Read audio data
+        std::vector<char> rawData(dataSize);
+        file.read(rawData.data(), dataSize);
+
+        // Convert to float
+        audioData.reserve(dataSize / (bitsPerSample / 8));
+        for (size_t i = 0; i < rawData.size(); i += bitsPerSample / 8) {
+            if (bitsPerSample == 16) {
+                int16_t sample = *reinterpret_cast<int16_t*>(&rawData[i]);
+                audioData.push_back(static_cast<float>(sample) / 32768.0f);
+            } else if (bitsPerSample == 24) {
+                // 24-bit handling
+                int32_t sample = (rawData[i+2] << 16) | (rawData[i+1] << 8) | rawData[i];
+                if (sample & 0x800000) sample |= 0xFF000000; // Sign extension
+                audioData.push_back(static_cast<float>(sample) / 8388608.0f);
+            } else if (bitsPerSample == 32) {
+                int32_t sample = *reinterpret_cast<int32_t*>(&rawData[i]);
+                audioData.push_back(static_cast<float>(sample) / 2147483648.0f);
+            }
+        }
+
+        file.close();
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error loading WAV file: " << e.what() << std::endl;
+    }
+
+    return audioData;
+}
+
+std::vector<float> AudioModule::loadMP3File(const std::string& audioPath) {
+    // TODO: Implement MP3 loading using external library like mpg123
+    // For now, return empty vector and log warning
+    std::cerr << "Warning: MP3 loading not implemented. Use external tools to convert to WAV first." << std::endl;
+    return std::vector<float>();
+}
+
+std::vector<float> AudioModule::loadFLACFile(const std::string& audioPath) {
+    // TODO: Implement FLAC loading using external library like libFLAC
+    // For now, return empty vector and log warning
+    std::cerr << "Warning: FLAC loading not implemented. Use external tools to convert to WAV first." << std::endl;
+    return std::vector<float>();
+}
+
+std::vector<float> AudioModule::loadRawPCMFile(const std::string& audioPath) {
+    std::vector<float> audioData;
+
+    try {
+        std::ifstream file(audioPath, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot open raw PCM file: " + audioPath);
+        }
+
+        // Read entire file
+        file.seekg(0, std::ios::end);
+        size_t fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> rawData(fileSize);
+        file.read(rawData.data(), fileSize);
+
+        // Assume 16-bit signed little-endian PCM
+        audioData.reserve(fileSize / 2);
+        for (size_t i = 0; i < rawData.size(); i += 2) {
+            int16_t sample = *reinterpret_cast<int16_t*>(&rawData[i]);
+            audioData.push_back(static_cast<float>(sample) / 32768.0f);
+        }
+
+        file.close();
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error loading raw PCM file: " << e.what() << std::endl;
+    }
+
+    return audioData;
+}
+
+// Audio format saving implementations
+std::string AudioModule::saveWAVFile(const std::vector<float>& data, const std::string& outputPath, int sampleRate) {
+    try {
+        std::ofstream file(outputPath, std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Cannot create WAV file: " + outputPath);
+        }
+
+        // Convert float data to 16-bit PCM
+        std::vector<int16_t> pcmData;
+        pcmData.reserve(data.size());
+        for (float sample : data) {
+            // Clamp to [-1, 1] and convert
+            sample = std::max(-1.0f, std::min(1.0f, sample));
+            pcmData.push_back(static_cast<int16_t>(sample * 32767.0f));
+        }
+
+        // Write WAV header
+        int dataSize = pcmData.size() * sizeof(int16_t);
+        int fileSize = 36 + dataSize;
+
+        // RIFF header
+        file.write("RIFF", 4);
+        file.write(reinterpret_cast<char*>(&fileSize), 4);
+        file.write("WAVE", 4);
+
+        // Format chunk
+        file.write("fmt ", 4);
+        int fmtSize = 16;
+        file.write(reinterpret_cast<char*>(&fmtSize), 4);
+        int16_t audioFormat = 1; // PCM
+        file.write(reinterpret_cast<char*>(&audioFormat), 2);
+        int16_t numChannels = this->channels;
+        file.write(reinterpret_cast<char*>(&numChannels), 2);
+        file.write(reinterpret_cast<char*>(&sampleRate), 4);
+        int byteRate = sampleRate * numChannels * sizeof(int16_t);
+        file.write(reinterpret_cast<char*>(&byteRate), 4);
+        int16_t blockAlign = numChannels * sizeof(int16_t);
+        file.write(reinterpret_cast<char*>(&blockAlign), 2);
+        int16_t bitsPerSample = 16;
+        file.write(reinterpret_cast<char*>(&bitsPerSample), 2);
+
+        // Data chunk
+        file.write("data", 4);
+        file.write(reinterpret_cast<char*>(&dataSize), 4);
+        file.write(reinterpret_cast<char*>(pcmData.data()), dataSize);
+
+        file.close();
+        return outputPath;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error saving WAV file: " << e.what() << std::endl;
+        return std::string();
+    }
+}
+
+std::string AudioModule::saveMP3File(const std::vector<float>& data, const std::string& outputPath, int sampleRate) {
+    // TODO: Implement MP3 saving using external library like lame
+    std::cerr << "Warning: MP3 saving not implemented. Saving as WAV instead." << std::endl;
+    return saveWAVFile(data, outputPath.substr(0, outputPath.find_last_of(".")) + ".wav", sampleRate);
+}
+
+std::string AudioModule::saveFLACFile(const std::vector<float>& data, const std::string& outputPath, int sampleRate) {
+    // TODO: Implement FLAC saving using external library like libFLAC
+    std::cerr << "Warning: FLAC saving not implemented. Saving as WAV instead." << std::endl;
+    return saveWAVFile(data, outputPath.substr(0, outputPath.find_last_of(".")) + ".wav", sampleRate);
 }
 
 // Memory management

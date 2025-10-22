@@ -28,6 +28,7 @@ private:
     std::string moduleName;
     int sampleRate;
     int channels;
+    int bitsPerSample;
     int bufferSize;
     bool isInitialized;
 
@@ -181,6 +182,17 @@ public:
     // Utility functions
     std::vector<float> audioPathToNumericalData(const std::string& audioPath);
     std::string numericalDataToAudioPath(const std::vector<float>& data, const std::string& outputPath, int sampleRate = 44100);
+
+    // Audio format loading functions
+    std::vector<float> loadWAVFile(const std::string& audioPath);
+    std::vector<float> loadMP3File(const std::string& audioPath);
+    std::vector<float> loadFLACFile(const std::string& audioPath);
+    std::vector<float> loadRawPCMFile(const std::string& audioPath);
+
+    // Audio format saving functions
+    std::string saveWAVFile(const std::vector<float>& data, const std::string& outputPath, int sampleRate);
+    std::string saveMP3File(const std::vector<float>& data, const std::string& outputPath, int sampleRate);
+    std::string saveFLACFile(const std::vector<float>& data, const std::string& outputPath, int sampleRate);
 
     // Status and information
     bool isReady() const { return isInitialized; }

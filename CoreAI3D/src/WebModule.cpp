@@ -5,6 +5,8 @@
 #include <regex>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <thread>
+#include <chrono>
 
 // WebModule constants
 const int DEFAULT_TIMEOUT = 30;
@@ -448,18 +450,43 @@ std::vector<float> WebModule::getAPIDataAsNumbers(const std::string& apiUrl,
 
 // Content filtering and validation
 bool WebModule::isValidURL(const std::string& url) {
-    std::regex urlRegex(R"(^https?://)");
-    return std::regex_search(url, urlRegex);
+    // More comprehensive URL validation
+    std::regex urlRegex(R"(^https?://[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}(?:/[^/\s]*)*$)");
+    return std::regex_match(url, urlRegex);
 }
 
 bool WebModule::isSafeContent(const std::string& content) {
-    // TODO: Implement content safety check
+    // Basic content safety check - filter out potentially harmful content
+    std::vector<std::string> harmfulPatterns = {
+        "malware", "virus", "trojan", "exploit", "hack", "crack",
+        "porn", "adult", "xxx", "gambling", "casino"
+    };
+
+    std::string lowerContent = content;
+    std::transform(lowerContent.begin(), lowerContent.end(), lowerContent.begin(), ::tolower);
+
+    for (const auto& pattern : harmfulPatterns) {
+        if (lowerContent.find(pattern) != std::string::npos) {
+            return false;
+        }
+    }
+
     return true;
 }
 
 std::string WebModule::filterSensitiveContent(const std::string& content) {
-    // TODO: Implement sensitive content filtering
-    return content;
+    // Basic sensitive content filtering
+    std::string filtered = content;
+
+    // Remove email addresses
+    std::regex emailRegex(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
+    filtered = std::regex_replace(filtered, emailRegex, "[EMAIL REMOVED]");
+
+    // Remove phone numbers (basic pattern)
+    std::regex phoneRegex(R"(\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})");
+    filtered = std::regex_replace(filtered, phoneRegex, "[PHONE REMOVED]");
+
+    return filtered;
 }
 
 std::vector<std::string> WebModule::validateLinks(const std::vector<std::string>& links) {
@@ -500,22 +527,94 @@ bool WebModule::loadKnowledgeBase(const std::string& filePath) {
 
 // Real-time web monitoring
 bool WebModule::startMonitoring(const std::string& url, int intervalSeconds) {
-    // TODO: Implement web monitoring
-    return false;
+    try {
+        std::lock_guard<std::mutex> lock(monitoringMutex);
+
+        if (monitoringActive[url]) {
+            return true; // Already monitoring
+        }
+
+        if (!isValidURL(url)) {
+            std::cerr << "Error: Invalid URL for monitoring: " << url << std::endl;
+            return false;
+        }
+
+        monitoringActive[url] = true;
+        monitoringUpdates[url].clear();
+
+        monitoringThreads[url] = std::thread([this, url, intervalSeconds]() {
+            while (true) {
+                {
+                    std::lock_guard<std::mutex> lock(this->monitoringMutex);
+                    if (!this->monitoringActive[url]) {
+                        break;
+                    }
+                }
+
+                try {
+                    WebPage currentPage = fetchWebPage(url);
+                    std::string currentContent = currentPage.content;
+
+                    // Check if content has changed (simple hash comparison)
+                    static std::map<std::string, size_t> lastHashes;
+                    size_t currentHash = std::hash<std::string>{}(currentContent);
+
+                    if (lastHashes.find(url) == lastHashes.end()) {
+                        lastHashes[url] = currentHash;
+                        monitoringUpdates[url].push_back("Monitoring started for: " + url);
+                    } else if (lastHashes[url] != currentHash) {
+                        lastHashes[url] = currentHash;
+                        monitoringUpdates[url].push_back("Content changed at: " + url);
+                    }
+                } catch (const std::exception& e) {
+                    std::lock_guard<std::mutex> lock(this->monitoringMutex);
+                    monitoringUpdates[url].push_back("Error monitoring " + url + ": " + e.what());
+                }
+
+                std::this_thread::sleep_for(std::chrono::seconds(intervalSeconds));
+            }
+        });
+
+        monitoringThreads[url].detach(); // Run in background
+
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error starting monitoring for " << url << ": " << e.what() << std::endl;
+        return false;
+    }
 }
 
 void WebModule::stopMonitoring(const std::string& url) {
-    // TODO: Implement monitoring stop
+    std::lock_guard<std::mutex> lock(monitoringMutex);
+    monitoringActive[url] = false;
+
+    if (monitoringThreads[url].joinable()) {
+        monitoringThreads[url].join();
+    }
+
+    monitoringThreads.erase(url);
+    monitoringUpdates.erase(url);
 }
 
 std::vector<std::string> WebModule::getMonitoringUpdates() {
-    // TODO: Implement monitoring updates retrieval
-    return {};
+    std::lock_guard<std::mutex> lock(monitoringMutex);
+    std::vector<std::string> allUpdates;
+
+    for (const auto& pair : monitoringUpdates) {
+        allUpdates.insert(allUpdates.end(), pair.second.begin(), pair.second.end());
+    }
+
+    // Clear updates after retrieval
+    for (auto& pair : monitoringUpdates) {
+        pair.second.clear();
+    }
+
+    return allUpdates;
 }
 
 bool WebModule::isMonitoringActive(const std::string& url) {
-    // TODO: Implement monitoring status check
-    return false;
+    std::lock_guard<std::mutex> lock(monitoringMutex);
+    return monitoringActive.find(url) != monitoringActive.end() && monitoringActive[url];
 }
 
 // Web automation
@@ -812,39 +911,272 @@ std::string WebModule::extractTextContent(const std::string& html) {
 
 // Search engine integration
 std::vector<SearchResult> WebModule::searchGoogle(const std::string& query, int maxResults) {
-    // TODO: Implement Google search
-    return {};
+    try {
+        std::vector<SearchResult> results;
+
+        // Use Google Custom Search API (requires API key)
+        std::string apiKey = "YOUR_GOOGLE_API_KEY"; // Should be loaded from config
+        std::string searchEngineId = "YOUR_SEARCH_ENGINE_ID"; // Should be loaded from config
+
+        if (apiKey.empty() || searchEngineId.empty()) {
+            std::cerr << "Google API key or search engine ID not configured" << std::endl;
+            return results;
+        }
+
+        std::string url = "https://www.googleapis.com/customsearch/v1?key=" + apiKey +
+                         "&cx=" + searchEngineId + "&q=" + query + "&num=" + std::to_string(maxResults);
+
+        std::string response = performHttpRequest(url, "GET");
+
+        // Parse JSON response
+        nlohmann::json jsonResponse = nlohmann::json::parse(response);
+
+        if (jsonResponse.contains("items")) {
+            for (const auto& item : jsonResponse["items"]) {
+                SearchResult result;
+                result.url = item.value("link", "");
+                result.title = item.value("title", "");
+                result.description = item.value("snippet", "");
+                result.relevanceScore = 1.0f; // Could be calculated based on position
+                results.push_back(result);
+            }
+        }
+
+        return results;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error searching Google: " << e.what() << std::endl;
+        return {};
+    }
 }
 
 std::vector<SearchResult> WebModule::searchBing(const std::string& query, int maxResults) {
-    // TODO: Implement Bing search
-    return {};
+    try {
+        std::vector<SearchResult> results;
+
+        // Use Bing Web Search API (requires API key)
+        std::string apiKey = "YOUR_BING_API_KEY"; // Should be loaded from config
+
+        if (apiKey.empty()) {
+            std::cerr << "Bing API key not configured" << std::endl;
+            return results;
+        }
+
+        std::string url = "https://api.bing.microsoft.com/v7.0/search?q=" + query +
+                         "&count=" + std::to_string(maxResults);
+
+        std::map<std::string, std::string> headers = {
+            {"Ocp-Apim-Subscription-Key", apiKey}
+        };
+
+        std::string response = callWebAPI(url, "GET", headers);
+
+        // Parse JSON response
+        nlohmann::json jsonResponse = nlohmann::json::parse(response);
+
+        if (jsonResponse.contains("webPages") && jsonResponse["webPages"].contains("value")) {
+            for (const auto& item : jsonResponse["webPages"]["value"]) {
+                SearchResult result;
+                result.url = item.value("url", "");
+                result.title = item.value("name", "");
+                result.description = item.value("snippet", "");
+                result.relevanceScore = 1.0f;
+                results.push_back(result);
+            }
+        }
+
+        return results;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error searching Bing: " << e.what() << std::endl;
+        return {};
+    }
 }
 
 std::vector<SearchResult> WebModule::searchDuckDuckGo(const std::string& query, int maxResults) {
-    // TODO: Implement DuckDuckGo search
-    return {};
+    try {
+        std::vector<SearchResult> results;
+
+        // DuckDuckGo Instant Answer API (no API key required)
+        std::string url = "https://api.duckduckgo.com/?q=" + query + "&format=json&no_html=1&skip_disambig=1";
+
+        std::string response = performHttpRequest(url, "GET");
+
+        // Parse JSON response
+        nlohmann::json jsonResponse = nlohmann::json::parse(response);
+
+        // DuckDuckGo API has limited results, so also scrape the HTML search page
+        std::string searchUrl = "https://duckduckgo.com/html/?q=" + query;
+        WebPage page = fetchWebPage(searchUrl);
+
+        // Extract search results from HTML
+        std::regex resultRegex(R"(<a[^>]*class="result__a"[^>]*>([^<]+)</a>.*?<a[^>]*class="result__url"[^>]*>([^<]+)</a>.*?<span[^>]*class="result__snippet"[^>]*>([^<]+)</span>)");
+        std::sregex_iterator resultBegin(page.content.begin(), page.content.end(), resultRegex);
+        std::sregex_iterator resultEnd;
+
+        int count = 0;
+        for (std::sregex_iterator i = resultBegin; i != resultEnd && count < maxResults; ++i, ++count) {
+            SearchResult result;
+            result.title = (*i)[1].str();
+            result.url = (*i)[2].str();
+            result.description = (*i)[3].str();
+            result.relevanceScore = 1.0f - (count * 0.1f); // Decreasing score
+            results.push_back(result);
+        }
+
+        return results;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error searching DuckDuckGo: " << e.what() << std::endl;
+        return {};
+    }
 }
 
 // Content analysis
 std::string WebModule::analyzeSentiment(const std::string& text) {
-    // TODO: Implement sentiment analysis
-    return "neutral";
+    // Basic sentiment analysis using keyword matching
+    std::vector<std::string> positiveWords = {
+        "good", "great", "excellent", "amazing", "wonderful", "fantastic",
+        "love", "like", "best", "awesome", "perfect", "brilliant"
+    };
+
+    std::vector<std::string> negativeWords = {
+        "bad", "terrible", "awful", "horrible", "worst", "hate",
+        "dislike", "poor", "ugly", "stupid", "annoying", "boring"
+    };
+
+    std::string lowerText = text;
+    std::transform(lowerText.begin(), lowerText.end(), lowerText.begin(), ::tolower);
+
+    int positiveCount = 0;
+    int negativeCount = 0;
+
+    for (const auto& word : positiveWords) {
+        size_t pos = 0;
+        while ((pos = lowerText.find(word, pos)) != std::string::npos) {
+            positiveCount++;
+            pos += word.length();
+        }
+    }
+
+    for (const auto& word : negativeWords) {
+        size_t pos = 0;
+        while ((pos = lowerText.find(word, pos)) != std::string::npos) {
+            negativeCount++;
+            pos += word.length();
+        }
+    }
+
+    if (positiveCount > negativeCount) {
+        return "positive";
+    } else if (negativeCount > positiveCount) {
+        return "negative";
+    } else {
+        return "neutral";
+    }
 }
 
 std::vector<std::string> WebModule::extractEntities(const std::string& text) {
-    // TODO: Implement entity extraction
-    return {};
+    std::vector<std::string> entities;
+
+    // Extract email addresses
+    std::regex emailRegex(R"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})");
+    std::sregex_iterator emailBegin(text.begin(), text.end(), emailRegex);
+    std::sregex_iterator emailEnd;
+    for (std::sregex_iterator i = emailBegin; i != emailEnd; ++i) {
+        entities.push_back("EMAIL:" + (*i)[0].str());
+    }
+
+    // Extract URLs
+    std::regex urlRegex(R"(https?://[^\s]+)");
+    std::sregex_iterator urlBegin(text.begin(), text.end(), urlRegex);
+    std::sregex_iterator urlEnd;
+    for (std::sregex_iterator i = urlBegin; i != urlEnd; ++i) {
+        entities.push_back("URL:" + (*i)[0].str());
+    }
+
+    // Extract phone numbers (basic pattern)
+    std::regex phoneRegex(R"(\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})");
+    std::sregex_iterator phoneBegin(text.begin(), text.end(), phoneRegex);
+    std::sregex_iterator phoneEnd;
+    for (std::sregex_iterator i = phoneBegin; i != phoneEnd; ++i) {
+        entities.push_back("PHONE:" + (*i)[0].str());
+    }
+
+    // Extract dates (basic patterns)
+    std::regex dateRegex(R"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})");
+    std::sregex_iterator dateBegin(text.begin(), text.end(), dateRegex);
+    std::sregex_iterator dateEnd;
+    for (std::sregex_iterator i = dateBegin; i != dateEnd; ++i) {
+        entities.push_back("DATE:" + (*i)[0].str());
+    }
+
+    return entities;
 }
 
 std::string WebModule::summarizeContent(const std::string& content, int maxSentences) {
-    // TODO: Implement content summarization
-    return content.substr(0, 200) + "...";
+    // Basic extractive summarization - take first few sentences
+    std::vector<std::string> sentences;
+    std::istringstream iss(content);
+    std::string sentence;
+
+    // Split into sentences (basic approach)
+    std::string remaining = content;
+    size_t pos = 0;
+    while ((pos = remaining.find_first_of(".!?", pos)) != std::string::npos) {
+        std::string sent = remaining.substr(0, pos + 1);
+        if (!sent.empty()) {
+            sentences.push_back(sent);
+        }
+        remaining = remaining.substr(pos + 1);
+        pos = 0;
+    }
+
+    // Take first maxSentences
+    std::string summary;
+    int count = 0;
+    for (const auto& sent : sentences) {
+        if (count >= maxSentences) break;
+        summary += sent + " ";
+        count++;
+    }
+
+    // If no sentences found, take first 200 characters
+    if (summary.empty()) {
+        summary = content.substr(0, 200) + "...";
+    }
+
+    return summary;
 }
 
 std::string WebModule::translateContent(const std::string& content, const std::string& targetLanguage) {
-    // TODO: Implement content translation
-    return content;
+    // Basic translation using Google Translate API (requires API key)
+    try {
+        std::string apiKey = "YOUR_GOOGLE_TRANSLATE_API_KEY"; // Should be loaded from config
+
+        if (apiKey.empty()) {
+            std::cerr << "Google Translate API key not configured" << std::endl;
+            return content;
+        }
+
+        std::string url = "https://translation.googleapis.com/language/translate/v2?key=" + apiKey +
+                         "&q=" + content + "&target=" + targetLanguage;
+
+        std::string response = performHttpRequest(url, "GET");
+
+        // Parse JSON response
+        nlohmann::json jsonResponse = nlohmann::json::parse(response);
+
+        if (jsonResponse.contains("data") && jsonResponse["data"].contains("translations")) {
+            return jsonResponse["data"]["translations"][0]["translatedText"];
+        }
+
+        return content; // Return original if translation fails
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error translating content: " << e.what() << std::endl;
+        return content;
+    }
 }
 
 // Document processing

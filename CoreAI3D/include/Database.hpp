@@ -5,8 +5,12 @@
 #include "Core.hpp"
 #include "Language.hpp"
 
+#ifdef USE_MYSQL
+#include <mysqlx/xdevapi.h>
+#endif
+
 // Forward declarations for nlohmann::json if needed in header for method signatures
-// using json = nlohmann::json;
+using json = nlohmann::json;
 
 // Simple enum to replace mysqlx::SSLMode
 enum class SSLMode {
@@ -20,7 +24,7 @@ class Database
 {
 public:
     // Constructor signature: Changed 'int port' to 'unsigned int port' to match implementation
-    Database(const std::string& host, unsigned int port, const std::string& user, const std::string password, const std::string& schemaName, SSLMode ssl);
+    Database(const std::string& host, unsigned int port, const std::string& user, const std::string password, const std::string& schemaName, SSLMode ssl, bool createTables = false);
 
     void createTables();
 
@@ -93,6 +97,24 @@ public:
         const std::vector<float>& actualTargets,
         const std::vector<float>& predictedTargets);
 
+    // NEW: Methods for learning settings management
+    void saveLearningSettings(int& datasetId, double learningRate, int batchSize, int epochs,
+                             double momentum = 0.0, double weightDecay = 0.0, double dropoutRate = 0.0,
+                             const std::string& optimizer = "adam", const std::string& lossFunction = "mse",
+                             const std::string& activationFunction = "relu");
+    struct LearningSettings {
+        double learningRate;
+        int batchSize;
+        int epochs;
+        double momentum;
+        double weightDecay;
+        double dropoutRate;
+        std::string optimizer;
+        std::string lossFunction;
+        std::string activationFunction;
+    };
+    LearningSettings loadLearningSettings(int& datasetId);
+
 private:
     std::string dbHost;
     unsigned int dbPort;
@@ -100,6 +122,10 @@ private:
     std::string dbPassword;
     std::string dbSchema;
     SSLMode sslMode;
+
+#ifdef USE_MYSQL
+    mysqlx::Session* session;
+#endif
 
     // Helper functions for BLOB conversion of 2D matrices
     std::vector<char> matrixToBlob(const std::vector<std::vector<float> >& matrix);

@@ -1,4 +1,4 @@
-aservices:
+services:
   mysql:
     image: mysql:latest
     container_name: coreai3d_mysql

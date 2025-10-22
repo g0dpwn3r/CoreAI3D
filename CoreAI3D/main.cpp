@@ -7,7 +7,6 @@
 
 #include "include/Core.hpp"
 #include "include/Train.hpp"
-#include "include/Database.hpp"
 #include "include/Language.hpp"
 #include "include/APIServer.hpp"
 #include "include/WebSocketServer.hpp"
@@ -19,16 +18,11 @@ namespace po = boost::program_options; // Alias for convenience
 
 int main(int argc, char* argv[]) {
     // --- START DEBUG PRINTS (Argc/Argv) ---
-    std::cout << "DEBUG: argc = " << argc << std::endl;
-    for (int i = 0; i < argc; ++i) {
-        std::cout << "DEBUG: argv[" << i << "] = \"" << argv[i] << "\"" << std::endl;
-    }
-    std::cout << "DEBUG: End of argv dump." << std::endl;
-    // --- END DEBUG PRINTS (Argc/Argv) ---
-
+    // First, parse arguments to get verbose flag
     po::options_description desc("CoreAI3D Opties");
     desc.add_options()
         ("help,h", "produce help message")
+        ("verbose,v", po::bool_switch()->default_value(false), "Enable verbose debug output.")
         ("input-file,i", po::value<std::string>(), "Input filename...")
         ("target-file,t", po::value<std::string>()->default_value(""), "Optional: Filename containing separate target values for evaluation (only target columns)")
         ("delimiter,d", po::value<std::string>()->default_value(","), "CSV file delimiter (e.g., ',' or ';')")
@@ -43,14 +37,18 @@ int main(int argc, char* argv[]) {
         ("max", po::value<std::string>()->default_value("1.0"), "Maximum value for data normalization.")
         ("input-size,iz", po::value<std::string>()->default_value("1"), "Number of input columns (feature values).")
         ("output-size,oz", po::value<std::string>()->default_value("1"), "Number of output columns (target values).")
+#ifdef USE_MYSQL
         ("db-host", po::value<std::string>()->default_value("localhost"), "Database host for MySQL X DevAPI.")
         ("db-port", po::value<std::string>()->default_value("33060"), "Database port for MySQL X DevAPI.")
         ("db-user", po::value<std::string>()->default_value("user"), "Database user for MySQL X DevAPI.")
         ("db-password", po::value<std::string>()->default_value("password"), "Database password for MySQL X DevAPI.")
         ("db-schema", po::value<std::string>()->default_value("coreai_db"), "Database schema name.")
         ("ssl-mode", po::value<std::string>()->default_value("DISABLED"), "SSL mode for database connection (DISABLED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY).")
+#endif
         ("dataset-name", po::value<std::string>()->default_value("online-1a"), "Name for the dataset")
+#ifdef USE_MYSQL
         ("create-tables", po::bool_switch()->default_value(false), "Create database tables if they don't exist.")
+#endif
         ("offline", po::bool_switch()->default_value(false), "Run in offline mode (no database connection).")
         ("dataset-id,di", po::value<std::string>()->default_value("-1"), "Specific dataset ID for database operations (load/save model/data).")
         ("output-csv,o", po::value<std::string>()->default_value(""), "Output CSV filename for results (predictions, actuals).")
@@ -62,10 +60,8 @@ int main(int argc, char* argv[]) {
 
     po::variables_map vm;
     try {
-        std::cout << "DEBUG: Parsing arguments...\n";
         po::store(po::parse_command_line(argc, argv, desc), vm);
         po::notify(vm);
-        std::cout << "DEBUG: Arguments parsed successfully.\n";
     }
     catch (const po::error& e) {
         std::cerr << "ERROR: Error parsing arguments: " << e.what() << std::endl;
@@ -79,14 +75,32 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    bool verbose = vm["verbose"].as<bool>();
+
+    // --- START DEBUG PRINTS (Argc/Argv) ---
+    if (verbose) {
+        std::cout << "DEBUG: argc = " << argc << std::endl;
+        for (int i = 0; i < argc; ++i) {
+            std::cout << "DEBUG: argv[" << i << "] = \"" << argv[i] << "\"" << std::endl;
+        }
+        std::cout << "DEBUG: End of argv dump." << std::endl;
+    }
+    // --- END DEBUG PRINTS (Argc/Argv) ---
+
+    // Check for help option first
+    if (vm.count("help")) {
+        std::cout << desc << std::endl;
+        return 0;
+    }
+
     // Retrieve arguments and manually convert numeric types
-    std::cout << "DEBUG: About to retrieve inputFile...\n";
+    if (verbose) std::cout << "DEBUG: About to retrieve inputFile...\n";
     std::string inputFile;
     if (vm.count("input-file")) {
         inputFile = vm["input-file"].as<std::string>();
-        std::cout << "DEBUG: inputFile retrieved: '" << inputFile << "'\n";
+        if (verbose) std::cout << "DEBUG: inputFile retrieved: '" << inputFile << "'\n";
     } else {
-        std::cout << "DEBUG: inputFile not provided, will be empty\n";
+        if (verbose) std::cout << "DEBUG: inputFile not provided, will be empty\n";
     }
     std::string targetFile = vm["target-file"].as<std::string>();
     std::string datasetName = vm["dataset-name"].as<std::string>();
@@ -155,6 +169,7 @@ int main(int argc, char* argv[]) {
     bool startChat = vm["start-chat"].as<bool>();
     bool startPredict = vm["start-predict"].as<bool>();
 
+#ifdef USE_MYSQL
     std::string dbHost = vm["db-host"].as<std::string>();
     int dbPort;
     std::string dbPort_str_arg = vm["db-port"].as<std::string>();
@@ -167,6 +182,7 @@ int main(int argc, char* argv[]) {
     std::string sslModeStr = vm["ssl-mode"].as<std::string>();
 
     bool createTables = vm["create-tables"].as<bool>();
+#endif
     bool isOfflineMode = vm["offline"].as<bool>();
 
     int datasetId;
@@ -181,23 +197,11 @@ int main(int argc, char* argv[]) {
     try { apiPort = std::stoi(apiPort_str_arg); }
     catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for --api-port: \"" << apiPort_str_arg << "\". Defaulting to 8080. Error: " << e.what() << std::endl; apiPort = 8080; }
 
-    std::cout << "DEBUG: All arguments retrieved. Proceeding to logic.\n";
+    if (verbose) std::cout << "DEBUG: All arguments retrieved. Proceeding to logic.\n";
 
-    // Helper strings for interactive input parsing (these are no longer needed for retrieval, but kept for interactive prompts)
-    std::string dbPort_str_prompt; // Re-use for interactive prompts
-    std::string neuron_str;
-    std::string layer_str;
-    std::string inputSize_str_prompt;
-    std::string outputSize_str_prompt;
-    std::string learningRate_str_input; // Renamed to avoid shadowing
-    std::string minRange_str_prompt; // For interactive prompt input
-    std::string maxRange_str_prompt; // For interactive prompt input
-    std::string sample_str;
-    std::string epoch_str;
-    std::string dataset_str; // For interactive prompt input
-    std::string bool_str;
 
-    // Map string to mysqlx::SSLMode enum
+#ifdef USE_MYSQL
+    // Map string to SSLMode enum
     SSLMode ssl = SSLMode::DISABLED; // Default
     if (sslModeStr == "DISABLED") {
         ssl = SSLMode::DISABLED;
@@ -216,42 +220,15 @@ int main(int argc, char* argv[]) {
             << "'. Defaulting to DISABLED." << std::endl;
         ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
     }
+#endif
 
-    // --- Interactive Mode Check ---
-    // If neither --start-chat nor --start-predict is provided, prompt the user
-    // Also, if --api-port is NOT explicitly used, prompt for interactive mode.
-    // Use vm.count() to check if an argument was provided on the command line.
+    // --- Mode Check ---
+    // Must specify one of --start-chat, --start-predict, or --api-port for API server mode.
     bool api_port_is_used = vm.count("api-port");
     if (!startChat && !startPredict && !api_port_is_used)
     {
-        std::cout << "CoreAI3D Application Menu:\n";
-        std::cout << "1. Calculate CSV and Predict Future\n";
-        std::cout << "2. Chat with AI\n";
-        std::cout << "3. Start API Server\n";
-        std::cout << "Enter your choice (1, 2, or 3): ";
-        int choice;
-        std::cin >> choice;
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(),
-            '\n'); // Consume newline
-
-        if (choice == 1)
-        {
-            startPredict = true;
-        }
-        else if (choice == 2)
-        {
-            startChat = true;
-        }
-        else if (choice == 3)
-        {
-            // API server mode is implicit if no other mode is chosen and no API port is provided via CLI.
-            // If the user chose option 3, then it means API server mode.
-        }
-        else
-        {
-            std::cerr << "Invalid choice. Exiting." << std::endl;
-            return 1;
-        }
+        std::cerr << "Error: Must specify one of --start-chat, --start-predict, or --api-port for API server mode." << std::endl;
+        return 1;
     }
 
     // --- Main Logic Branches ---
@@ -259,160 +236,70 @@ int main(int argc, char* argv[]) {
     {
         if (startChat)
         {
-            std::cout << "Starting chat mode...\n";
+            if (verbose) std::cout << "Starting chat mode...\n";
 
-            // Prompt for missing chat arguments if not provided by CLI
-            // Use vm.count() for conditional prompting
+            // Check for required arguments
             if (!vm.count("db-host")) {
-                std::cout << "Enter Hostname of the database: " << std::endl;
-                std::getline(std::cin, dbHost);
+                std::cerr << "Error: --db-host is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("db-port")) {
-                std::cout << "Enter the port of the database: " << std::endl;
-                std::getline(std::cin, dbPort_str_prompt); // Use dbPort_str_prompt for interactive input
-                try {
-                    dbPort = std::stoi(dbPort_str_prompt);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the port. Defaulting to 33060. Error: " << e.what() << std::endl;
-                    dbPort = 33060;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 33060. Error: " << e.what() << std::endl;
-                    dbPort = 33060;
-                }
+                std::cerr << "Error: --db-port is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("db-user")) {
-                std::cout << "Enter database username: " << std::endl;
-                std::getline(std::cin, dbUser);
+                std::cerr << "Error: --db-user is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("db-password")) {
-                std::cout << "Enter database password: " << std::endl;
-                std::getline(std::cin, dbPassword);
+                std::cerr << "Error: --db-password is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("db-schema")) {
-                std::cout << "Enter database schema: " << std::endl;
-                std::getline(std::cin, dbSchema);
+                std::cerr << "Error: --db-schema is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("ssl-mode")) {
-                std::cout << "Enter database SSLMode (DISABLED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY): " << std::endl;
-                std::getline(std::cin, sslModeStr);
-                // Re-evaluate SSL mode after interactive input
-                if (sslModeStr == "DISABLED") {
-                    ssl = SSLMode::DISABLED;
-                }
-                else if (sslModeStr == "REQUIRED") {
-                    ssl = SSLMode::REQUIRED;
-                }
-                else if (sslModeStr == "VERIFY_CA") {
-                    ssl = SSLMode::VERIFY_CA;
-                }
-                else if (sslModeStr == "VERIFY_IDENTITY") {
-                    ssl = SSLMode::VERIFY_IDENTITY;
-                }
-                else {
-                    std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
-                        << "'. Defaulting to DISABLED." << std::endl;
-                    ssl = SSLMode::DISABLED;
-                }
+                std::cerr << "Error: --ssl-mode is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("layers")) {
-                std::cout << "Enter amount of layers: " << std::endl;
-                std::getline(std::cin, layer_str);
-                try {
-                    layers = std::stoi(layer_str);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the layer. Defaulting to 5. Error: " << e.what() << std::endl;
-                    layers = 5;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 5. Error: " << e.what() << std::endl;
-                    layers = 5;
-                }
+                std::cerr << "Error: --layers is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("neurons")) {
-                std::cout << "Enter amount of neurons: " << std::endl;
-                std::getline(std::cin, neuron_str);
-                try {
-                    neurons = std::stoi(neuron_str);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the neuron. Defaulting to 25. Error: " << e.what() << std::endl;
-                    neurons = 25;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 25. Error: " << e.what() << std::endl;
-                    neurons = 25;
-                }
+                std::cerr << "Error: --neurons is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("input-size")) {
-                std::cout << "Enter inputSize: " << std::endl;
-                std::getline(std::cin, inputSize_str_prompt);
-                try {
-                    inputSize = std::stoi(inputSize_str_prompt);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the inputSize. Defaulting to 1. Error: " << e.what() << std::endl;
-                    inputSize = 1;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    inputSize = 1;
-                }
+                std::cerr << "Error: --input-size is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("output-size")) {
-                std::cout << "Enter outputSize: " << std::endl;
-                std::getline(std::cin, outputSize_str_prompt);
-                try {
-                    outputSize = std::stoi(outputSize_str_prompt);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the outputSize. Defaulting to 1. Error: " << e.what() << std::endl;
-                    outputSize = 1;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    outputSize = 1;
-                }
+                std::cerr << "Error: --output-size is required for chat mode." << std::endl;
+                return 1;
             }
             if (!vm.count("learning-rate")) {
-                std::cout << "Enter Learning rate: " << std::endl;
-                std::getline(std::cin, learningRate_str_input); // Use unique name
-                try {
-                    learningRate = std::stod(learningRate_str_input); // Use stod for double
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the learningrate. Defaulting to 0.0001. Error: " << e.what() << std::endl;
-                    learningRate = 0.0001;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for double type. Defaulting to 0.0001. Error: " << e.what() << std::endl;
-                    learningRate = 0.0001;
-                }
+                std::cerr << "Error: --learning-rate is required for chat mode." << std::endl;
+                return 1;
+            }
+            if (!vm.count("embedding-file")) {
+                std::cerr << "Error: --embedding-file is required for chat mode." << std::endl;
+                return 1;
+            }
+            if (!vm.count("language")) {
+                std::cerr << "Error: --language is required for chat mode." << std::endl;
+                return 1;
             }
 
-            // Prompt for missing chat arguments if not provided by CLI
-            bool embedding_file_used_flag = vm.count("embedding-file");
-            if (embeddingFile == "embedding.txt" && !embedding_file_used_flag)
-            {
-                std::cout << "Enter path to embedding file (e.g., en_embeddings.csv): ";
-                std::getline(std::cin, embeddingFile);
-            }
-            // Check language only if it's default AND embeddingFile doesn't imply language
-            bool language_used_flag = vm.count("language");
-            if (language == "en" && !language_used_flag
-                && embeddingFile.find(language) == std::string::npos) // Only prompt if default AND not implicitly set by file
-            {
-                std::cout << "Enter language code (e.g., en, nl, ru): ";
-                std::getline(std::cin, language);
-            }
-
+#ifdef USE_MYSQL
             // Assuming embedding dimension is fixed or passed as an argument.
             // For this example, let's assume it's 100 as per previous context.
             int embeddingDimension = 100; // This should match your embedding file's dimension.
             Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
+#endif
 
+#ifdef USE_MYSQL
             // Load embeddings for the specified language.
             std::string actualEmbeddingFile = embeddingFile.empty()
                 ? std::string(language) + "_embeddings.csv" // Fixed string concat
@@ -422,39 +309,32 @@ int main(int argc, char* argv[]) {
             langProcessor.setCurrentLanguage(language);
 
             langProcessor.chat(inputFile);
+#endif
         }
         else if (startPredict)
         {
-            std::cout << "[PREDICT MODE] Starting prediction mode...\n";
+            if (verbose) std::cout << "[PREDICT MODE] Starting prediction mode...\n";
 
-            // Prompt for missing predict arguments if not provided by CLI
-            if (inputFile.empty() && !vm.count("input-file"))
-            {
-                std::cout << "Enter path to input CSV file: ";
-                std::getline(std::cin, inputFile);
+            // Check for required arguments
+            if (!vm.count("input-file")) {
+                std::cerr << "Error: --input-file is required for predict mode." << std::endl;
+                return 1;
             }
-            if (outputCsvFile.empty() && !vm.count("output-csv"))
-            {
-                std::cout << "Enter path to output CSV file for predictions: ";
-                std::getline(std::cin, outputCsvFile);
+            if (!vm.count("output-csv")) {
+                std::cerr << "Error: --output-csv is required for predict mode." << std::endl;
+                return 1;
             }
-            if (!vm.count("language") && language == "en" // Check if language was default AND not CLI-provided
-                && embeddingFile.find(language) == std::string::npos)
-            {
-                std::cout << "Enter language code (e.g., en, nl, ru): ";
-                std::getline(std::cin, language);
+            if (!vm.count("language")) {
+                std::cerr << "Error: --language is required for predict mode." << std::endl;
+                return 1;
             }
-            if (!vm.count("embedding-file") && embeddingFile == "embedding.txt") // Check if embedding_file was default AND not CLI-provided
-            {
-                std::cout << "Enter path to embedding file (e.g., en_embeddings.csv): ";
-                std::getline(std::cin, embeddingFile);
+            if (!vm.count("embedding-file")) {
+                std::cerr << "Error: --embedding-file is required for predict mode." << std::endl;
+                return 1;
             }
-            bool offline_used_flag = vm.count("offline"); // Capture result
-            if (!offline_used_flag) { // Use the captured flag
-                std::cout << "Do you want to run in offline mode (true/false, 1/0, y/n)? ";
-                std::getline(std::cin, bool_str);
-                std::transform(bool_str.begin(), bool_str.end(), bool_str.begin(), ::tolower);
-                isOfflineMode = (bool_str == "true" || bool_str == "1" || bool_str == "y");
+            if (!vm.count("offline")) {
+                std::cerr << "Error: --offline is required for predict mode." << std::endl;
+                return 1;
             }
 
             // In offline mode, force containsText to false to avoid any text processing that might require database connections
@@ -464,240 +344,90 @@ int main(int argc, char* argv[]) {
 
             if (!isOfflineMode) {
                 if (!vm.count("db-host")) {
-                    std::cout << "Enter Hostname of the database: " << std::endl;
-                    std::getline(std::cin, dbHost);
+                    std::cerr << "Error: --db-host is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("db-port")) {
-                    std::cout << "Enter the port of the database: " << std::endl;
-                    std::getline(std::cin, dbPort_str_prompt);
-                    try {
-                        dbPort = std::stoi(dbPort_str_prompt);
-                    }
-                    catch (const std::invalid_argument& e) {
-                        std::cerr << "Invalid input: Please enter a valid number for the port. Defaulting to 33060. Error: " << e.what() << std::endl;
-                        dbPort = 33060;
-                    }
-                    catch (const std::out_of_range& e) {
-                        std::cerr << "Input number out of range for int type. Defaulting to 33060. Error: " << e.what() << std::endl;
-                        dbPort = 33060;
-                    }
+                    std::cerr << "Error: --db-port is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("db-user")) {
-                    std::cout << "Enter database username: " << std::endl;
-                    std::getline(std::cin, dbUser);
+                    std::cerr << "Error: --db-user is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("db-password")) {
-                    std::cout << "Enter database password: " << std::endl;
-                    std::getline(std::cin, dbPassword);
+                    std::cerr << "Error: --db-password is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("db-schema")) {
-                    std::cout << "Enter database schema: " << std::endl;
-                    std::getline(std::cin, dbSchema);
+                    std::cerr << "Error: --db-schema is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("ssl-mode")) {
-                    std::cout << "Enter database SSLMode (DISABLED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY): " << std::endl;
-                    std::getline(std::cin, sslModeStr);
-                    // Re-evaluate SSL mode after interactive input
-                    if (sslModeStr == "DISABLED") {
-                        ssl = SSLMode::DISABLED;
-                    }
-                    else if (sslModeStr == "REQUIRED") {
-                        ssl = SSLMode::REQUIRED;
-                    }
-                    else if (sslModeStr == "VERIFY_CA") {
-                        ssl = SSLMode::VERIFY_CA;
-                    }
-                    else if (sslModeStr == "VERIFY_IDENTITY") {
-                        ssl = SSLMode::VERIFY_IDENTITY;
-                    }
-                    else {
-                        std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
-                            << "'. Defaulting to DISABLED." << std::endl;
-                        ssl = SSLMode::DISABLED;
-                    }
+                    std::cerr << "Error: --ssl-mode is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("dataset-name")) {
-                    std::cout << "Enter dataset name: " << std::endl;
-                    std::getline(std::cin, datasetName);
+                    std::cerr << "Error: --dataset-name is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("dataset-id")) {
-                    std::cout << "Enter dataset ID (-1 for no specific ID): " << std::endl;
-                    std::getline(std::cin, dataset_str);
-                    try {
-                        datasetId = std::stoi(dataset_str);
-                    }
-                    catch (const std::invalid_argument& e) {
-                        std::cerr << "Invalid input: Please enter a valid number for datasetID. Defaulting to -1. Error: " << e.what() << std::endl;
-                        datasetId = -1;
-                    }
-                    catch (const std::out_of_range& e) {
-                        std::cerr << "Input number out of range for int type. Defaulting to -1. Error: " << e.what() << std::endl;
-                        datasetId = -1;
-                    }
+                    std::cerr << "Error: --dataset-id is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
                 if (!vm.count("create-tables")) {
-                    std::cout << "Create database tables if they don't exist (true/false, 1/0, y/n)? ";
-                    std::getline(std::cin, bool_str);
-                    std::transform(bool_str.begin(), bool_str.end(), bool_str.begin(), ::tolower);
-                    createTables = (bool_str == "true" || bool_str == "1" || bool_str == "y");
+                    std::cerr << "Error: --create-tables is required for predict mode when not offline." << std::endl;
+                    return 1;
                 }
             }
 
             if (!vm.count("delimiter")) {
-                std::cout << "Enter delimiter: " << std::endl;
-                std::string s_temp; // Use a temp string for input
-                std::getline(std::cin, s_temp);
-                if (!s_temp.empty()) {
-                    delimiter = s_temp[0];
-                }
+                std::cerr << "Error: --delimiter is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("layers")) {
-                std::cout << "Enter amount of layers: " << std::endl;
-                std::getline(std::cin, layer_str);
-                try {
-                    layers = std::stoi(layer_str);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the layer. Defaulting to 5. Error: " << e.what() << std::endl;
-                    layers = 5;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 5. Error: " << e.what() << std::endl;
-                    layers = 5;
-                }
+                std::cerr << "Error: --layers is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("neurons")) {
-                std::cout << "Enter amount of neurons: " << std::endl;
-                std::getline(std::cin, neuron_str);
-                try {
-                    neurons = std::stoi(neuron_str);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the neuron. Defaulting to 25. Error: " << e.what() << std::endl;
-                    neurons = 25;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 25. Error: " << e.what() << std::endl;
-                    neurons = 25;
-                }
+                std::cerr << "Error: --neurons is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("input-size")) {
-                std::cout << "Enter inputSize: " << std::endl;
-                std::getline(std::cin, inputSize_str_prompt);
-                try {
-                    inputSize = std::stoi(inputSize_str_prompt);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the inputSize. Defaulting to 1. Error: " << e.what() << std::endl;
-                    inputSize = 1;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    inputSize = 1;
-                }
+                std::cerr << "Error: --input-size is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("output-size")) {
-                std::cout << "Enter outputSize: " << std::endl;
-                std::getline(std::cin, outputSize_str_prompt);
-                try {
-                    outputSize = std::stoi(outputSize_str_prompt);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the outputSize. Defaulting to 1. Error: " << e.what() << std::endl;
-                    outputSize = 1;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    outputSize = 1;
-                }
+                std::cerr << "Error: --output-size is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("learning-rate")) {
-                std::cout << "Enter Learning rate: " << std::endl;
-                std::getline(std::cin, learningRate_str_input); // Use unique name
-                try {
-                    learningRate = std::stod(learningRate_str_input); // Use stod for double
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the learningrate. Defaulting to 0.0001. Error: " << e.what() << std::endl;
-                    learningRate = 0.0001;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for double type. Defaulting to 0.0001. Error: " << e.what() << std::endl;
-                    learningRate = 0.0001;
-                }
+                std::cerr << "Error: --learning-rate is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("samples")) {
-                std::cout << "Enter number of samples: " << std::endl;
-                std::getline(std::cin, sample_str);
-                try {
-                    numSamples = std::stoi(sample_str);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the samples. Defaulting to 1. Error: " << e.what() << std::endl;
-                    numSamples = 1;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    numSamples = 1;
-                }
+                std::cerr << "Error: --samples is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("epochs")) {
-                std::cout << "Enter number of epochs: " << std::endl;
-                std::getline(std::cin, epoch_str);
-                try {
-                    epochs = std::stoi(epoch_str);
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the epochs. Defaulting to 1. Error: " << e.what() << std::endl;
-                    epochs = 1;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for int type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    epochs = 1;
-                }
+                std::cerr << "Error: --epochs is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("min")) {
-                std::cout << "Enter minimum value for normalization: " << std::endl;
-                std::getline(std::cin, minRange_str_prompt); // Use _prompt suffix for interactive
-                try {
-                    minRange = std::stof(minRange_str_prompt); // Use stof for float
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the minimum value. Defaulting to 0. Error: " << e.what() << std::endl;
-                    minRange = 0.0f;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for float type. Defaulting to 0. Error: " << e.what() << std::endl;
-                    minRange = 0.0f;
-                }
+                std::cerr << "Error: --min is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("max")) {
-                std::cout << "Enter maximum value for normalization: " << std::endl;
-                std::getline(std::cin, maxRange_str_prompt); // Use _prompt suffix for interactive
-                try {
-                    maxRange = std::stof(maxRange_str_prompt); // Use stof for float
-                }
-                catch (const std::invalid_argument& e) {
-                    std::cerr << "Invalid input: Please enter a valid number for the maximum value. Defaulting to 1. Error: " << e.what() << std::endl;
-                    maxRange = 1.0f;
-                }
-                catch (const std::out_of_range& e) {
-                    std::cerr << "Input number out of range for float type. Defaulting to 1. Error: " << e.what() << std::endl;
-                    maxRange = 1.0f;
-                }
+                std::cerr << "Error: --max is required for predict mode." << std::endl;
+                return 1;
             }
-
             if (!vm.count("contains-header")) {
-                std::cout << "Does the file contain headers (true/false, 1/0, y/n)? ";
-                std::getline(std::cin, bool_str);
-                std::transform(bool_str.begin(), bool_str.end(), bool_str.begin(), ::tolower);
-                hasHeader = (bool_str == "true" || bool_str == "1" || bool_str == "y");
+                std::cerr << "Error: --contains-header is required for predict mode." << std::endl;
+                return 1;
             }
             if (!vm.count("contains-text")) {
-                std::cout << "Does the file contain text data that needs embedding (true/false, 1/0, y/n)? ";
-                std::getline(std::cin, bool_str);
-                std::transform(bool_str.begin(), bool_str.end(), bool_str.begin(), ::tolower);
-                containsText = (bool_str == "true" || bool_str == "1" || bool_str == "y");
+                std::cerr << "Error: --contains-text is required for predict mode." << std::endl;
+                return 1;
             }
 
             if (inputFile.empty() || outputCsvFile.empty())
@@ -708,10 +438,14 @@ int main(int argc, char* argv[]) {
             }
 
             std::cout << "[PREDICT MODE] Initializing Training object...\n";
+#ifdef USE_MYSQL
             Training trainer = isOfflineMode
-                ? Training(true)
+                ? Training(true, verbose)
                 : Training(dbHost, dbPort, dbUser, dbPassword,
-                    dbSchema, 0, createTables);
+                    dbSchema, 0, createTables, verbose);
+#else
+            Training trainer = Training(true, verbose);
+#endif
             std::cout << "[PREDICT MODE] Training object initialized.\n";
 
             // Set training parameters (important for model structure if loading from DB)
@@ -737,12 +471,15 @@ int main(int argc, char* argv[]) {
             }
             std::cout << "[PREDICT MODE] CSV data loaded.\n";
 
-            std::cout << "[PREDICT MODE] Loading data from: " << inputFile << std::endl;
-            if (!trainer.loadCSV(inputFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName)) {
-                std::cerr << "Failed to load CSV data for prediction. Exiting." << std::endl;
-                return 1;
+            // If target-file is provided, load targets separately
+            if (!targetFile.empty()) {
+                std::cout << "[PREDICT MODE] Loading targets from: " << targetFile << std::endl;
+                if (!trainer.loadTargetsCSV(targetFile, delimiter, hasHeader, containsText, datasetId)) {
+                    std::cerr << "Failed to load target CSV data for prediction. Exiting." << std::endl;
+                    return 1;
+                }
+                std::cout << "[PREDICT MODE] Target CSV data loaded.\n";
             }
-            std::cout << "[PREDICT MODE] CSV data loaded.\n";
 
 
             std::cout << "[PREDICT MODE] Attempting to load model from database (if datasetId is specified)....\n";
@@ -768,6 +505,15 @@ int main(int argc, char* argv[]) {
             trainer.preprocess(minRange, maxRange); // This re-normalizes and initializes CoreAI
             std::cout << "[PREDICT MODE] Data preprocessing complete. CoreAI initialized.\n";
 
+            // DEBUG: Log data statistics after preprocessing
+            if (verbose) {
+                std::cout << "[DEBUG PREDICT] After preprocessing - numSamples: " << trainer.numSamples
+                          << ", inputSize: " << trainer.inputSize << ", outputSize: " << trainer.outputSize << std::endl;
+                if (!trainer.getTargets().empty()) {
+                    std::cout << "[DEBUG PREDICT] First target value: " << trainer.getTargets()[0][0] << std::endl;
+                }
+            }
+
             std::cout << "[PREDICT MODE] Starting model training...\n";
             auto start_time = std::chrono::high_resolution_clock::now();
             trainer.train(learningRate, epochs);
@@ -786,27 +532,6 @@ int main(int argc, char* argv[]) {
             std::cout << "Accuracy: " << accuracy * 100.0f << "%\n";
             std::cout << "Training Execution Time: " << training_duration.count() << " seconds\n";
 
-            std::cout << "[PREDICT MODE] Printing inputs:\n";
-            if (trainer.getCore()) {
-                trainer.printFullMatrix(trainer.getCore()->getInput(), 25);
-            }
-            else {
-                std::cerr << "CoreAI not initialized for printing inputs. Skipping." << std::endl;
-            }
-            std::cout << "[PREDICT MODE] Printing outputs:\n";
-            if (trainer.getCore()) {
-                trainer.printFullMatrix(trainer.getCore()->getOutput(), 5);
-            }
-            else {
-                std::cerr << "CoreAI not initialized for printing outputs. Skipping." << std::endl;
-            }
-            std::cout << "[PREDICT MODE] Printing results:\n";
-            if (trainer.getCore()) {
-                trainer.printFullMatrix(trainer.getCore()->getResults(), 5);
-            }
-            else {
-                std::cerr << "CoreAI not initialized for printing results. Skipping." << std::endl;
-            }
 
             std::cout << "[PREDICT MODE] Saving prediction results to: " << outputCsvFile << std::endl;
             if (trainer.saveResultsToCSV(outputCsvFile, inputFile, hasHeader, delimiter)) {
@@ -821,17 +546,17 @@ int main(int argc, char* argv[]) {
         }
         else
         { // Default to API server mode if no other mode is selected
+            if (!vm.count("api-port")) {
+                std::cerr << "Error: --api-port is required for API server mode." << std::endl;
+                return 1;
+            }
+
             std::cout << "Starting API server mode...\n";
 
             // Initialize Training object
             std::cout << "[API MODE] Initializing Training object...\n";
             std::unique_ptr<Training> trainer;
-            if (isOfflineMode) {
-                trainer = std::make_unique<Training>(true);
-            } else {
-                trainer = std::make_unique<Training>(dbHost, dbPort, dbUser, dbPassword,
-                    dbSchema, 0, createTables);
-            }
+            trainer = std::make_unique<Training>(true, verbose); // Always offline for API mode to avoid MySQL issues
             std::cout << "[API MODE] Training object initialized.\n";
 
 
@@ -856,10 +581,17 @@ int main(int argc, char* argv[]) {
             // Initialize API Server
             std::cout << "[API MODE] Initializing API Server...\n";
             APIServer apiServer("CoreAI3D_API", "0.0.0.0", apiPort);
-            if (!apiServer.initialize()) {
+#ifdef USE_MYSQL
+            if (!apiServer.initialize("config.json", dbHost, dbPort, dbUser, dbPassword, dbSchema, ssl, createTables)) {
                 std::cerr << "Failed to initialize API server\n";
                 return 1;
             }
+#else
+            if (!apiServer.initialize("config.json")) {
+                std::cerr << "Failed to initialize API server\n";
+                return 1;
+            }
+#endif
             std::cout << "[API MODE] API Server initialized.\n";
 
             // Set training module for neural API endpoints

@@ -58,4 +58,9 @@ private:
     std::unique_ptr<Training> trainer;
     std::string answer(std::vector<float>& textEmbedding);
 
+    // New methods for learning from conversations
+    std::vector<std::pair<std::string, std::string>> parseConversation(const std::string& conversation);
+    std::unordered_map<std::string, std::vector<float>> extractContext(const std::vector<std::pair<std::string, std::string>>& parsedConversation);
+    void learnFromConversation(const std::string& conversation);
+
 };

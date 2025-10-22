@@ -49,10 +49,9 @@
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 
-// MySQL Connector/C++ includes - conditionally included
-#ifdef USE_MYSQL
-#include <mysqlx/xdevapi.h>
-#endif
+// #ifdef USE_MYSQL
+// #include <mysqlx/xdevapi.h>
+// #endif
 
 // Namespace aliases
 namespace net = boost::asio;

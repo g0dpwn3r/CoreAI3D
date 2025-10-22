@@ -92,8 +92,9 @@ public:
     template<typename Func>
     void fillVectorWithTransform(std::vector<float>& vec, Func transform);
     // Core AI functionalities
-    void populateFields(int numInput,
-        int numOutput); // Initializes weights, etc.
+    void setInputSize(int size);
+    void setOutputSize(int size);
+    void resizeWeights();
     std::vector<std::vector<float> >
         forward(const std::vector<std::vector<float> >& inputData);
     void train(const std::vector<std::vector<float> >& inputData,
