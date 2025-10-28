@@ -41,6 +41,7 @@ int main(int argc, char* argv[]) {
     bool startChat = false;
     bool startPredict = false;
     bool isOfflineMode = false;
+    bool enableWebsocket = false;
 
     // Basic argument parsing
     for (int i = 1; i < argc; ++i) {
@@ -51,8 +52,10 @@ int main(int argc, char* argv[]) {
             std::cout << "--input-file,-i: Input file\n";
             std::cout << "--output-csv,-o: Output CSV file\n";
             std::cout << "--api-port: API server port (default: 8080)\n";
+            std::cout << "--start-chat: Start chat mode\n";
             std::cout << "--start-predict: Start prediction mode\n";
             std::cout << "--offline: Run in offline mode\n";
+            std::cout << "--enable-websocket: Enable WebSocket server in API mode\n";
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
@@ -64,8 +67,12 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) apiPort = argv[++i];
         } else if (arg == "--start-predict") {
             startPredict = true;
+        } else if (arg == "--start-chat") {
+            startChat = true;
         } else if (arg == "--offline") {
             isOfflineMode = true;
+        } else if (arg == "--enable-websocket") {
+            enableWebsocket = true;
         }
     }
 
@@ -392,26 +399,33 @@ int main(int argc, char* argv[]) {
             }
             std::cout << "[API MODE] API Server started.\n";
 
-            // Initialize WebSocket Server
-            std::cout << "[API MODE] Initializing WebSocket Server...\n";
-            WebSocketServer wsServer("CoreAI3D_WebSocket", "0.0.0.0");
-            if (!wsServer.initialize()) {
-                std::cerr << "Failed to initialize WebSocket server\n";
-                return 1;
-            }
-            std::cout << "[API MODE] WebSocket Server initialized.\n";
+            // Initialize WebSocket Server if enabled
+            std::unique_ptr<WebSocketServer> wsServerPtr;
+            if (enableWebsocket) {
+                std::cout << "[API MODE] Initializing WebSocket Server...\n";
+                wsServerPtr = std::make_unique<WebSocketServer>("CoreAI3D_WebSocket", "0.0.0.0");
+                if (!wsServerPtr->initialize()) {
+                    std::cerr << "Failed to initialize WebSocket server\n";
+                    return 1;
+                }
+                std::cout << "[API MODE] WebSocket Server initialized.\n";
 
-            // Start WebSocket Server
-            std::cout << "[API MODE] Starting WebSocket Server...\n";
-            if (!wsServer.start()) {
-                std::cerr << "Failed to start WebSocket server\n";
-                return 1;
+                // Start WebSocket Server
+                std::cout << "[API MODE] Starting WebSocket Server...\n";
+                if (!wsServerPtr->start()) {
+                    std::cerr << "Failed to start WebSocket server\n";
+                    return 1;
+                }
+                std::cout << "[API MODE] WebSocket Server started.\n";
+            } else {
+                std::cout << "[API MODE] WebSocket Server disabled (use --enable-websocket to enable).\n";
             }
-            std::cout << "[API MODE] WebSocket Server started.\n";
 
             // Wait for servers to finish (they handle their own signals)
-            while (apiServer.isServerRunning() || wsServer.isServerRunning()) {
+            bool wsRunning = wsServerPtr && wsServerPtr->isServerRunning();
+            while (apiServer.isServerRunning() || wsRunning) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
+                wsRunning = wsServerPtr && wsServerPtr->isServerRunning();
             }
 
             std::cout << "Application gracefully exited.\n";

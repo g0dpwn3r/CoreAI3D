@@ -1015,7 +1015,7 @@ void Training::preprocess(float minVal, float maxVal) {
     normalize(minVal, maxVal);
 
     if (!core) { // Initialize CoreAI only if it hasn't been already
-        core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal);
+        core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal, verbose);
         core->trainer = this; // Set the trainer pointer in CoreAI
     }
     else {
@@ -1385,7 +1385,7 @@ bool Training::loadModel(int& datasetId) {
     this->outputSize = state.outputData[0].size();
     // Reinitialize CoreAI with loaded dimensions if not already
     if (!core) {
-        core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, min, max);
+        core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, min, max, verbose);
     }
     // Set the loaded state to CoreAI
     core->setInput(state.inputData);

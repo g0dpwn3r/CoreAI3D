@@ -1,26 +1,34 @@
 ﻿#include "Core.hpp"
 
 CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
-    float min_, float max_)
+    float min_, float max_, bool verbose_)
     : inputSize(inputSize_), layers(layers_), neurons(neurons_),
-    outputSize(outputSize_), minVal(min_), maxVal(max_)
+    outputSize(outputSize_), minVal(min_), maxVal(max_), verbose(verbose_)
 {
-    std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI constructor with params: "
-              << "inputSize=" << inputSize_ << ", layers=" << layers_
-              << ", neurons=" << neurons_ << ", outputSize=" << outputSize_
-              << ", min=" << min_ << ", max=" << max_ << std::endl;
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI constructor with params: "
+                  << "inputSize=" << inputSize_ << ", layers=" << layers_
+                  << ", neurons=" << neurons_ << ", outputSize=" << outputSize_
+                  << ", min=" << min_ << ", max=" << max_ << std::endl;
+    }
 
     // Parameter validation
     if (inputSize_ <= 0 || layers_ <= 0 || neurons_ <= 0 || outputSize_ <= 0) {
-        std::cout << "[DEBUG CONSTRUCTOR] Parameter validation failed: sizes must be positive" << std::endl;
+        if (verbose) {
+            std::cout << "[DEBUG CONSTRUCTOR] Parameter validation failed: sizes must be positive" << std::endl;
+        }
         throw std::invalid_argument("CoreAI: All size parameters must be positive integers");
     }
     if (min_ >= max_) {
-        std::cout << "[DEBUG CONSTRUCTOR] Parameter validation failed: min >= max" << std::endl;
+        if (verbose) {
+            std::cout << "[DEBUG CONSTRUCTOR] Parameter validation failed: min >= max" << std::endl;
+        }
         throw std::invalid_argument("CoreAI: minVal must be less than maxVal");
     }
 
-    std::cout << "[DEBUG CONSTRUCTOR] Parameter validation passed" << std::endl;
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Parameter validation passed" << std::endl;
+    }
 
     // Initialize weights and biases directly instead of using populateFields
     std::mt19937 gen(42);
@@ -179,7 +187,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
     this->output.clear();
 
     // DEBUG: Log input statistics
-    if (!inputvalue.empty() && !inputvalue[0].empty()) {
+    if (verbose && !inputvalue.empty() && !inputvalue[0].empty()) {
         std::cout << "[DEBUG FORWARD] Input size: " << inputvalue.size() << " samples, "
                   << inputvalue[0].size() << " features per sample" << std::endl;
         std::cout << "[DEBUG FORWARD] First input sample: ";
@@ -209,7 +217,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         }
 
         // DEBUG: Log hidden layer activation for first sample
-        if (i == 0) {
+        if (verbose && i == 0) {
             std::cout << "[DEBUG FORWARD] Hidden layer activations (first 5): ";
             for (int j = 0; j < std::min(5, this->neurons); ++j) {
                 std::cout << hiddenLayer[j] << " ";
@@ -232,7 +240,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         }
 
         // DEBUG: Log output layer activation for first sample
-        if (i == 0) {
+        if (verbose && i == 0) {
             std::cout << "[DEBUG FORWARD] Output layer activations: ";
             for (int j = 0; j < this->outputSize; ++j) {
                 std::cout << outputLayer[j] << " ";
@@ -359,10 +367,12 @@ void CoreAI::denormalizeOutput()
     }
 
     // DEBUG: Log denormalization parameters
-    std::cout << "[DEBUG DENORMALIZE] original_data_global_min: " << trainer->original_data_global_min
-              << ", original_data_global_max: " << trainer->original_data_global_max
-              << ", range: " << (trainer->original_data_global_max - trainer->original_data_global_min)
-              << ", minVal: " << this->minVal << ", maxVal: " << this->maxVal << std::endl;
+    if (verbose) {
+        std::cout << "[DEBUG DENORMALIZE] original_data_global_min: " << trainer->original_data_global_min
+                  << ", original_data_global_max: " << trainer->original_data_global_max
+                  << ", range: " << (trainer->original_data_global_max - trainer->original_data_global_min)
+                  << ", minVal: " << this->minVal << ", maxVal: " << this->maxVal << std::endl;
+    }
 
     float normalized_range_diff = this->maxVal - this->minVal;
     float original_range_diff = trainer->original_data_global_max - trainer->original_data_global_min;
@@ -388,9 +398,11 @@ void CoreAI::denormalizeOutput()
             }
 
             // DEBUG: Log first few denormalizations (per call, not static)
-            static int call_count = 0;
-            if (call_count++ < 5) {
-                std::cout << "[DEBUG DENORMALIZE] prediction " << original_val << " -> " << val << std::endl;
+            if (verbose) {
+                static int call_count = 0;
+                if (call_count++ < 5) {
+                    std::cout << "[DEBUG DENORMALIZE] prediction " << original_val << " -> " << val << std::endl;
+                }
             }
         }
     }

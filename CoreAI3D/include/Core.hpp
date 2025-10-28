@@ -22,6 +22,7 @@ private:
     float x;
     float y;
     float z;
+    bool verbose; // Control verbosity of debug output
 
     Training* getTrainer();
 
@@ -55,7 +56,7 @@ private:
 
 public:
     CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
-        float min_, float max_);
+        float min_, float max_, bool verbose_ = false);
 
 
     float minVal;
