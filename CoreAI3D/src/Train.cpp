@@ -470,10 +470,10 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 // Validate subsequent rows against determined sizes
                 size_t expected_columns = (size_t)(this->inputSize + this->outputSize);
                 if (current_processed_values.size() != expected_columns) {
-                    std::cerr << "[DEBUG] WARNING: Row " << rowIndex << " (file line " << lineCounter << ") has " << current_processed_values.size()
-                        << " columns, but expected " << expected_columns
-                        << " columns based on the first data row. Skipping this row." << std::endl;
-                    continue;
+                    if (verbose) {
+                        std::cout << "[DEBUG] Adjusting row " << rowIndex << " size from " << current_processed_values.size() << " to " << expected_columns << std::endl;
+                    }
+                    current_processed_values.resize(expected_columns, 0.0f);
                 }
             }
 
@@ -562,6 +562,19 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             }
 
             for (size_t i = 0; i < inputs.size(); ++i) {
+                // Ensure vectors match expected sizes before database insertion
+                if (inputs[i].size() != (size_t)this->inputSize) {
+                    if (verbose) {
+                        std::cout << "[DEBUG] Resizing input[" << i << "] from " << inputs[i].size() << " to " << this->inputSize << std::endl;
+                    }
+                    inputs[i].resize(this->inputSize, 0.0f);
+                }
+                if (targets[i].size() != (size_t)this->outputSize) {
+                    if (verbose) {
+                        std::cout << "[DEBUG] Resizing target[" << i << "] from " << targets[i].size() << " to " << this->outputSize << std::endl;
+                    }
+                    targets[i].resize(this->outputSize, 0.0f);
+                }
                 dbManager->addDatasetRecord(currentDatasetId, i, inputs[i], targets[i]);
             }
             if (verbose) {

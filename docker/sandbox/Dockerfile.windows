@@ -1,0 +1,73 @@
+# Windows 11 base image (using Windows Server Core as base for compatibility)
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Set shell to PowerShell
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+WORKDIR C:\\workspace
+
+# Install Chocolatey package manager
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+# Refresh environment variables after Chocolatey install
+RUN refreshenv
+
+# Install essential tools and dependencies
+RUN choco install -y \
+    git \
+    cmake \
+    visualstudio2022buildtools \
+    python3 \
+    nodejs \
+    curl \
+    wget \
+    7zip \
+    && refreshenv
+
+# Install Python packages for AI operations
+RUN python -m pip install --upgrade pip && \
+    pip install \
+    requests aiohttp websockets \
+    psutil \
+    opencv-python-headless \
+    numpy pandas scipy \
+    scikit-learn \
+    pillow \
+    pytesseract \
+    SpeechRecognition \
+    pyttsx3 \
+    beautifulsoup4 \
+    selenium
+
+# Install Node.js packages for web automation
+RUN npm install -g \
+    puppeteer \
+    cheerio \
+    axios \
+    ws
+
+# Create sandbox user (Windows equivalent)
+RUN net user sandbox sandbox /add /passwordchg:no && \
+    net localgroup administrators sandbox /add
+
+# Create workspace directories
+RUN New-Item -ItemType Directory -Path C:\workspace, C:\training_data -Force
+
+# Copy training scripts (assuming they exist)
+# Note: In a real scenario, these would be copied from the host
+# COPY docker/training/train_windows_operations.py C:/training_scripts/
+
+# Set working directory
+WORKDIR C:\\workspace
+
+# Environment variables
+ENV SANDBOX_TYPE=windows11
+ENV PYTHONPATH="C:\\Python311\\Lib\\site-packages;${PYTHONPATH}"
+
+# Switch to sandbox user (Windows equivalent)
+USER sandbox
+
+# Default command (PowerShell)
+CMD ["powershell.exe", "-Command", "Write-Host 'CoreAI3D Windows Sandbox Ready'"]

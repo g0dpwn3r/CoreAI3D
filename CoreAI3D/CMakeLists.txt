@@ -319,7 +319,7 @@ target_link_libraries(CoreAI3DLib PUBLIC
 
 # Add MySQL Connector/C++ libraries if found
 if(MYSQLCPP_FOUND)
-    target_link_libraries(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARIES})
+    target_link_libraries(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARIES} mysqlcppconnx)
     target_include_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_INCLUDE_DIRS})
     target_link_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARY_DIRS})
     message(STATUS "MySQL Connector/C++ found and linked")
