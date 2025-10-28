@@ -99,9 +99,57 @@ def get_git_remotes():
         logging.error(f"Failed to get git remotes: {e}")
         raise
 
+def setup_git_lfs():
+    """Set up Git LFS for large files."""
+    try:
+        # Check if git-lfs is available
+        subprocess.run(['git', 'lfs', 'version'], capture_output=True, check=True)
+        logging.info("Git LFS is available")
+
+        # Install Git LFS hooks
+        subprocess.run(['git', 'lfs', 'install'], check=True)
+        logging.info("Git LFS installed")
+
+        # Track large files with LFS
+        large_file_patterns = [
+            "*.log",
+            "*.tlog",
+            "*.exe.recipe",
+            "*.vcxproj.FileListAbsolute.txt",
+            "assets/*",
+            "*.png",
+            "*.jpg",
+            "*.jpeg",
+            "*.gif",
+            "*.bmp",
+            "*.ico",
+            "*.pdf",
+            "*.docx",
+            "*.xlsx",
+            "*.ipynb"
+        ]
+
+        for pattern in large_file_patterns:
+            try:
+                subprocess.run(['git', 'lfs', 'track', pattern], check=True)
+                logging.info(f"Tracking {pattern} with Git LFS")
+            except subprocess.CalledProcessError:
+                logging.warning(f"Failed to track {pattern} with Git LFS")
+
+        # Add .gitattributes if it exists
+        if Path('.gitattributes').exists():
+            subprocess.run(['git', 'add', '.gitattributes'], check=True)
+            logging.info("Added .gitattributes to staging")
+
+    except subprocess.CalledProcessError:
+        logging.warning("Git LFS is not available or failed to set up. Continuing without LFS.")
+
 def perform_git_operations(branch, remotes):
     """Perform git add, commit, and push operations."""
     try:
+        # Set up Git LFS first
+        setup_git_lfs()
+
         # Check if there are any changes to commit
         result = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=True)
         if not result.stdout.strip():
@@ -112,16 +160,33 @@ def perform_git_operations(branch, remotes):
         subprocess.run(['git', 'add', '-A'], check=True)
 
         logging.info("Performing git commit")
-        subprocess.run(['git', 'commit', '-m', 'Another successful build'], check=True)
+        subprocess.run(['git', 'commit', '-m', 'Another successful build with Git LFS support'], check=True)
 
-        for remote in remotes:
-            logging.info(f"Pushing to remote: {remote}")
-            subprocess.run(['git', 'push', remote, branch], check=True)
+        # Ensure we push to GitHub, GitLab, and Bitbucket if configured
+        target_remotes = ['origin', 'github', 'gitlab', 'bitbucket']
+        available_remotes = [r for r in remotes if r in target_remotes or any(tr in r for tr in target_remotes)]
+
+        if not available_remotes:
+            available_remotes = remotes  # Fallback to all remotes
+
+        for remote in available_remotes:
+            try:
+                logging.info(f"Pushing to remote: {remote}")
+                result = subprocess.run(['git', 'push', remote, branch], capture_output=True, text=True, check=True)
+                logging.info(f"Successfully pushed to {remote}")
+            except subprocess.CalledProcessError as e:
+                logging.warning(f"Failed to push to remote {remote}: {e}")
+                if e.stdout:
+                    logging.warning(f"Push stdout: {e.stdout}")
+                if e.stderr:
+                    logging.warning(f"Push stderr: {e.stderr}")
+                logging.warning(f"Continuing with other operations despite push failure to {remote}")
 
         logging.info("Git operations completed successfully")
     except subprocess.CalledProcessError as e:
         logging.error(f"Git operation failed: {e}")
-        raise
+        # Don't raise exception to avoid failing the build
+        logging.warning("Git operations failed, but build will continue")
 
 def main():
     parser = argparse.ArgumentParser(description='Post-build automation script')

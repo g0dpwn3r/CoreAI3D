@@ -41,15 +41,16 @@ done
 
 echo "Building CoreAI3D in $BUILD_TYPE mode with MySQL=$USE_MYSQL"
 
-# Create build directory if it doesn't exist
-if [ ! -d "build" ]; then
-    mkdir build
+# Create build directory based on build type
+BUILD_DIR="out/build/linux-x64-$BUILD_TYPE"
+if [ ! -d "$BUILD_DIR" ]; then
+    mkdir -p "$BUILD_DIR"
 fi
 
-cd build
+cd "$BUILD_DIR"
 
 # Configure with CMake using system packages
-cmake .. \
+cmake ../../.. \
     -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
     -DUSE_MYSQL=$USE_MYSQL \
     -G Ninja
@@ -58,4 +59,5 @@ cmake .. \
 cmake --build . --parallel $(nproc)
 
 echo "Build completed successfully!"
-echo "Executable location: $(pwd)/bin/CoreAI3D"
+echo "Executable location: $(pwd)/CoreAI3D/CoreAI3D"
+echo "Build directory: $(pwd)"
