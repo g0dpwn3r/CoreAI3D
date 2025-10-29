@@ -49,6 +49,11 @@ int main(int argc, char* argv[]) {
     bool enableWebsocket = false;
     bool createTableFlag = false;
 
+    // Helper function to check if next argument is a value (not a flag)
+    auto hasValue = [&](int idx) -> bool {
+        return idx + 1 < argc && std::string(argv[idx + 1]).find("--") != 0;
+    };
+
     // Basic argument parsing
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -72,11 +77,14 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
         } else if (arg == "--input-file" || arg == "-i") {
-            if (i + 1 < argc) inputFile = argv[++i];
+            if (hasValue(i)) inputFile = argv[++i];
+            else std::cerr << "ERROR: --input-file requires a value\n";
         } else if (arg == "--output-csv" || arg == "-o") {
-            if (i + 1 < argc) outputCsvFile = argv[++i];
+            if (hasValue(i)) outputCsvFile = argv[++i];
+            else std::cerr << "ERROR: --output-csv requires a value\n";
         } else if (arg == "--api-port") {
-            if (i + 1 < argc) apiPort = argv[++i];
+            if (hasValue(i)) apiPort = argv[++i];
+            else std::cerr << "ERROR: --api-port requires a value\n";
         } else if (arg == "--start-predict") {
             startPredict = true;
         } else if (arg == "--start-chat") {
@@ -88,15 +96,22 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--create-table") {
             createTableFlag = true;
         } else if (arg == "--db-host") {
-            if (i + 1 < argc) dbHost = argv[++i];
+            if (hasValue(i)) dbHost = argv[++i];
+            else std::cerr << "ERROR: --db-host requires a value\n";
         } else if (arg == "--db-user") {
-            if (i + 1 < argc) dbUser = argv[++i];
+            if (hasValue(i)) dbUser = argv[++i];
+            else std::cerr << "ERROR: --db-user requires a value\n";
         } else if (arg == "--db-password") {
-            if (i + 1 < argc) dbPassword = argv[++i];
+            if (hasValue(i)) dbPassword = argv[++i];
+            else std::cerr << "ERROR: --db-password requires a value\n";
         } else if (arg == "--db-port") {
-            if (i + 1 < argc) dbPort = argv[++i];
+            if (hasValue(i)) dbPort = argv[++i];
+            else std::cerr << "ERROR: --db-port requires a value\n";
         } else if (arg == "--db-schema") {
-            if (i + 1 < argc) dbSchema = argv[++i];
+            if (hasValue(i)) dbSchema = argv[++i];
+            else std::cerr << "ERROR: --db-schema requires a value\n";
+        } else {
+            std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
     }
 
@@ -451,6 +466,12 @@ int main(int argc, char* argv[]) {
             while (apiServer.isServerRunning() || wsRunning) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 wsRunning = wsServerPtr && wsServerPtr->isServerRunning();
+
+                // Check for connection health and attempt reconnection if needed
+                if (wsServerPtr && !wsServerPtr->isHealthy()) {
+                    std::cerr << "WebSocket server health check failed, attempting restart..." << std::endl;
+                    wsServerPtr->restartServer();
+                }
             }
 
             std::cout << "Application gracefully exited.\n";

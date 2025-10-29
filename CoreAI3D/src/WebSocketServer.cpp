@@ -73,9 +73,12 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t bytes_transferre
     }
 
     if (ec == beast::error::timeout) {
-        // Handle timeout specifically
-        std::cerr << "WebSocket read timeout: Connection timed out" << std::endl;
-        isActive_ = false;
+        // Handle timeout specifically - don't close connection immediately
+        std::cerr << "WebSocket read timeout: Connection timed out, but keeping connection alive" << std::endl;
+        // Continue reading instead of closing
+        if (isActive_) {
+            doRead();
+        }
         return;
     }
 
@@ -113,9 +116,9 @@ void WebSocketSession::onWrite(beast::error_code ec, std::size_t bytes_transferr
     boost::ignore_unused(bytes_transferred);
 
     if (ec == beast::error::timeout) {
-        // Handle write timeout specifically
-        std::cerr << "WebSocket write timeout: Connection timed out during write" << std::endl;
-        isActive_ = false;
+        // Handle write timeout specifically - don't close connection immediately
+        std::cerr << "WebSocket write timeout: Connection timed out during write, but keeping connection alive" << std::endl;
+        // Continue processing instead of closing
         return;
     }
 
