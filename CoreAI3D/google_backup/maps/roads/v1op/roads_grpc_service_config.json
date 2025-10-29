@@ -1,14 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [{ "service": "google.maps.roads.v1op.RoadsService" }],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "60s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE", "UNKNOWN"]
-    }
-  }
- ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1c1d63735b280d914458bcb1913067053f7bbba4fb7d66bcfa9a691bf59c2f60
+size 319

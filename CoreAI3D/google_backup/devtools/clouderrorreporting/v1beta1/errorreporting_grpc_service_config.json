@@ -1,32 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.devtools.clouderrorreporting.v1beta1.ErrorStatsService"
-        },
-        {
-          "service": "google.devtools.clouderrorreporting.v1beta1.ErrorGroupService"
-        }
-      ],
-      "timeout": "600s",
-      "retryPolicy": {
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "UNAVAILABLE",
-          "DEADLINE_EXCEEDED"
-        ]
-      }
-    },
-    {
-      "name": [
-        {
-          "service": "google.devtools.clouderrorreporting.v1beta1.ReportErrorsService"
-        }
-      ],
-      "timeout": "600s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2c3a247d67834b92dff03810980ca0f824cd30e750a81b01e5e95f50ed9c79ed
+size 699

@@ -1,35 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.speech.v1p1beta1.Speech",
-          "method": "Recognize"
-        },
-        {
-          "service": "google.cloud.speech.v1p1beta1.Speech",
-          "method": "StreamingRecognize"
-        }
-      ],
-      "timeout": "5000s",
-      "retryPolicy": {
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "DEADLINE_EXCEEDED",
-          "UNAVAILABLE"
-        ]
-      }
-    },
-    {
-      "name": [
-        {
-          "service": "google.cloud.speech.v1p1beta1.Speech",
-          "method": "LongRunningRecognize"
-        }
-      ],
-      "timeout": "5000s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:1a196408fdb2468947dcfe4d739ec44f9a128bef0bf1a5fad8d7a4a75c439b82
+size 743

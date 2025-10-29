@@ -1,8 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.apps.alertcenter.v1beta1.AlertCenterService" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:73e9e277d95aa3eabc399681610a7ea3398818c015f9f36f452602a15749ab7d
+size 146

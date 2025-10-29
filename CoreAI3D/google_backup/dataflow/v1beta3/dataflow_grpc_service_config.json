@@ -1,24 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.dataflow.v1beta3.JobsV1Beta3"
-        },
-        {
-          "service": "google.dataflow.v1beta3.MessagesV1Beta3"
-        },
-        {
-          "service": "google.dataflow.v1beta3.MetricsV1Beta3"
-        },
-        {
-          "service": "google.dataflow.v1beta3.SnapshotsV1Beta3"
-        },
-        {
-          "service": "google.dataflow.v1beta3.TemplatesService"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:52b4191d67f8759176e2bd5ba55a42993356d31824ee88c6cac2c0c20250d239
+size 504

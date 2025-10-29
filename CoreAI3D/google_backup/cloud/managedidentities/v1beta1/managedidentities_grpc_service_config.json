@@ -1,12 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.managedidentities.v1.ManagedIdentitiesService"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:819bd6a357261ba08e45db5aedbf2be550f2473f38ecbf092dcb10587d9a263a
+size 190

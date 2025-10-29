@@ -626,13 +626,25 @@ class AsyncTaskThread(QThread):
         self.callback = callback
         self.error_callback = error_callback
         self._finished = False
+        self._loop = None
 
     def run(self):
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(self.coro)
-            loop.close()
+            # Create new event loop for this thread
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+
+            # Create a task and run it
+            task = self._loop.create_task(self.coro)
+            result = self._loop.run_until_complete(task)
+
+            # Ensure all pending tasks are cancelled before closing
+            pending_tasks = [t for t in asyncio.all_tasks(self._loop) if not t.done()]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                self._loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+
             if self.callback:
                 QTimer.singleShot(0, lambda: self.callback(result))
         except Exception as e:
@@ -641,6 +653,12 @@ class AsyncTaskThread(QThread):
             if self.error_callback:
                 QTimer.singleShot(0, lambda: self.error_callback(str(e)))
         finally:
+            # Properly close the event loop
+            if self._loop and not self._loop.is_closed():
+                try:
+                    self._loop.close()
+                except Exception as e:
+                    logger.warning(f"Error closing event loop: {e}")
             self._finished = True
 
 class AsyncTaskManager(QObject):
@@ -653,6 +671,7 @@ class AsyncTaskManager(QObject):
         super().__init__()
         self.active_threads = []
         self._shutdown = False
+        self._client_loop = None  # Track the main client event loop
 
     def run_async_task(self, coro, callback=None, error_callback=None):
         """Run an async coroutine safely with Qt integration"""
@@ -680,6 +699,10 @@ class AsyncTaskManager(QObject):
             return func()
         return wrapper
 
+    def set_client_loop(self, loop):
+        """Set the main client event loop for reference"""
+        self._client_loop = loop
+
     def shutdown(self):
         """Shutdown the task manager and wait for active threads"""
         logger.info(f"Shutting down AsyncTaskManager with {len(self.active_threads)} active threads")
@@ -699,6 +722,7 @@ class AsyncTaskManager(QObject):
                     self.active_threads.remove(thread)
 
         self.active_threads.clear()
+        self._client_loop = None
         logger.info("AsyncTaskManager shutdown complete")
 
 
@@ -3231,6 +3255,9 @@ if __name__ == "__main__":
 
         except Exception as e:
             logger.error(f"Health check error: {str(e)}")
+            # Don't retry immediately to avoid spam
+            if "Event loop is closed" in str(e) or "Future attached to a different loop" in str(e):
+                logger.warning("Event loop issue detected, will retry health check later")
 
     def load_datasets(self):
         """Load existing datasets"""

@@ -1,21 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.security.publicca.v1beta1.PublicCertificateAuthorityService"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "UNAVAILABLE"
-        ]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0083788496eb1e53b3d9adca017e169c3bf3493eaaa64401342907aa56a15a4f
+size 429

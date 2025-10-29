@@ -1,27 +1,3 @@
-{
-    "remotePath": "./",
-    "host": "almelokaal.nl",
-    "username": "Carlon@almelokaal.nl",
-    "password": "M6pgtgAUwDzTqY5KEpPp",
-    "port": 21,
-    "secure": false,
-    "protocol": "ftp",
-    "uploadOnSave": false,
-    "passive": false,
-    "debug": false,
-    "privateKeyPath": null,
-    "passphrase": null,
-    "agent": null,
-    "allow": [],
-    "ignore": [
-        "\\.vscode",
-        "\\.git",
-        "\\.DS_Store"
-    ],
-    "generatedFiles": {
-        "extensionsToInclude": [
-            ""
-        ],
-        "path": ""
-    }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:928d6ff385dbeec4df5276507f1401732b11195358782ea039611be56431a40e
+size 545

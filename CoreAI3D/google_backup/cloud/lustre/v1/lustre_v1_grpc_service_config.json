@@ -1,26 +1,3 @@
-{
-    "methodConfig": [{
-      "name": [
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "ListInstances" },
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "GetInstance" }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "10s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["UNAVAILABLE"]
-      }
-    },
-    {
-      "name": [
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "CreateInstance" },
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "UpdateInstance" },
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "DeleteInstance" },
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "ImportData" },
-        { "service": "google.cloud.lustre.v1main.v1.Lustre", "method": "ExportData" }
-      ],
-      "timeout": "1800s"
-    }]
-  }
+version https://git-lfs.github.com/spec/v1
+oid sha256:4165c6f75e1b965466ecd365472eb1172ebd0e43cacffdbaca0fc6a317a06f2e
+size 971

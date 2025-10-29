@@ -1,28 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.optimization.v1.FleetRouting", "method": "OptimizeTours" }
-    ],
-    "timeout": "3600s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },
-  {
-    "name": [
-      { "service": "google.cloud.optimization.v1.FleetRouting", "method": "BatchOptimizeTours" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4ef77f1a80728c18cb2127064a26c7b4739d1047a2b520d7a150f0034ed38d46
+size 688

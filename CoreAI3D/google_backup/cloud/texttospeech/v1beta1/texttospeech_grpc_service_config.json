@@ -1,26 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [{ "service": "google.cloud.texttospeech.v1beta1.TextToSpeech" }],
-      "timeout": "300s",
-      "retryPolicy": {
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "UNAVAILABLE",
-          "DEADLINE_EXCEEDED"
-        ]
-      }
-    },
-    {
-      "name": [
-        {
-          "service": "google.cloud.texttospeech.v1beta1.TextToSpeechLongAudioSynthesize",
-          "method": "SynthesizeLongAudio"
-        }
-      ],
-      "timeout": "5000s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b97c9c7a34021d7cbd07ca5e65453e0648c7370fdbda5e76b8e4b3065d2a8dac
+size 590

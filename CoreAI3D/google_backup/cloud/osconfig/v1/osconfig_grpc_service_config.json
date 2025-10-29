@@ -1,16 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.osconfig.v1.OsConfigService" },
-      { "service": "google.cloud.osconfig.v1.OsConfigZonalService" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "60s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d53b12decb67a71e6626ac7243e8c58d4ea933a861b238b49d7c25ba0ff1193b
+size 393

@@ -1,13 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.phishingprotection.v1beta1.PhishingProtectionServiceV1Beta1",
-          "method": "ReportPhishing"
-        }
-      ],
-      "timeout": "600s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0c18a559f5f6cefa8bf0211388cd31ba5853a07640098bcfde3f23dc4f909775
+size 243

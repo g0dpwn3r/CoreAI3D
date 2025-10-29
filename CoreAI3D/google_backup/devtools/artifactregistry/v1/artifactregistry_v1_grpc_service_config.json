@@ -1,12 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.devtools.artifactregistry.v1.ArtifactRegistry"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a48441d396fb4c7d57a2cad1502f88acd5d4edbdc7fce47c76750ed6f65fdba5
+size 184

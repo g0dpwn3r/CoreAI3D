@@ -1,22 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "DEADLINE_EXCEEDED",
-          "UNAVAILABLE"
-        ]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:f74953eb9eb26178c26d7811fcb12832d74d75c2ee61c918c738036e2cd940c9
+size 441

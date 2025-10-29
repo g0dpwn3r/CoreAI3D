@@ -1,18 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.speech.v2.Speech"
-        }
-      ],
-      "timeout": "5000s",
-      "retryPolicy": {
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["DEADLINE_EXCEEDED", "UNAVAILABLE"]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:d0a2ad095a31a5d199a2a9c7832bafb414bbb5137a520dbc8580a6f2276b9933
+size 363

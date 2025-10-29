@@ -1,15 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.shopping.merchant.promotions.v1.PromotionsService" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:66e5b163b2d33d506d5863f0ec288938d1c5d3cc16dd3196e6307e35b4bf4636
+size 339

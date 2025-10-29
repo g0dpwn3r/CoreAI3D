@@ -1,22 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.bigquery.biglake.v1alpha1.MetastoreService"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "10s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "DEADLINE_EXCEEDED",
-          "UNAVAILABLE"
-        ]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ccd731ac80ff85661e4bb528e4f4c68f101f88f6e482494c2ecb5b66fd1c005e
+size 439

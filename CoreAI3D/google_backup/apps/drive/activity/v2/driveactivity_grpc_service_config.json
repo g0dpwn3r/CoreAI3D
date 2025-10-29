@@ -1,20 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.apps.drive.activity.v2.DriveActivityService",
-          "method": "QueryDriveActivity"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["UNAVAILABLE"]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e3c1711dd77e4851010595e789bca7a56a308dcaf92314d4b9ab34dca5d7324c
+size 425

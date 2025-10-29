@@ -1,24 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.maps.regionlookup.v1alpha.RegionLookup",
-          "method": "LookupRegion"
-        },
-        {
-          "service": "google.maps.regionlookup.v1alpha.RegionLookup",
-          "method": "SearchRegion"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "10s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["UNAVAILABLE"]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5147d7a3cb08b90ad373d12c646b8109589214558b7b15129189b42ac4527a14
+size 540

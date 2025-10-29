@@ -1,15 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.sql.v1beta4.SqlBackupRunsService" },
-      { "service": "google.cloud.sql.v1beta4.SqlDatabasesService" },
-      { "service": "google.cloud.sql.v1beta4.SqlFlagsService" },
-      { "service": "google.cloud.sql.v1beta4.SqlInstancesService" },
-      { "service": "google.cloud.sql.v1beta4.SqlOperationsService" },
-      { "service": "google.cloud.sql.v1beta4.SqlSslCertsService" },
-      { "service": "google.cloud.sql.v1beta4.SqlTiersService" },
-      { "service": "google.cloud.sql.v1beta4.SqlUsersService" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b230f10bfdcdc66ddc83d12134c650842cc09f1d491e26871963615cb5726872
+size 612

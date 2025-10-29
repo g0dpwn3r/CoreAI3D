@@ -1,22 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.asset.v1p7beta1.AssetService",
-          "method": "ExportAssets"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "DEADLINE_EXCEEDED",
-          "UNAVAILABLE"
-        ]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:54e11c648d81e700754034583c03e3b702e6ba6dd83b7e706fa5b3933b1732ec
+size 439

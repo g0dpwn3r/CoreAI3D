@@ -1,31 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.ads.datamanager.v1.IngestionService",
-          "method": " IngestAudienceMembers"
-        },
-        {
-          "service": "google.ads.datamanager.v1.IngestionService",
-          "method": " RemoveAudienceMembers"
-        },
-        {
-          "service": "google.ads.datamanager.v1.IngestionService",
-          "method": " IngestEvents"
-        },
-        {
-          "service": "google.ads.datamanager.v1.IngestionService",
-          "method": " RetrieveRequestStatus"
-        }
-      ],
-      "timeout": "120s",
-      "retryPolicy": {
-        "initialBackoff": "5s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["UNAVAILABLE", "DEADLINE_EXCEEDED"]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:83edb8da5ebc947d746d51231e48a40d94ef5dcd3759c9340790d84d81bc8787
+size 807

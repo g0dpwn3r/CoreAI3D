@@ -1,15 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [{"service": "google.analytics.admin.v1beta.AnalyticsAdminService"}],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["UNAVAILABLE", "UNKNOWN"]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:dccc53551c5179fe1314d4c7748762a9afb1261010cb393086fcff3bf92f8717
+size 359

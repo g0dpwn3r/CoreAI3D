@@ -1,29 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google3.google.cloud.parallelstore.v1main.v1beta.Parallelstore", "method": "ListInstances" },
-      { "service": "google3.google.cloud.parallelstore.v1main.v1beta.Parallelstore", "method": "GetInstance" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },
-  {
-    "name": [
-      { "service": "google3.google.cloud.parallelstore.v1main.v1beta.Parallelstore", "method": "CreateInstance" }
-    ],
-    "timeout": "1800s"
-  },
-  {
-    "name": [
-      { "service": "google3.google.cloud.parallelstore.v1main.v1beta.Parallelstore", "method": "UpdateInstance" },
-      { "service": "google3.google.cloud.parallelstore.v1main.v1beta.Parallelstore", "method": "DeleteInstance" }
-    ],
-    "timeout": "3600s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b205a9970a16a4c09f2a5406d3730627f6cc4f3a1822cff00e84eda64d713aa5
+size 933

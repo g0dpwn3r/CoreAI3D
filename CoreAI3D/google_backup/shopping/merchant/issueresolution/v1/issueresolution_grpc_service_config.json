@@ -1,16 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.shopping.merchant.issueresolution.v1.IssueResolutionService" },
-      { "service": "google.shopping.merchant.issueresolution.v1.AggregateProductStatusesService" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:29a4b35137d52175a76076a1b02b364391863a7e8d02a4ab71af6386cd0515c6
+size 449

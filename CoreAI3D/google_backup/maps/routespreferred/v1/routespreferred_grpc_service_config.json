@@ -1,14 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [{ "service": "google.maps.routespreferred.v1.RoutesPreferred" }],
-    "timeout": "30s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "30s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }
- ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:066604ac0f3bfe2588f35abe44ae42f057de474ff8f0d8a72425992f5f01e2a9
+size 319

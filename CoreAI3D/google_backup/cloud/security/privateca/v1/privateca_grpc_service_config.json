@@ -1,22 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.security.privateca.v1.CertificateAuthorityService"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "initialBackoff": "0.100s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "UNKNOWN",
-          "UNAVAILABLE",
-          "DEADLINE_EXCEEDED"
-        ]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3fba0cbf355840e833e5a29daee9dc7262e4c89ef1245acfb821818ec796ce4b
+size 445

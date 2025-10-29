@@ -1,8 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.api.apikeys.v2.ApiKeys" }
-    ],
-    "timeout": "10s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ee68c179a097848ea35386d77f594f3964bf0f965c6fd8d1599b3ac2aef9347f
+size 125

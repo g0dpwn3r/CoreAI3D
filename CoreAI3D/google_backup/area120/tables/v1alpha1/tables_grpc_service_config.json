@@ -1,31 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [{ "service": "google.area120.tables.v1alpha1.TablesService" }],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },
-    {
-      "name": [
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "ListWorkspaces" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "GetWorkspace" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "ListTables" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "GetTable" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "GetRow" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "ListRows" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "CreateRow" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "BatchCreateRows" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "UpdateRow" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "BatchUpdateRows" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "DeleteRow" },
-        { "service": "google.area120.tables.v1alpha1.TablesService", "method": "BatchDeleteRows" }
-      ],
-      "timeout": "60s"
-    }]
-}
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:796efe3b12a19766a0b318ce4412a97e82fd60b72c3d1e6174573b14938c2287
+size 1526

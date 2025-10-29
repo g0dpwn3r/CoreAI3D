@@ -1,15 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.maps.addressvalidation.v1.AddressValidation" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:386b5689ea937a3fb509a15eed936b742f43deb04c5adf33c55f84ceded5a354
+size 333

@@ -1,34 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [{ "service": "google.cloud.osconfig.agentendpoint.v1.AgentEndpointService" }],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "60s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },{
-      "name": [
-        {
-          "service": "google.cloud.osconfig.agentendpoint.v1.AgentEndpointService",
-          "method": "ReceiveTaskNotification"
-        }
-      ],
-      "timeout": "3600s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "DEADLINE_EXCEEDED",
-          "CANCELLED",
-          "ABORTED",
-          "INTERNAL",
-          "UNAVAILABLE"
-        ]
-      }
-    }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ef6510a1967fe2bf43c2591f9ee5e7a59019d728fe325f690fb3fe475bfa3e77
+size 856

@@ -1,22 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.videointelligence.v1p2beta1.VideoIntelligenceService",
-          "method": "AnnotateVideo"
-        }
-      ],
-      "timeout": "600s",
-      "retryPolicy": {
-        "initialBackoff": "1s",
-        "maxBackoff": "120s",
-        "backoffMultiplier": 2.5,
-        "retryableStatusCodes": [
-          "UNAVAILABLE",
-          "DEADLINE_EXCEEDED"
-        ]
-      }
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:98c22f9a519cbe7de01ea7cfa3bacc81f62504489aef862032c66a034bcaebcd
+size 462

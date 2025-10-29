@@ -1,15 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.shopping.merchant.reports.v1beta.ReportService" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:44afe1e1ea938b6dc82d11ce8bf6eab33f5918d99788a63aa8f368cc1ae176b4
+size 336

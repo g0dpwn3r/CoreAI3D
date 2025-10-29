@@ -1,7 +1,3 @@
-{
-  "default-registry": {
-    "kind": "git",
-    "repository": "https://github.com/g0dpwn3r/vcpkg",
-    "baseline": "f9fa4c8ea8a05702c6f0e06df782b9f485dffa2e"
-  }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:24914eab2a57f8c3863fbcd12aae7d85895ee8a13822c7c3325ce58434d9f33d
+size 164

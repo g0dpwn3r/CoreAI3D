@@ -1,8 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.privatecatalog.v1alpha1.PrivateCatalog" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2de55fc2f8535e962b47973f8f35f582fe233a6f7425a1846fbeb7e1f94f04d8
+size 147

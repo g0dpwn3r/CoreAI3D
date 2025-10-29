@@ -1,35 +1,3 @@
-{
-  "configurations": [
-    {
-      "name": "WSL-Debug",
-      "generator": "Ninja",
-      "configurationType": "Debug",
-      "buildRoot": "${projectDir}/out/build/linux-x64-debug-wsl",
-      "installRoot": "${projectDir}/out/install/linux-x64-debug-wsl",
-      "cmakeCommandArgs": "",
-      "buildCommandArgs": "",
-      "inheritEnvironments": [ "linux" ],
-      "remoteMachineName": "WSL"
-    },
-
-    {
-      "name": "Windows-Debug",
-      "generator": "Ninja",
-      "configurationType": "Debug",
-      "buildRoot": "${projectDir}/out/build/${name}",
-      "installRoot": "${projectDir}/out/install/${name}",
-      "cmakeCommandArgs": "",
-      "inheritEnvironments": [ "msvc_x64_x64" ],
-      "variables": [
-        {
-            "name": "CMAKE_EXPORT_COMPILE_COMMANDS",
-            "value": "ON"
-        },
-        {
-            "name": "CMAKE_INSTALL_PREFIX",
-            "value": "D:/code/CoreAI3D/out/install/${name}"
-        }
-      ]
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:4177dedce1aef6efa59ae7031b0b2f8254185243808e04ecdec2d6e309390d90
+size 957

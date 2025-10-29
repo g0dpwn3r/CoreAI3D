@@ -1,21 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.kms.inventory.v1.KeyDashboardService",
-          "method": "ListCryptoKeys"
-        },
-        {
-          "service": "google.cloud.kms.inventory.v1.KeyTrackingService",
-          "method": "GetProtectedResourcesSummary"
-        },
-        {
-          "service": "google.cloud.kms.inventory.v1.KeyTrackingService",
-          "method": "SearchProtectedResources"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:dc10ffe2fab018d8c256b5cb6ccc88cbcb96edee066794e408b88f505dc2a634
+size 505

@@ -1,12 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.iap.v1beta1.IdentityAwareProxyAdminV1Beta1"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:70dd81ed3c564f437ff12e3c48742a86be8c9e663714101862ad734e90c0d1af
+size 187

@@ -99,6 +99,47 @@ def get_git_remotes():
         logging.error(f"Failed to get git remotes: {e}")
         raise
 
+def get_remote_url(remote):
+    """Get the URL of a specific git remote."""
+    try:
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', remote],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to get URL for remote {remote}: {e}")
+        raise
+
+def is_https_url(url):
+    """Check if the URL is HTTPS."""
+    return url.startswith('https://')
+
+def convert_to_ssh(url):
+    """Convert HTTPS URL to SSH URL for Bitbucket."""
+    if 'bitbucket.org' in url:
+        return url.replace('https://bitbucket.org/', 'git@bitbucket.org:')
+    else:
+        # For non-Bitbucket URLs, return as is or handle differently if needed
+        return url
+
+def check_ssh_connectivity():
+    """Check SSH connectivity to Bitbucket."""
+    try:
+        subprocess.run(
+            ['ssh', '-T', 'git@bitbucket.org'],
+            capture_output=True,
+            check=True,
+            timeout=10
+        )
+        logging.info("SSH connectivity to Bitbucket verified")
+        return True
+    except subprocess.CalledProcessError as e:
+        logging.error(f"SSH connectivity check failed: {e}")
+        return False
+
 def setup_git_lfs():
     """Set up Git LFS for large files."""
     try:
@@ -161,6 +202,19 @@ def perform_git_operations(branch, remotes):
 
         logging.info("Performing git commit")
         subprocess.run(['git', 'commit', '-m', 'Another successful build with Git LFS support'], check=True)
+
+        # Check and convert origin remote to SSH if it's HTTPS
+        if 'origin' in remotes:
+            origin_url = get_remote_url('origin')
+            if is_https_url(origin_url):
+                ssh_url = convert_to_ssh(origin_url)
+                logging.info(f"Converting origin remote from HTTPS to SSH: {ssh_url}")
+                subprocess.run(['git', 'remote', 'set-url', 'origin', ssh_url], check=True)
+
+        # Check SSH connectivity before pushing
+        if not check_ssh_connectivity():
+            logging.error("SSH connectivity to Bitbucket failed. Skipping push operations.")
+            return
 
         # Ensure we push to GitHub, GitLab, and Bitbucket if configured
         target_remotes = ['origin', 'github', 'gitlab', 'bitbucket']

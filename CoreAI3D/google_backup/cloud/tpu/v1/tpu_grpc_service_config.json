@@ -1,9 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.tpu.v1.Tpu" }
-    ],
-    "timeout": "60s"
-  }]
-}
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:4d500f0b8f93f994e8734f1fc438968356a21066234b174129675faea37b8173
+size 120

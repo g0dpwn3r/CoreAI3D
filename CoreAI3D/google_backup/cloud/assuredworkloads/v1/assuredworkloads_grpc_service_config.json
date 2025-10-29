@@ -1,12 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.assuredworkloads.v1.AssuredWorkloadsService"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:231d4cf147decb11fa8107bcd65984d3d0ceb1da34380d2fe2214f493ebdb61b
+size 188

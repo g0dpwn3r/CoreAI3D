@@ -1,24 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-        { "service": "google.cloud.workflows.v1beta", "method": "ListWorkflows"},
-        { "service": "google.cloud.workflows.v1beta", "method": "GetWorkflow"}
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "60s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },
-  {
-    "name": [
-      { "service": "google.cloud.workflows.v1beta", "method": "CreateWorkflow" },
-      { "service": "google.cloud.workflows.v1beta", "method": "DeleteWorkflow" },
-      { "service": "google.cloud.workflows.v1beta", "method": "UpdateWorkflow" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2cfa2804051cb4f96ea475016212bb242b14e2e106546df930de5133c9c92e0b
+size 716

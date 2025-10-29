@@ -1,15 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.policytroubleshooter.iam.v3.PolicyTroubleshooter", "method": "TroubleshootIamPolicy" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ae916787d04e6ae2ed49a41f06cd747813712765b3ff73ec531d7b4493679662
+size 378

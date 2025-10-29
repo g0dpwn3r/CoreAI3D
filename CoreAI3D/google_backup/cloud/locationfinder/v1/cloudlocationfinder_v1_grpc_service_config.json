@@ -1,17 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.locationfinder.v1.CloudLocationFinder", "method": "GetCloudLocation" },
-      { "service": "google.cloud.locationfinder.v1.CloudLocationFinder", "method": "ListCloudLocations" },
-      { "service": "google.cloud.locationfinder.v1.CloudLocationFinder", "method": "SearchCloudLocations" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b669151782d043c99ac74b39ecf77746a45a6e6fd36ab28568f43158f58a05f3
+size 578

@@ -1,16 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.maps.routing.v2.RoutesService", "method": "ComputeRoutes" },
-      { "service": "google.maps.routing.v2.RoutesService", "method": "ComputeRouteMatrix" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:46c77657e532d5af511c19aea695d5e6443a5732a6a3251e694e7dcb5d2ea1dd
+size 439

@@ -1,9 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.eventarc.publishing.v1.Publisher", "method": "PublishChannelConnectionEvents" },
-      { "service": "google.cloud.eventarc.publishing.v1.Publisher", "method": "Publish" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a1e40314fedaa54690660fac04c475c89d3a518f928021779633634aead35403
+size 276

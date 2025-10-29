@@ -1,18 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.devtools.testing.v1.ApplicationDetailService"
-        },
-        {
-          "service": "google.devtools.testing.v1.TestEnvironmentDiscoveryService"
-        },
-        {
-          "service": "google.devtools.testing.v1.TestExecutionService"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:543404a681a3b62696155f56b85fc9017598e4f8130a9ef53393135be19aec9a
+size 378

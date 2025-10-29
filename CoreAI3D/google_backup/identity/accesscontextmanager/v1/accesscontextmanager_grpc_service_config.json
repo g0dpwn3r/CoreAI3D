@@ -1,12 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.identity.accesscontextmanager.v1.AccessContextManager"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:94873ed76ddf3bd2535c469a2d9f43c507e31e7ce40dd6dda2c5bcdaf872bc24
+size 192

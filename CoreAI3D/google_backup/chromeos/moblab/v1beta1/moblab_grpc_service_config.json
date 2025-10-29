@@ -1,35 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.chromeos.moblab.v1beta1.BuildService",
-          "method": "CheckBuildStageStatus"
-        },
-        {
-          "service": "google.chromeos.moblab.v1beta1.BuildService",
-          "method": "ListBuilds"
-        }
-      ],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "10s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": [
-          "UNAVAILABLE"
-        ]
-      }
-    },
-    {
-      "name": [
-        {
-          "service": "google.chromeos.moblab.v1beta1.BuildService",
-          "method": "StageBuild"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e0a9c0a3050b488d7e32951b413590cf30f6786e062587958b0126ebd94096ce
+size 744

@@ -1,17 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.recaptchaenterprise.v1beta1.RecaptchaEnterpriseServiceV1Beta1",
-          "method": "CreateAssessment"
-        },
-        {
-          "service": "google.cloud.recaptchaenterprise.v1beta1.RecaptchaEnterpriseServiceV1Beta1",
-          "method": "AnnotateAssessment"
-        }
-      ],
-      "timeout": "600s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:499a92961ef42c3f0677f6c1791ee156f6debac4cb2b9399d8b8094ac6efb11c
+size 408

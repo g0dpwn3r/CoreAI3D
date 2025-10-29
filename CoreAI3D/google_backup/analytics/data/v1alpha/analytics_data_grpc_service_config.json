@@ -1,24 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [{ "service": "google.analytics.data.v1alpha.AlphaAnalyticsData" }],
-      "timeout": "60s",
-      "retryPolicy": {
-        "maxAttempts": 5,
-        "initialBackoff": "1s",
-        "maxBackoff": "60s",
-        "backoffMultiplier": 1.3,
-        "retryableStatusCodes": ["UNKNOWN"]
-      }
-    },
-    {
-      "name": [
-        {
-          "service": "google.analytics.data.v1alpha.AlphaAnalyticsData",
-          "method": "RunFunnelReport"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:3b5d3df401e22d8235ee4e52885f875af57eafdaf2f7872bf4d8cd2ee147ef38
+size 535

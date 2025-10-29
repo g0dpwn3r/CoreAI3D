@@ -1,23 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-        { "service": "google.cloud.workflows.executions.v1", "method": "ListExecutions"},
-        { "service": "google.cloud.workflows.executions.v1", "method": "GetExecution"}
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "60s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },
-  {
-    "name": [
-      { "service": "google.cloud.workflows.executions.v1", "method": "CreateExecution" },
-      { "service": "google.cloud.workflows.executions.v1", "method": "CancelExecution" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:a97fa0222326a6fa8793553d333b9387c1cc34723d57bca489b0fcde1a6ee5a4
+size 666

@@ -1,28 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "ListContacts" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "GetContact" }
-    ],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "10s",
-      "backoffMultiplier": 1.3,
-      "retryableStatusCodes": ["UNAVAILABLE"]
-    }
-  },
-  {
-    "name": [
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "CreateContact" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "UpdateContact" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "DeleteContact" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "VerifyContact" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "ResendVerification" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "SendTestMessage" },
-      { "service": "google.cloud.essentialcontacts.v1.EssentialContactsService", "method": "ComputeContacts" }
-    ],
-    "timeout": "60s"
-  }]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8f9560e28ed70358e15a6405bf05abefd9b2c028ef032ebad3228da8551eb262
+size 1303

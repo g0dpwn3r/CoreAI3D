@@ -1,21 +1,3 @@
-{
-  "methodConfig": [{
-    "name": [{ "service": "google.storagetransfer.v1.StorageTransferService"},
-             { "service": "google.longrunning.Operations"}],
-    "timeout": "60s",
-    "retryPolicy": {
-      "maxAttempts": 5,
-      "initialBackoff": "1s",
-      "maxBackoff": "60s",
-      "backoffMultiplier": 2,
-      "retryableStatusCodes": [
-        "UNAVAILABLE"
-      ]
-    }
-  },
-  {
-    "name": [{ "service": "google.storagetransfer.v1.StorageTransferService", "method": "CreateTransferJob"}],
-    "timeout" : "60s"
-  }
-]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e5f119081644a5ea3b9a167ddc385a0e2a1928137243e7480b8a3ca6024929c4
+size 534

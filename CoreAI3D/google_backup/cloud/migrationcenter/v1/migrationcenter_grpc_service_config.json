@@ -1,21 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.migrationcenter.v1.MigrationCenter"
-        }
-      ],
-      "timeout": "60s"
-    },
-    {
-      "name": [
-        {
-          "service": "google.cloud.migrationcenter.v1.MigrationCenter",
-          "method": "DeleteSource"
-        }
-      ],
-      "timeout": "600s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:00648a3a896918496a787807323e501f549efde2483b12255c3b27d0cb940589
+size 368

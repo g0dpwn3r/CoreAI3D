@@ -1,15 +1,3 @@
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "google.cloud.identitytoolkit.v2.AccountManagementService"
-        },
-        {
-          "service": "google.cloud.identitytoolkit.v2.AuthenticationService"
-        }
-      ],
-      "timeout": "60s"
-    }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:2465a10a8feefe30cdd5ba6d19f2cbc1350730edfc7c724b7301146adac69b18
+size 286
