@@ -357,6 +357,11 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
     VERBATIM
 )
 
+add_custom_command(TARGET CoreAI3D POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $HOME/tools/CoreAI3D
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:CoreAI3D> $HOME/tools/CoreAI3D/CoreAI3D
+    COMMENT "Copying CoreAI3D executable to $HOME/tools/CoreAI3D"
+    VERBATIM)
 
 # Add post-build automation script (disabled for now due to path issues)
 add_custom_command(TARGET CoreAI3D POST_BUILD
