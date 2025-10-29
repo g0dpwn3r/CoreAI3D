@@ -744,6 +744,108 @@ Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
 #endif
 }
 
+// API key management methods
+void Database::saveAPIKey(const std::string& apiKey, const std::string& description, bool isActive) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".api_keys ("
+                        "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                        "api_key VARCHAR(255) NOT NULL UNIQUE,"
+                        "description TEXT,"
+                        "is_active BOOLEAN DEFAULT TRUE,"
+                        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                        "INDEX idx_api_key (api_key),"
+                        "INDEX idx_active (is_active)"
+                        ")").execute();
+
+        session->sql("INSERT INTO " + dbSchema + ".api_keys (api_key, description, is_active) VALUES (?, ?, ?) "
+                        "ON DUPLICATE KEY UPDATE description = VALUES(description), is_active = VALUES(is_active), updated_at = CURRENT_TIMESTAMP")
+                    .bind(apiKey)
+                    .bind(description)
+                    .bind(isActive)
+                    .execute();
+
+        std::cout << "Saved API key: " << apiKey.substr(0, 8) << "..." << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error saving API key: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation
+    std::cout << "Database stub: saveAPIKey('" << apiKey.substr(0, 8) << "...')" << std::endl;
+#endif
+}
+
+bool Database::validateAPIKey(const std::string& apiKey) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT COUNT(*) FROM " + dbSchema + ".api_keys WHERE api_key = ? AND is_active = TRUE")
+                        .bind(apiKey)
+                        .execute();
+
+        auto row = result.fetchOne();
+        if (row) {
+            return row[0].get<int64_t>() > 0;
+        }
+        return false;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error validating API key: " << ex.what() << std::endl;
+        return false;
+    }
+#else
+    // Stub implementation - accept any non-empty key
+    std::cout << "Database stub: validateAPIKey('" << apiKey.substr(0, 8) << "...') -> " << (!apiKey.empty()) << std::endl;
+    return !apiKey.empty();
+#endif
+}
+
+void Database::deactivateAPIKey(const std::string& apiKey) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("UPDATE " + dbSchema + ".api_keys SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE api_key = ?")
+                    .bind(apiKey)
+                    .execute();
+
+        std::cout << "Deactivated API key: " << apiKey.substr(0, 8) << "..." << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error deactivating API key: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation
+    std::cout << "Database stub: deactivateAPIKey('" << apiKey.substr(0, 8) << "...')" << std::endl;
+#endif
+}
+
+std::vector<std::pair<std::string, std::string>> Database::getAPIKeys() {
+    ensureConnection();
+    std::vector<std::pair<std::string, std::string>> keys;
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT api_key, description FROM " + dbSchema + ".api_keys WHERE is_active = TRUE ORDER BY created_at DESC")
+                        .execute();
+
+        mysqlx::Row row;
+        while ((row = result.fetchOne())) {
+            std::string apiKey = row[0].get<std::string>();
+            std::string description = row[1].get<std::string>();
+            keys.emplace_back(apiKey, description);
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error getting API keys: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation - return empty list
+    std::cout << "Database stub: getAPIKeys() -> empty list" << std::endl;
+#endif
+    return keys;
+}
+
 // Chat history management methods
 void Database::saveChatMessage(int sessionId, const std::string& speaker, const std::string& message) {
     ensureConnection();

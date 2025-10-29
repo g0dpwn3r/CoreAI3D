@@ -26,8 +26,7 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
 
 // Constructor for offline mode (no database)
 Training::Training(bool isOffline, bool verbose)
-    : dbManager(nullptr), // No database manager in offline mode
-    isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
+    : isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
@@ -3233,4 +3232,5 @@ catch (const std::exception& e) {
     return {};
 }
 }
+
 

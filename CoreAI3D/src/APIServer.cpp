@@ -333,6 +333,13 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             health["is_running"] = isRunning.load();
             return health;
         }
+        else if (module == "generate_key") {
+            std::string apiKey = generateAPIKey();
+            if (database) {
+                database->saveAPIKey(apiKey, "Generated via API", true);
+            }
+            return createSuccessResponse("API key generated", {{"api_key", apiKey}});
+        }
         else if (module.empty() || module == "/") {
             // Handle root endpoint
             return getAPIStatus();
@@ -617,7 +624,11 @@ std::string APIServer::generateAPIKey() {
 }
 
 bool APIServer::validateAPIKey(const std::string& apiKey) {
-    // Simple validation - in production, check against database
+    // Check against database if available
+    if (database) {
+        return database->validateAPIKey(apiKey);
+    }
+    // Fallback to simple validation
     return !apiKey.empty() && apiKey.length() >= 16;
 }
 

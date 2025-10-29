@@ -115,6 +115,12 @@ public:
     };
     LearningSettings loadLearningSettings(int& datasetId);
 
+    // API key management methods
+    void saveAPIKey(const std::string& apiKey, const std::string& description = "", bool isActive = true);
+    bool validateAPIKey(const std::string& apiKey);
+    void deactivateAPIKey(const std::string& apiKey);
+    std::vector<std::pair<std::string, std::string>> getAPIKeys();
+
     // Chat history management methods
     void saveChatMessage(int sessionId, const std::string& speaker, const std::string& message);
     std::vector<std::pair<std::string, std::string>> loadChatHistory(int sessionId);

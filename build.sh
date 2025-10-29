@@ -6,18 +6,18 @@
 set -e
 
 # Default build type
-BUILD_TYPE="Release"
+BUILD_TYPE="release"
 USE_MYSQL="ON"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
     --debug)
-      BUILD_TYPE="Debug"
+      BUILD_TYPE="debug"
       shift
       ;;
     --release)
-      BUILD_TYPE="Release"
+      BUILD_TYPE="release"
       shift
       ;;
     --no-mysql)
@@ -42,7 +42,7 @@ done
 echo "Building CoreAI3D in $BUILD_TYPE mode with MySQL=$USE_MYSQL"
 
 # Create build directory based on build type
-BUILD_DIR="out/build/linux-x64-$BUILD_TYPE"
+BUILD_DIR="out/build/linux-$BUILD_TYPE"
 if [ ! -d "$BUILD_DIR" ]; then
     mkdir -p "$BUILD_DIR"
 fi
