@@ -3,7 +3,8 @@
 #include "VisionModule.hpp"
 #include "AudioModule.hpp"
 #include <filesystem>
-// Constructor for online mode (with database)
+// Constructor for online mode (with database) - only if USE_MYSQL is defined
+#ifdef USE_MYSQL
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
     const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose)
     : dbManager(std::make_unique<Database>(dbHost, dbPort, dbUser, dbPassword, dbSchema, SSLMode::DISABLED, createTables)),
@@ -21,6 +22,7 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
         throw std::invalid_argument("Training: Database port must be positive");
     }
 }
+#endif
 
 // Constructor for offline mode (no database)
 Training::Training(bool isOffline, bool verbose)
@@ -545,7 +547,8 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                   << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
     }
 
-    // Database Integration
+    // Database Integration - only if USE_MYSQL is defined
+#ifdef USE_MYSQL
     if (!isOfflineMode && dbManager) {
         try {
             std::string actualDatasetName = datasetName.empty() ? filename : datasetName;
@@ -591,6 +594,7 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
     else if (!dbManager && !isOfflineMode) {
         std::cerr << "Warning: Database manager not initialized in online mode. CSV data will not be persisted." << std::endl;
     }
+#endif
 
     if (verbose) {
         std::cout << "Successfully loaded CSV: " << filename << std::endl;
@@ -728,6 +732,7 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
     }
     std::cout << "\nTarget CSV Loaded!\n";
 
+#ifdef USE_MYSQL
     if (!isOfflineMode && dbManager && datasetId != -1) {
         try {
             for (size_t i = 0; i < targets.size(); ++i) {
@@ -745,10 +750,12 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
     else if (!dbManager && !isOfflineMode && datasetId != -1) {
         std::cerr << "Warning: Database manager not initialized in online mode. Target CSV data will not be persisted." << std::endl;
     }
+#endif
 
     return true;
 }
 
+#ifdef USE_MYSQL
 bool Training::loadDatasetFromDB(int& datasetId) {
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot load dataset from database in offline mode or if database manager is not initialized." << std::endl;
@@ -806,6 +813,7 @@ bool Training::loadDatasetFromDB(int& datasetId) {
         std::cerr << "Database error loading dataset: " << err.what() << std::endl; return false;
     }
 }
+#endif
 
 void Training::splitInputOutput(int outputSize) {
     inputs.clear();
@@ -1316,6 +1324,7 @@ nlohmann::json Training::getNetworkActivity() {
     return activity;
 }
 
+#ifdef USE_MYSQL
 bool Training::saveModel(int& datasetId) {
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot save model to database in offline mode or if database manager is not initialized." << std::endl;
@@ -1365,7 +1374,9 @@ bool Training::saveModel(int& datasetId) {
     std::cout << "AI model state saved successfully." << std::endl;
     return true;
 }
+#endif
 
+#ifdef USE_MYSQL
 bool Training::loadModel(int& datasetId) {
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot load model from database in offline mode or if database manager is not initialized." << std::endl;
@@ -1399,6 +1410,7 @@ bool Training::loadModel(int& datasetId) {
     std::cout << "Model loaded successfully for dataset ID " << datasetId << std::endl;
 	return true;
 }
+#endif
 
 void Training::printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision)
 {
@@ -2225,6 +2237,7 @@ bool Training::loadFile(const std::string& filename, int maxSeqLen, int embeddin
 }
 
 // Database integration for new file types
+#ifdef USE_MYSQL
 bool Training::saveFileDataset(int& datasetId, const std::string& datasetName, const std::string& fileType) {
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot save file dataset to database in offline mode or if database manager is not initialized." << std::endl;
@@ -2257,6 +2270,7 @@ bool Training::saveFileDataset(int& datasetId, const std::string& datasetName, c
         return false;
     }
 }
+#endif
 
 // New method for loading plain text files
 bool Training::loadTextFile(const std::string& filename, int maxSeqLen, int embeddingDim) {

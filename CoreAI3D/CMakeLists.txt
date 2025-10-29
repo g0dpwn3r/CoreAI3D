@@ -45,12 +45,16 @@ if(Boost_FOUND)
 else()
     message(WARNING "Boost not found. Install Boost via system package manager.")
 endif()
-# Find MySQL Connector/C++ using system package
+# Find MySQL Connector/C++ using system package (optional)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(MYSQLCPP REQUIRED libmysqlcppconn)
-include_directories(${MYSQLCPP_INCLUDE_DIRS})
-link_directories(${MYSQLCPP_LIBRARY_DIRS})
-find_package(PkgConfig REQUIRED)
+pkg_check_modules(MYSQLCPP libmysqlcppconn)
+if(MYSQLCPP_FOUND)
+    include_directories(${MYSQLCPP_INCLUDE_DIRS})
+    link_directories(${MYSQLCPP_LIBRARY_DIRS})
+    message(STATUS "MySQL Connector/C++ found - can be enabled with USE_MYSQL=ON")
+else()
+    message(STATUS "MySQL Connector/C++ not found - MySQL support disabled")
+endif()
 find_package(absl CONFIG REQUIRED)
 # pkg_check_modules(UTF8_RANGE utf8_range)
 find_package(ZLIB REQUIRED)
@@ -205,10 +209,17 @@ target_include_directories(CoreAI3DLib PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Add USE_MYSQL preprocessor definition conditionally
-option(USE_MYSQL "Enable MySQL support" ON)
+# Add USE_MYSQL preprocessor definition conditionally (default OFF for offline mode)
+option(USE_MYSQL "Enable MySQL support" OFF)
 if(USE_MYSQL)
-    target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
+    if(MYSQLCPP_FOUND)
+        target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
+        message(STATUS "MySQL support enabled")
+    else()
+        message(FATAL_ERROR "USE_MYSQL=ON but MySQL Connector/C++ not found")
+    endif()
+else()
+    message(STATUS "MySQL support disabled - running in offline mode")
 endif()
 
 # If we copied local google/googleapis into the build tree, include them too
@@ -317,14 +328,12 @@ target_link_libraries(CoreAI3DLib PUBLIC
     $<$<BOOL:${LZ4_FOUND}>:${LZ4_LIBRARIES}>
 )
 
-# Add MySQL Connector/C++ libraries if found
-if(MYSQLCPP_FOUND)
+# Add MySQL Connector/C++ libraries if found and enabled
+if(USE_MYSQL AND MYSQLCPP_FOUND)
     target_link_libraries(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARIES} mysqlcppconnx)
     target_include_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_INCLUDE_DIRS})
     target_link_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARY_DIRS})
-    message(STATUS "MySQL Connector/C++ found and linked")
-else()
-    message(WARNING "MySQL Connector/C++ not found - database functionality may not work")
+    message(STATUS "MySQL Connector/C++ linked")
 endif()
 
 add_executable(CoreAI3D main.cpp)

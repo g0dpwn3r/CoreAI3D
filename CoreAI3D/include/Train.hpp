@@ -16,11 +16,13 @@ class VisionModule;
 
 class Training {
 public:
-    // Constructor for online mode (with database)
+    // Constructor for online mode (with database) - only if USE_MYSQL is defined
+#ifdef USE_MYSQL
     Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
         const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose = true);
+#endif
 
-    // Constructor for offline mode (no database)
+    // Constructor for offline mode (no database) - always available
     Training(bool isOffline, bool verbose = true);
 
     void initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort, std::string& dbUser, std::string& dbPassword, std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
@@ -65,9 +67,11 @@ public:
     Language* getLanguage();
     nlohmann::json getNetworkTopology();
     nlohmann::json getNetworkActivity();
-    // Database interaction methods
+    // Database interaction methods - only if USE_MYSQL is defined
+#ifdef USE_MYSQL
     bool saveModel(int& datasetId);
     bool loadModel(int& datasetId);
+#endif
     void printFullMatrix(std::vector<std::vector<float>>& data, int len, int precision = 6);
     void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);
     float original_data_global_min;                 // Stores global min from original data for denorm
@@ -89,7 +93,10 @@ private:
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Language> langProc;
 public:
+    // Database manager - only if USE_MYSQL is defined
+#ifdef USE_MYSQL
     std::unique_ptr<Database> dbManager; // Changed to unique_ptr
+#endif
     std::vector<std::vector<float>> normalizeData(const std::vector<std::vector<float>>& data_to_normalize,
         float original_min, float original_max,
         float target_min, float target_max) const;
