@@ -81,8 +81,8 @@ logging.getLogger('asyncio').setLevel(logging.WARNING)
 @dataclass
 class DashboardConfig:
     """Dashboard configuration settings"""
-    api_url: str = "http://0.0.0.0:8080/api/v1"
-    ws_url: str = "ws://0.0.0.0:8081"
+    api_url: str = "http://localhost:8080/api/v1"
+    ws_url: str = "ws://localhost:8081"
     api_key: str = ""
     data_dir: str = "training_data"
     sandbox_timeout: int = 300
@@ -774,9 +774,9 @@ class CoreAI3DDashboard(QMainWindow):
         config.log_level = settings.value("log_level", config.log_level)
         config.enable_diagnostics = settings.value("enable_diagnostics", config.enable_diagnostics, type=bool)
 
-        # Force reset API and WebSocket URLs to 0.0.0.0, overriding any saved QSettings
-        config.api_url = "http://0.0.0.0:8080/api/v1"
-        config.ws_url = "ws://0.0.0.0:8081"
+        # Force reset API and WebSocket URLs to localhost, overriding any saved QSettings
+        config.api_url = "http://localhost:8080/api/v1"
+        config.ws_url = "ws://localhost:8081"
 
         # Validate and sanitize API key
         if config.api_key:
