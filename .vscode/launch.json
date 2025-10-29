@@ -185,6 +185,25 @@
                     "ignoreFailures": true
                 }
             ]
-        }, 
+        },
+
+        {
+            "name": "Debug Dashboard",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/linux_gui/dashboard.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/linux_gui"
+        },
+        {
+            "name": "Debug CoreAI3D Client",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/linux_gui/coreai3d_client.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/linux_gui"
+        }
     ]
 }

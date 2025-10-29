@@ -59,6 +59,9 @@ from PyQt6.QtGui import (
 from coreai3d_client import CoreAI3DClient
 from automation_helper import AutomationHelper
 
+# Create logs directory before configuring logging
+os.makedirs('logs', exist_ok=True)
+
 # Configure logging with reduced verbosity
 logging.basicConfig(
     level=logging.WARNING,  # Changed from INFO to WARNING to reduce verbosity
@@ -78,8 +81,8 @@ logging.getLogger('asyncio').setLevel(logging.WARNING)
 @dataclass
 class DashboardConfig:
     """Dashboard configuration settings"""
-    api_url: str = "http://localhost:8080/api/v1"
-    ws_url: str = "ws://localhost:8081/ws"
+    api_url: str = "http://0.0.0.0:8080/api/v1"
+    ws_url: str = "ws://0.0.0.0:8081"
     api_key: str = ""
     data_dir: str = "training_data"
     sandbox_timeout: int = 300
@@ -771,7 +774,48 @@ class CoreAI3DDashboard(QMainWindow):
         config.log_level = settings.value("log_level", config.log_level)
         config.enable_diagnostics = settings.value("enable_diagnostics", config.enable_diagnostics, type=bool)
 
+        # Force reset API and WebSocket URLs to 0.0.0.0, overriding any saved QSettings
+        config.api_url = "http://0.0.0.0:8080/api/v1"
+        config.ws_url = "ws://0.0.0.0:8081"
+
+        # Validate and sanitize API key
+        if config.api_key:
+            config.api_key = self._validate_api_key(config.api_key)
+
         return config
+
+    def _validate_api_key(self, api_key: str) -> str:
+        """Validate and sanitize API key"""
+        if not api_key or not isinstance(api_key, str):
+            logger.warning("API key is empty or not a string")
+            return ""
+
+        # Remove any whitespace
+        api_key = api_key.strip()
+
+        # Check for invalid characters that could cause HTTP header issues
+        invalid_chars = ['\n', '\r', '\t', '\0']
+        for char in invalid_chars:
+            if char in api_key:
+                logger.warning(f"API key contains invalid character '{repr(char)}', removing it")
+                api_key = api_key.replace(char, '')
+
+        # Check for control characters
+        if any(ord(c) < 32 or ord(c) > 126 for c in api_key):
+            logger.warning("API key contains non-printable characters, this may cause issues")
+            # Remove non-printable characters
+            api_key = ''.join(c for c in api_key if ord(c) >= 32 and ord(c) <= 126)
+
+        # Check length (reasonable bounds)
+        if len(api_key) > 1000:
+            logger.warning(f"API key is unusually long ({len(api_key)} characters), truncating")
+            api_key = api_key[:1000]
+
+        if len(api_key) < 10 and api_key:
+            logger.warning(f"API key is very short ({len(api_key)} characters), this may indicate an issue")
+
+        logger.info(f"API key validation complete: length={len(api_key)}, configured={bool(api_key)}")
+        return api_key
 
     def _save_config(self):
         """Save configuration to settings"""
@@ -2908,17 +2952,27 @@ if __name__ == "__main__":
             # Allow initialization even without API key for offline mode
             if not self.config.api_url:
                 logger.warning("API URL not configured - client will work in offline mode")
-                self.config.api_url = "http://localhost:8080/api/v1"  # Set default
-
+                self.config.api_url = "http://0.0.0.0:8080/api/v1"  # Set default
+    
             if not self.config.api_key:
                 logger.warning("API key not configured - using empty key (may cause authentication failures)")
                 self.config.api_key = ""  # Allow empty key
 
             logger.info("Creating CoreAI3DClient instance...")
+            # Ensure API key is properly validated before passing to client
+            api_key = self.config.api_key if self.config.api_key else ""
+            logger.info(f"Passing API key to client: configured={bool(api_key)}, length={len(api_key)}")
+
+            # Additional validation before client creation
+            if not api_key:
+                logger.warning("No API key configured - client will work in offline mode only")
+            elif len(api_key) < 10:
+                logger.warning(f"API key is very short ({len(api_key)} chars) - this may cause authentication issues")
+
             self.client = CoreAI3DClient({
                 'base_url': self.config.api_url,
                 'ws_url': self.config.ws_url,
-                'api_key': self.config.api_key,
+                'api_key': api_key,
                 'timeout': self.config.connection_timeout,
                 'max_connections': self.config.max_connections,
                 'retry_attempts': self.config.retry_attempts,
@@ -3003,26 +3057,57 @@ if __name__ == "__main__":
                 return
 
         try:
+            # Show progress indicator
+            self.status_bar.showMessage("Testing connection...")
+
             # Run health check using async manager
             async def check_health():
                 result = await self.client.health_check()
                 return result
 
             def on_success(result):
+                self.status_bar.showMessage("Connection test completed")
                 if result.success:
-                    self.status_bar.showMessage("Connection test successful")
-                    QMessageBox.information(self, "Connection Test", "API connection successful")
+                    QMessageBox.information(
+                        self, "Connection Test Successful",
+                        "✓ API connection successful!\n\n"
+                        "The CoreAI3D server is responding correctly.\n"
+                        "All systems are operational."
+                    )
                 else:
-                    self.status_bar.showMessage("Connection test failed")
-                    QMessageBox.warning(self, "Connection Test", "API connection failed")
+                    error_details = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                    QMessageBox.warning(
+                        self, "Connection Test Failed",
+                        f"✗ API connection failed!\n\n"
+                        f"Error: {error_details}\n\n"
+                        "Please check:\n"
+                        "• Server is running\n"
+                        "• Network connectivity\n"
+                        "• API URL configuration"
+                    )
 
             def on_error(error_msg):
-                QMessageBox.warning(self, "Connection Error", error_msg)
+                self.status_bar.showMessage("Connection test failed")
+                QMessageBox.critical(
+                    self, "Connection Error",
+                    f"✗ Connection test failed!\n\n"
+                    f"Error: {error_msg}\n\n"
+                    "Please check:\n"
+                    "• Server configuration\n"
+                    "• Network settings\n"
+                    "• Firewall rules"
+                )
 
             self.async_manager.run_async_task(check_health(), on_success, on_error)
 
         except Exception as e:
-            QMessageBox.warning(self, "Connection Error", str(e))
+            self.status_bar.showMessage("Connection test error")
+            QMessageBox.critical(
+                self, "Connection Error",
+                f"✗ Unexpected error during connection test!\n\n"
+                f"Error: {str(e)}\n\n"
+                "Please check the application logs for more details."
+            )
 
     def update_system_metrics(self):
         """Update system metrics display"""
@@ -4168,9 +4253,10 @@ capabilities, training data, performance metrics, and usage instructions."""
                 return
 
         try:
-            # Show progress
+            # Show progress with actual range
             self.training_progress.setVisible(True)
-            self.training_progress.setRange(0, 0)  # Indeterminate progress
+            self.training_progress.setRange(0, 100)
+            self.training_progress.setValue(0)
 
             # Log training start
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
@@ -4183,6 +4269,7 @@ capabilities, training data, performance metrics, and usage instructions."""
 
             def on_success(result):
                 self.training_progress.setVisible(False)
+                self.training_progress.setValue(100)  # Ensure progress shows complete
                 if result.success:
                     self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training completed successfully")
                     if result.data:
@@ -4195,6 +4282,7 @@ capabilities, training data, performance metrics, and usage instructions."""
 
             def on_error(error_msg):
                 self.training_progress.setVisible(False)
+                self.training_progress.setValue(0)  # Reset progress on error
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {error_msg}")
                 QMessageBox.warning(self, "Training Error", error_msg)
 

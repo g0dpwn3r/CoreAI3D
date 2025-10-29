@@ -13,7 +13,7 @@ TEST_CASE("Database smoke and dataset flow (requires real DB)", "[database][!may
     }
 
     // configure these to match your local test DB or CI DB container
-    const std::string host = "127.0.0.1";
+    const std::string host = "0.0.0.0";
     const unsigned int port = 33060;
     const std::string user = "root";
     const std::string password = "password";

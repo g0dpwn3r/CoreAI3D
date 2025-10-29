@@ -6,8 +6,8 @@
 class CoreAI3DClient {
     constructor(config = {}) {
         this.config = {
-            baseURL: config.baseURL || 'http://localhost:8080/api/v1',
-            wsURL: config.wsURL || 'ws://localhost:8081/ws',
+            baseURL: config.baseURL || 'http://0.0.0.0:8080/api/v1',
+            wsURL: config.wsURL || 'ws://0.0.0.0:8081/ws',
             apiKey: config.apiKey || '',
             sessionId: config.sessionId || '',
             timeout: config.timeout || 30000,

@@ -42,8 +42,8 @@ class CoreAI3DClient:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = {
-            'base_url': 'http://localhost:8080/api/v1',
-            'ws_url': 'ws://localhost:8081/ws',
+            'base_url': 'http://0.0.0.0:8080/api/v1',
+            'ws_url': 'ws://0.0.0.0:8081/ws',
             'api_key': '',
             'session_id': '',
             'timeout': 30.0,

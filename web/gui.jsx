@@ -16,7 +16,7 @@ const App = () => {
     const [neurons, setNeurons] = useState(10);
     const [minRange, setMinRange] = useState(0.0);
     const [maxRange, setMaxRange] = useState(1.0);
-    const [dbHost, setDbHost] = useState('localhost');
+    const [dbHost, setDbHost] = useState('0.0.0.0');
     const [dbPort, setDbPort] = useState(33060);
     const [dbUser, setDbUser] = useState('user');
     const [dbPassword, setDbPassword] = useState('password');
@@ -128,7 +128,7 @@ const App = () => {
                 </SectionContent>
 
                 <SectionContent>
-                    <InputGroup label="DB Host (--db-host)" value={dbHost} onChange={handleChange(setDbHost)} type="text" placeholder="e.g., localhost" />
+                    <InputGroup label="DB Host (--db-host)" value={dbHost} onChange={handleChange(setDbHost)} type="text" placeholder="e.g., 0.0.0.0" />
                     <InputGroup label="DB Port (--db-port)" value={dbPort} onChange={handleNumberChange(setDbPort)} type="number" />
                     <InputGroup label="DB User (--db-user)" value={dbUser} onChange={handleChange(setDbUser)} type="text" />
                     <InputGroup label="DB Password (--db-password)" value={dbPassword} onChange={handleChange(setDbPassword)} type="password" />

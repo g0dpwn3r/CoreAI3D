@@ -57,7 +57,7 @@ APIServer::APIServer(const std::string& name, const std::string& host, int port)
     : serverName(name), host(host), port(port), numThreads(4), isInitialized(false), isRunning(false),
       apiVersion("v1"), corsOrigin("*"), requestTimeout(30), maxRequestSize(1024 * 1024),
       enableLogging(true), logFilePath("api_server.log"),
-      dbHost("localhost"), dbPort(33060), dbUser("user"), dbPassword("password"),
+      dbHost("0.0.0.0"), dbPort(33060), dbUser("user"), dbPassword("password"),
       dbSchema("coreai_db"), dbSSLMode(SSLMode::DISABLED), createTables(false) {
 }
 
@@ -324,6 +324,14 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         }
         else if (module == "status") {
             return getAPIStatus();
+        }
+        else if (module == "health") {
+            json health;
+            health["status"] = "healthy";
+            health["timestamp"] = getTimestampString();
+            health["server"] = serverName;
+            health["is_running"] = isRunning.load();
+            return health;
         }
         else if (module.empty() || module == "/") {
             // Handle root endpoint

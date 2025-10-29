@@ -4,8 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 const EnhancedAIInterface = () => {
     // API Configuration
     const [apiConfig, setApiConfig] = useState({
-        baseURL: 'http://localhost:8080/api/v1',
-        wsURL: 'ws://localhost:8081/ws',
+        baseURL: 'http://0.0.0.0:8080/api/v1',
+        wsURL: 'ws://0.0.0.0:8081/ws',
         sessionId: '',
         apiKey: '',
         timeout: 30000

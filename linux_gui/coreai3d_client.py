@@ -46,8 +46,8 @@ class CoreAI3DClient:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = {
-            'base_url': 'http://localhost:8080/api/v1',
-            'ws_url': 'ws://localhost:8081/ws',
+            'base_url': 'http://0.0.0.0:8080/api/v1',
+            'ws_url': 'ws://0.0.0.0:8081',
             'api_key': '',
             'session_id': '',
             'timeout': 30.0,
@@ -61,6 +61,7 @@ class CoreAI3DClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws_connection: Optional[Any] = None
         self._ws_task: Optional[asyncio.Task] = None
+        self._monitor_task: Optional[asyncio.Task] = None
         self._is_connected: bool = False
         self.message_handlers: Dict[str, List[Callable]] = {}
         self.streaming_tasks: Dict[str, asyncio.Task] = {}
@@ -76,6 +77,15 @@ class CoreAI3DClient:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.disconnect()
+        # Ensure all tasks are properly cancelled
+        if hasattr(asyncio, 'current_task'):
+            current_task = asyncio.current_task()
+            if current_task and not current_task.done():
+                current_task.cancel()
+                try:
+                    await current_task
+                except asyncio.CancelledError:
+                    pass
 
     async def connect(self):
         """Initialize HTTP session and WebSocket connection"""
@@ -86,6 +96,10 @@ class CoreAI3DClient:
 
         if not self._is_connected:
             await self._connect_websocket()
+            # Add reconnection logic for WebSocket
+            if self._is_connected and self.ws_connection:
+                # Set up automatic reconnection on connection loss
+                asyncio.create_task(self._monitor_connection())
 
     async def disconnect(self):
         """Close connections"""
@@ -128,6 +142,18 @@ class CoreAI3DClient:
                 task.cancel()
         self.streaming_tasks.clear()
 
+        # Cancel monitor task
+        if self._monitor_task is not None and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await asyncio.wait_for(self._monitor_task, timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning("Monitor task cancellation timed out")
+            self._monitor_task = None
+
+        # Reset connection state
+        self._is_connected = False
+
     async def _connect_websocket(self):
         """Establish WebSocket connection"""
         try:
@@ -151,7 +177,10 @@ class CoreAI3DClient:
             # Connect to WebSocket
             self.ws_connection = await websockets.connect(
                 self.config['ws_url'],
-                close_timeout=5.0  # Add timeout for connection
+                close_timeout=5.0,  # Add timeout for connection
+                ping_interval=30.0,  # Send ping every 30 seconds
+                ping_timeout=10.0,   # Wait 10 seconds for pong
+                max_size=2**20       # 1MB max message size
             )
             self._is_connected = True
             logger.info("WebSocket connected")
@@ -193,6 +222,7 @@ class CoreAI3DClient:
         except asyncio.CancelledError:
             logger.info("WebSocket handler cancelled")
             self._is_connected = False
+            raise  # Re-raise to properly cancel the task
         except Exception as e:
             logger.error(f"WebSocket handler error: {e}")
             self._is_connected = False
@@ -261,10 +291,14 @@ class CoreAI3DClient:
                 metadata={}
             )
 
+        # Sanitize api_key and session_id to prevent header injection
+        api_key = self.config["api_key"].replace('\n', '').replace('\r', '')
+        session_id = self.config['session_id'].replace('\n', '').replace('\r', '')
+
         url = urljoin(self.config['base_url'], endpoint)
         headers = {
-            'Authorization': f'Bearer {self.config["api_key"]}',
-            'X-Session-ID': self.config['session_id'],
+            'Authorization': f'Bearer {api_key}',
+            'X-Session-ID': session_id,
             'Content-Type': 'application/json'
         }
 
@@ -345,6 +379,17 @@ class CoreAI3DClient:
             status_code=500,
             metadata={}
         )
+
+    async def _ensure_session(self):
+        """Ensure we have a valid session, create one if needed"""
+        if not self.config['session_id']:
+            logger.info("No session ID, creating new session")
+            session_response = await self.create_session()
+            if not session_response.success:
+                logger.error(f"Failed to create session: {session_response.message}")
+                return False
+            logger.info(f"Created new session: {self.config['session_id']}")
+        return True
 
     # HTTP API Methods
     async def get(self, endpoint: str) -> APIResponse:
@@ -573,6 +618,16 @@ class CoreAI3DClient:
     # Status and Health
     async def health_check(self) -> APIResponse:
         try:
+            # Ensure we have a valid session before health check
+            if not await self._ensure_session():
+                return APIResponse(
+                    success=False,
+                    data=None,
+                    message="Failed to establish session",
+                    status_code=503,
+                    metadata={}
+                )
+
             response = await self.get('/health')
             return response
         except Exception as e:
@@ -632,3 +687,25 @@ class CoreAI3DClient:
 
     def is_connected(self) -> bool:
         return self._is_connected and self.ws_connection is not None
+
+    async def _monitor_connection(self):
+        """Monitor WebSocket connection and handle reconnections"""
+        try:
+            while True:
+                await asyncio.sleep(10.0)  # Check every 10 seconds
+
+                if not self._is_connected or self.ws_connection is None:
+                    logger.info("Connection lost, attempting to reconnect...")
+                    try:
+                        await self._connect_websocket()
+                        if self._is_connected:
+                            logger.info("Successfully reconnected")
+                        else:
+                            logger.warning("Reconnection failed")
+                    except Exception as e:
+                        logger.error(f"Reconnection attempt failed: {e}")
+                        await asyncio.sleep(5.0)  # Wait before next attempt
+        except asyncio.CancelledError:
+            logger.info("Connection monitor cancelled")
+        except Exception as e:
+            logger.error(f"Connection monitor error: {e}")

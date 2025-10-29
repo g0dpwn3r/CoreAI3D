@@ -36,7 +36,7 @@ int main(int argc, char* argv[]) {
     std::string datasetId = "-1";
     std::string outputCsvFile;
     std::string apiPort = "8080";
-    std::string dbHost = "localhost";
+    std::string dbHost = "0.0.0.0";
     std::string dbUser = "root";
     std::string dbPassword = "password";
     std::string dbPort = "3306";
@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
             std::cout << "--input-file,-i: Input file\n";
             std::cout << "--output-csv,-o: Output CSV file\n";
             std::cout << "--api-port: API server port (default: 8080)\n";
-            std::cout << "--db-host: Database host (default: localhost)\n";
+            std::cout << "--db-host: Database host (default: 0.0.0.0)\n";
             std::cout << "--db-user: Database user (default: root)\n";
             std::cout << "--db-password: Database password (default: password)\n";
             std::cout << "--db-port: Database port (default: 3306)\n";

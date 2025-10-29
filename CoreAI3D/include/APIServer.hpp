@@ -101,12 +101,12 @@ public:
 
 public:
     // Constructor
-    APIServer(const std::string& name, const std::string& host = "localhost", int port = 8080);
+    APIServer(const std::string& name, const std::string& host = "0.0.0.0", int port = 8080);
     virtual ~APIServer();
 
     // Initialization
     bool initialize(const std::string& configPath = "config.json",
-                   const std::string& dbHost = "localhost",
+                   const std::string& dbHost = "0.0.0.0",
                    unsigned int dbPort = 33060,
                    const std::string& dbUser = "user",
                    const std::string& dbPassword = "password",
