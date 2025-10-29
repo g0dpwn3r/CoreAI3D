@@ -36,12 +36,18 @@ int main(int argc, char* argv[]) {
     std::string datasetId = "-1";
     std::string outputCsvFile;
     std::string apiPort = "8080";
+    std::string dbHost = "localhost";
+    std::string dbUser = "root";
+    std::string dbPassword = "password";
+    std::string dbPort = "3306";
+    std::string dbSchema = "coreai_db";
     bool hasHeader = true;
     bool containsText = false;
     bool startChat = false;
     bool startPredict = false;
     bool isOfflineMode = false;
     bool enableWebsocket = false;
+    bool createTableFlag = false;
 
     // Basic argument parsing
     for (int i = 1; i < argc; ++i) {
@@ -52,10 +58,16 @@ int main(int argc, char* argv[]) {
             std::cout << "--input-file,-i: Input file\n";
             std::cout << "--output-csv,-o: Output CSV file\n";
             std::cout << "--api-port: API server port (default: 8080)\n";
+            std::cout << "--db-host: Database host (default: localhost)\n";
+            std::cout << "--db-user: Database user (default: root)\n";
+            std::cout << "--db-password: Database password (default: password)\n";
+            std::cout << "--db-port: Database port (default: 3306)\n";
+            std::cout << "--db-schema: Database schema (default: coreai_db)\n";
             std::cout << "--start-chat: Start chat mode\n";
             std::cout << "--start-predict: Start prediction mode\n";
             std::cout << "--offline: Run in offline mode\n";
             std::cout << "--enable-websocket: Enable WebSocket server in API mode\n";
+            std::cout << "--create-table: Create database tables during initialization\n";
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
@@ -73,6 +85,18 @@ int main(int argc, char* argv[]) {
             isOfflineMode = true;
         } else if (arg == "--enable-websocket") {
             enableWebsocket = true;
+        } else if (arg == "--create-table") {
+            createTableFlag = true;
+        } else if (arg == "--db-host") {
+            if (i + 1 < argc) dbHost = argv[++i];
+        } else if (arg == "--db-user") {
+            if (i + 1 < argc) dbUser = argv[++i];
+        } else if (arg == "--db-password") {
+            if (i + 1 < argc) dbPassword = argv[++i];
+        } else if (arg == "--db-port") {
+            if (i + 1 < argc) dbPort = argv[++i];
+        } else if (arg == "--db-schema") {
+            if (i + 1 < argc) dbSchema = argv[++i];
         }
     }
 
@@ -161,38 +185,37 @@ int main(int argc, char* argv[]) {
     try { apiPort_val = std::stoi(apiPort); }
     catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for api-port. Defaulting to 8080.\n"; apiPort_val = 8080; }
 
+    int dbPort_val = 3306;
+    try { dbPort_val = std::stoi(dbPort); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for db-port. Defaulting to 3306.\n"; dbPort_val = 3306; }
+
     if (verbose) std::cout << "DEBUG: All arguments retrieved. Proceeding to logic.\n";
 
 
 #ifdef USE_MYSQL
-    // MySQL variables (commented out since MySQL is disabled)
-    // std::string dbHost = "localhost";
-    // int dbPort = 3306;
-    // std::string dbUser = "root";
-    // std::string dbPassword = "password";
-    // std::string dbSchema = "coreai_db";
-    // bool createTables = false;
-    // std::string sslModeStr = "DISABLED";
+    // MySQL variables
+    bool createTables = createTableFlag;
+    std::string sslModeStr = "DISABLED";
 
     // Map string to SSLMode enum
     SSLMode ssl = SSLMode::DISABLED; // Default
-    // if (sslModeStr == "DISABLED") {
-    //     ssl = SSLMode::DISABLED;
-    // }
-    // else if (sslModeStr == "REQUIRED") {
-    //     ssl = SSLMode::REQUIRED;
-    // }
-    // else if (sslModeStr == "VERIFY_CA") {
-    //     ssl = SSLMode::VERIFY_CA;
-    // }
-    // else if (sslModeStr == "VERIFY_IDENTITY") {
-    //     ssl = SSLMode::VERIFY_IDENTITY;
-    // }
-    // else {
-    //     std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
-    //         << "'. Defaulting to DISABLED." << std::endl;
-    //     ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
-    // }
+    if (sslModeStr == "DISABLED") {
+        ssl = SSLMode::DISABLED;
+    }
+    else if (sslModeStr == "REQUIRED") {
+        ssl = SSLMode::REQUIRED;
+    }
+    else if (sslModeStr == "VERIFY_CA") {
+        ssl = SSLMode::VERIFY_CA;
+    }
+    else if (sslModeStr == "VERIFY_IDENTITY") {
+        ssl = SSLMode::VERIFY_IDENTITY;
+    }
+    else {
+        std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
+            << "'. Defaulting to DISABLED." << std::endl;
+        ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
+    }
 #endif
 
     // --- Mode Check ---
@@ -206,26 +229,28 @@ int main(int argc, char* argv[]) {
         {
             if (verbose) std::cout << "Starting chat mode...\n";
 
-            // Chat mode disabled due to MySQL dependencies
-            std::cerr << "Error: Chat mode is disabled due to removed MySQL dependencies." << std::endl;
-            return 1;
+            // File-based chat mode (no MySQL dependencies)
+            int embeddingDimension = 300; // Default embedding dimension
+            try {
+                embeddingDimension = std::stoi(inputSize); // Use inputSize as embedding dimension if provided
+            } catch (...) {
+                embeddingDimension = 300; // Fallback
+            }
 
-#ifdef USE_MYSQL
-            // MySQL code commented out
-            // int embeddingDimension = 100; // This should match your embedding file's dimension.
-            // Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, language, inputSize, outputSize, layers, neurons);
-#endif
+            // Create Language processor with database parameters
+            Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort_val,
+                                 dbUser, dbPassword, dbSchema, 0, language,
+                                 inputSize_val, outputSize_val, layers_val, neurons_val, 1);
 
-#ifdef USE_MYSQL
-            // MySQL code commented out
-            // std::string actualEmbeddingFile = embeddingFile.empty()
-            //     ? std::string(language) + "_embeddings.csv" // Fixed string concat
-            //     : embeddingFile;
-            // std::cout << "Loading embeddings from: " << actualEmbeddingFile
-            //     << " for language: " << language << std::endl;
-            // langProcessor.setCurrentLanguage(language);
-            // langProcessor.chat(inputFile);
-#endif
+            std::string actualEmbeddingFile = embeddingFile.empty()
+                ? std::string(language) + "_embeddings.txt"
+                : embeddingFile;
+            std::cout << "Loading embeddings from: " << actualEmbeddingFile
+                << " for language: " << language << std::endl;
+            langProcessor.setCurrentLanguage(language);
+
+            // Start chat with database persistence
+            langProcessor.chat();
         }
         else if (startPredict)
         {

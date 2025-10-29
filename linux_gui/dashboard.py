@@ -2532,7 +2532,7 @@ if __name__ == "__main__":
 
         # Neurons input
         self.neurons_spin = QSpinBox()
-        self.neurons_spin.setRange(1, 1000)
+        self.neurons_spin.setRange(1, 100000)
         self.neurons_spin.setValue(self.neurons)
         self.neurons_spin.valueChanged.connect(self.on_neurons_changed)
         network_layout.addRow("Neurons (-n):", self.neurons_spin)
@@ -2547,14 +2547,14 @@ if __name__ == "__main__":
 
         # Epochs input
         self.epochs_spin = QSpinBox()
-        self.epochs_spin.setRange(1, 10000)
+        self.epochs_spin.setRange(1, 100000)
         self.epochs_spin.setValue(self.epochs)
         self.epochs_spin.valueChanged.connect(self.on_epochs_changed)
         network_layout.addRow("Epochs (-e):", self.epochs_spin)
 
         # Layers input
         self.layers_spin = QSpinBox()
-        self.layers_spin.setRange(1, 100)
+        self.layers_spin.setRange(1, 1000)
         self.layers_spin.setValue(self.layers)
         self.layers_spin.valueChanged.connect(self.on_layers_changed)
         network_layout.addRow("Layers (-l):", self.layers_spin)
@@ -3505,6 +3505,15 @@ if __name__ == "__main__":
         directory = QFileDialog.getExistingDirectory(self, "Select Data Directory")
         if directory:
             self.data_dir_edit.setText(directory)
+
+    def browse_data_file(self):
+        """Browse for data file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Data File",
+            "", "All Files (*.*);;CSV Files (*.csv);;JSON Files (*.json);;Text Files (*.txt)"
+        )
+        if file_path:
+            self.data_file_edit.setText(file_path)
 
     def save_settings(self):
         """Save settings to configuration"""

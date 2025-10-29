@@ -59,9 +59,9 @@ class CoreAI3DClient:
         }
 
         self.session: Optional[aiohttp.ClientSession] = None
-        self.ws_connection: Optional[websockets.WebSocketServerProtocol] = None
+        self.ws_connection: Optional[Any] = None
         self._ws_task: Optional[asyncio.Task] = None
-        self.is_connected = False
+        self._is_connected: bool = False
         self.message_handlers: Dict[str, List[Callable]] = {}
         self.streaming_tasks: Dict[str, asyncio.Task] = {}
 
@@ -80,23 +80,41 @@ class CoreAI3DClient:
     async def connect(self):
         """Initialize HTTP session and WebSocket connection"""
         # Always create a new session to avoid closed session issues
-        if self.session is None or self.session.closed:
+        if self.session is None or (hasattr(self.session, 'closed') and self.session.closed):
             timeout = aiohttp.ClientTimeout(total=self.config['timeout'])
             self.session = aiohttp.ClientSession(timeout=timeout)
 
-        if not self.is_connected:
+        if not self._is_connected:
             await self._connect_websocket()
 
     async def disconnect(self):
         """Close connections"""
+        # First, set connection state to prevent new operations
+        self._is_connected = False
+
+        # Cancel WebSocket task first to stop message processing
+        if self._ws_task is not None and not self._ws_task.done():
+            try:
+                self._ws_task.cancel()
+                # Wait for task to complete cancellation, but don't fail if it doesn't
+                try:
+                    await asyncio.wait_for(self._ws_task, timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    logger.debug("WebSocket task cancellation completed")
+            except Exception as e:
+                logger.warning(f"Error cancelling WebSocket task: {e}")
+            finally:
+                self._ws_task = None
+
+        # Close WebSocket connection
         if self.ws_connection:
             try:
                 await self.ws_connection.close()
             except Exception as e:
                 logger.warning(f"Error closing WebSocket: {e}")
             self.ws_connection = None
-            self.is_connected = False
 
+        # Close HTTP session
         if self.session and not self.session.closed:
             try:
                 await self.session.close()
@@ -110,36 +128,59 @@ class CoreAI3DClient:
                 task.cancel()
         self.streaming_tasks.clear()
 
-        # Cancel WebSocket task if it exists
-        if hasattr(self, '_ws_task') and not self._ws_task.done():
-            self._ws_task.cancel()
-
     async def _connect_websocket(self):
         """Establish WebSocket connection"""
         try:
-            # Note: websockets library doesn't support extra_headers in connect()
-            # Headers should be passed differently or handled in the protocol
+            # Ensure any existing connection is properly closed
+            if self.ws_connection:
+                try:
+                    await self.ws_connection.close()
+                except Exception:
+                    pass  # Ignore errors during cleanup
+                self.ws_connection = None
+
+            # Cancel any existing WebSocket task
+            if self._ws_task is not None and not self._ws_task.done():
+                self._ws_task.cancel()
+                try:
+                    await asyncio.wait_for(self._ws_task, timeout=1.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Previous WebSocket task cancellation timed out")
+                self._ws_task = None
+
+            # Connect to WebSocket
             self.ws_connection = await websockets.connect(
-                self.config['ws_url']
-                # Removed extra_headers as it's not supported in this version
+                self.config['ws_url'],
+                close_timeout=5.0  # Add timeout for connection
             )
-            self.is_connected = True
+            self._is_connected = True
             logger.info("WebSocket connected")
 
             # Start message handler as a proper task
-            if hasattr(self, '_ws_task') and not self._ws_task.done():
-                self._ws_task.cancel()
             self._ws_task = asyncio.create_task(self._handle_websocket_messages())
 
         except Exception as e:
             logger.error(f"WebSocket connection failed: {e}")
-            self.is_connected = False
+            self._is_connected = False
+            self.ws_connection = None
+            if self._ws_task:
+                self._ws_task = None
 
     async def _handle_websocket_messages(self):
         """Handle incoming WebSocket messages"""
         try:
+            # Check if connection is still valid before starting
+            if not self.ws_connection:
+                logger.warning("WebSocket connection is None, exiting handler")
+                return
+
             async for message in self.ws_connection:
                 try:
+                    # Check if we should still be processing messages
+                    if not self._is_connected or not self.ws_connection:
+                        logger.info("WebSocket handler stopping due to disconnection")
+                        break
+
                     data = json.loads(message)
                     await self._process_message(data)
                 except json.JSONDecodeError:
@@ -147,14 +188,17 @@ class CoreAI3DClient:
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
         except websockets.exceptions.ConnectionClosed:
-            logger.info("WebSocket connection closed")
-            self.is_connected = False
+            logger.info("WebSocket connection closed normally")
+            self._is_connected = False
         except asyncio.CancelledError:
             logger.info("WebSocket handler cancelled")
-            self.is_connected = False
+            self._is_connected = False
         except Exception as e:
             logger.error(f"WebSocket handler error: {e}")
-            self.is_connected = False
+            self._is_connected = False
+        finally:
+            # Ensure connection state is updated
+            self._is_connected = False
 
     async def _process_message(self, data: Dict[str, Any]):
         """Process incoming WebSocket message"""
@@ -207,6 +251,16 @@ class CoreAI3DClient:
         if not self.session or self.session.closed:
             await self.connect()
 
+        # Check if session is still valid after connect attempt
+        if not self.session or self.session.closed:
+            return APIResponse(
+                success=False,
+                data=None,
+                message="Failed to establish HTTP session",
+                status_code=503,
+                metadata={}
+            )
+
         url = urljoin(self.config['base_url'], endpoint)
         headers = {
             'Authorization': f'Bearer {self.config["api_key"]}',
@@ -216,10 +270,12 @@ class CoreAI3DClient:
 
         for attempt in range(self.config['max_retries'] + 1):
             try:
-                # Check if session is still valid before making request
-                if self.session.closed:
-                    logger.warning("Session closed, reconnecting...")
+                # Double-check session validity before making request
+                if not self.session or self.session.closed:
+                    logger.warning("Session became invalid, reconnecting...")
                     await self.connect()
+                    if not self.session or self.session.closed:
+                        continue
 
                 async with self.session.request(
                     method, url, json=data, headers=headers
@@ -230,7 +286,7 @@ class CoreAI3DClient:
                         data=response_data,
                         message=response_data.get('message', ''),
                         status_code=response.status,
-                        metadata=response.headers
+                        metadata=dict(response.headers)  # Convert to dict to avoid type issues
                     )
 
             except asyncio.TimeoutError:
@@ -280,6 +336,15 @@ class CoreAI3DClient:
                         status_code=500,
                         metadata={}
                     )
+
+        # This should never be reached, but just in case
+        return APIResponse(
+            success=False,
+            data=None,
+            message="Request failed after all retries",
+            status_code=500,
+            metadata={}
+        )
 
     # HTTP API Methods
     async def get(self, endpoint: str) -> APIResponse:
@@ -439,18 +504,13 @@ class CoreAI3DClient:
     async def _handle_stream(self, stream_type: str):
         """Handle real-time stream data"""
         try:
-            async for message in self.ws_connection:
-                data = json.loads(message)
-                if data.get('type') == 'stream_data' and data.get('streamType') == stream_type:
-                    # Emit stream data to handlers
-                    if 'stream_data' in self.message_handlers:
-                        for handler in self.message_handlers['stream_data']:
-                            await handler(StreamData(
-                                stream_type=stream_type,
-                                data=data.get('data'),
-                                timestamp=data.get('timestamp', time.time()),
-                                metadata=data.get('metadata', {})
-                            ))
+            # Note: This method should not consume the WebSocket connection directly
+            # as it's already being consumed by _handle_websocket_messages
+            # Instead, rely on message handlers registered for stream_data
+            logger.info(f"Stream handler for {stream_type} started - waiting for messages via WebSocket")
+            # Keep the task alive until cancelled
+            while True:
+                await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             logger.info(f"Stream {stream_type} cancelled")
         except Exception as e:
@@ -511,12 +571,18 @@ class CoreAI3DClient:
             )
 
     # Status and Health
-    async def health_check(self) -> bool:
+    async def health_check(self) -> APIResponse:
         try:
             response = await self.get('/health')
-            return response.success and response.data.get('status') == 'healthy'
-        except Exception:
-            return False
+            return response
+        except Exception as e:
+            return APIResponse(
+                success=False,
+                data=None,
+                message=str(e),
+                status_code=500,
+                metadata={}
+            )
 
     async def get_system_status(self) -> APIResponse:
         return await self.get('/status')
@@ -538,6 +604,15 @@ class CoreAI3DClient:
         }
         return await self.post('/prediction/run', data)
 
+    # Training API
+    async def start_training(self, config: Dict[str, Any]) -> APIResponse:
+        """Start neural network training with specified configuration"""
+        return await self.post('/training/start', config)
+
+    async def stop_training(self) -> APIResponse:
+        """Stop current training session"""
+        return await self.post('/training/stop')
+
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:
         return await self.get('/neural/topology')
@@ -549,10 +624,11 @@ class CoreAI3DClient:
     async def wait_for_ready(self, timeout: float = 30.0) -> bool:
         start_time = time.time()
         while time.time() - start_time < timeout:
-            if await self.health_check():
+            health_response = await self.health_check()
+            if health_response.success and health_response.data and health_response.data.get('status') == 'healthy':
                 return True
             await asyncio.sleep(1.0)
         return False
 
     def is_connected(self) -> bool:
-        return self.is_connected and self.ws_connection is not None
+        return self._is_connected and self.ws_connection is not None

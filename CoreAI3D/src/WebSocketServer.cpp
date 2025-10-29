@@ -21,8 +21,12 @@ WebSocketSession::~WebSocketSession() {
 }
 
 void WebSocketSession::run() {
-    // Set suggested timeout settings for the websocket
-    ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
+    // Set custom timeout settings for the websocket to prevent premature timeouts
+    websocket::stream_base::timeout opt;
+    opt.handshake_timeout = std::chrono::seconds(30);
+    opt.idle_timeout = std::chrono::seconds(600);  // 10 minutes
+    opt.keep_alive_pings = true;
+    ws_.set_option(opt);
 
     // Set a decorator to change the Server of the handshake
     ws_.set_option(websocket::stream_base::decorator(
@@ -63,13 +67,25 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t bytes_transferre
     boost::ignore_unused(bytes_transferred);
 
     if (ec == websocket::error::closed) {
-        // Client disconnected
+        // Client disconnected normally
+        isActive_ = false;
+        return;
+    }
+
+    if (ec == beast::error::timeout) {
+        // Handle timeout specifically
+        std::cerr << "WebSocket read timeout: Connection timed out" << std::endl;
         isActive_ = false;
         return;
     }
 
     if (ec) {
-        std::cerr << "WebSocket read error: " << ec.message() << std::endl;
+        // Check for EOF or other connection errors
+        if (ec == boost::asio::error::eof) {
+            std::cerr << "WebSocket read error: End of file (connection closed by peer)" << std::endl;
+        } else {
+            std::cerr << "WebSocket read error: " << ec.message() << std::endl;
+        }
         isActive_ = false;
         return;
     }
@@ -96,8 +112,20 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t bytes_transferre
 void WebSocketSession::onWrite(beast::error_code ec, std::size_t bytes_transferred) {
     boost::ignore_unused(bytes_transferred);
 
+    if (ec == beast::error::timeout) {
+        // Handle write timeout specifically
+        std::cerr << "WebSocket write timeout: Connection timed out during write" << std::endl;
+        isActive_ = false;
+        return;
+    }
+
     if (ec) {
-        std::cerr << "WebSocket write error: " << ec.message() << std::endl;
+        // Check for EOF or other connection errors during write
+        if (ec == boost::asio::error::eof) {
+            std::cerr << "WebSocket write error: End of file (connection closed by peer)" << std::endl;
+        } else {
+            std::cerr << "WebSocket write error: " << ec.message() << std::endl;
+        }
         isActive_ = false;
         return;
     }
@@ -179,7 +207,12 @@ void WebSocketSession::close() {
     isStreaming_ = false;
 
     beast::error_code ec;
-    ws_.close(websocket::close_code::normal, ec);
+    // Use async close with timeout to avoid hanging
+    try {
+        ws_.close(websocket::close_code::normal, ec);
+    } catch (const std::exception& e) {
+        std::cerr << "Exception during WebSocket close: " << e.what() << std::endl;
+    }
 
     if (ec) {
         std::cerr << "Error closing WebSocket: " << ec.message() << std::endl;

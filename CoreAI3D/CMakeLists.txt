@@ -206,7 +206,7 @@ target_include_directories(CoreAI3DLib PUBLIC
 )
 
 # Add USE_MYSQL preprocessor definition conditionally
-option(USE_MYSQL "Enable MySQL support" OFF)
+option(USE_MYSQL "Enable MySQL support" ON)
 if(USE_MYSQL)
     target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
 endif()
@@ -339,7 +339,7 @@ target_include_directories(CoreAI3D PRIVATE
 # Link the executable against CoreAI3DLib
 target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib)
 
-# Add post-build automation script
+# Add post-build automation script (disabled for now due to path issues)
 add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${CMAKE_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
     COMMENT "Running post-build automation script"

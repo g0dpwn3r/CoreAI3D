@@ -1,8 +1,8 @@
 #pragma once
 #include "CoreAI3DCommon.hpp"
 
-#include "Train.hpp"
 #include "Core.hpp"
+#include "Train.hpp"
 #include "Language.hpp"
 
 #ifdef USE_MYSQL
@@ -115,6 +115,15 @@ public:
     };
     LearningSettings loadLearningSettings(int& datasetId);
 
+    // Chat history management methods
+    void saveChatMessage(int sessionId, const std::string& speaker, const std::string& message);
+    std::vector<std::pair<std::string, std::string>> loadChatHistory(int sessionId);
+    void saveModelState(int sessionId, const nlohmann::json& modelState);
+    nlohmann::json loadLatestModelState(int sessionId);
+
+    // Destructor for proper cleanup
+    ~Database();
+
 private:
     std::string dbHost;
     unsigned int dbPort;
@@ -137,4 +146,9 @@ private:
 
     // NEW: Helper to create the prediction results table
     void createPredictionResultsTable();
+
+    // Connection management methods
+    bool isConnectionHealthy();
+    void reconnect();
+    void ensureConnection();
 };

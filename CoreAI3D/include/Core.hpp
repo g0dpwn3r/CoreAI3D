@@ -4,8 +4,8 @@
 #include "CoreAI3DCommon.hpp"
 
 #include "Train.hpp"
-#include "Database.hpp"
 #include "Language.hpp"
+#include "Database.hpp"
 
 class Training;
 

@@ -13,9 +13,9 @@
   "database": {
     "host": "localhost",
     "port": 33060,
-    "user": "user",
-    "password": "password",
-    "schema": "coreai_db",
+    "user": "root",
+    "password": "4uyr95f23GpsWrYcBAQ3pzdzq@1991",
+    "schema": "coreai3d",
     "ssl_mode": "DISABLED",
     "create_tables": false
   },

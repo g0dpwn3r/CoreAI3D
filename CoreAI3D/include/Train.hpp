@@ -4,8 +4,8 @@
 #include "CoreAI3DCommon.hpp"
 
 #include "Core.hpp"
-#include "Database.hpp"
 #include "Language.hpp"
+#include "Database.hpp"
 #include "VisionModule.hpp"
 #include <nlohmann/json.hpp>
 

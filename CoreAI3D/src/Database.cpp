@@ -158,18 +158,19 @@ std::vector<float> Database::blobToVector(const std::vector<char>& blob) {
 }
 
 void Database::createPredictionResultsTable() {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".prediction_results ("
-                      "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
-                      "dataset_id BIGINT NOT NULL,"
-                      "sample_index INT NOT NULL,"
-                      "input_features BLOB,"
-                      "actual_targets BLOB,"
-                      "predicted_targets BLOB,"
-                      "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                      "INDEX idx_dataset_sample (dataset_id, sample_index)"
-                      ")").execute();
+                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                       "dataset_id BIGINT NOT NULL,"
+                       "sample_index INT NOT NULL,"
+                       "input_features BLOB,"
+                       "actual_targets BLOB,"
+                       "predicted_targets BLOB,"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "INDEX idx_dataset_sample (dataset_id, sample_index)"
+                       ")").execute();
         std::cout << "Created prediction_results table in schema " << dbSchema << std::endl;
     } catch (const std::exception& ex) {
         std::cerr << "Error creating prediction_results table: " << ex.what() << std::endl;
@@ -182,6 +183,7 @@ void Database::createPredictionResultsTable() {
 }
 
 void Database::createTables() {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         // Create datasets table with schema qualification
@@ -240,6 +242,36 @@ void Database::createTables() {
                        "INDEX idx_dataset (dataset_id)"
                        ")").execute();
 
+        // Create chat_sessions table for chat history
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".chat_sessions ("
+                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                       "session_name VARCHAR(255) DEFAULT 'default',"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                       "INDEX idx_session_name (session_name)"
+                       ")").execute();
+
+        // Create chat_messages table for storing individual messages
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".chat_messages ("
+                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                       "session_id BIGINT NOT NULL,"
+                       "speaker VARCHAR(50) NOT NULL,"
+                       "message TEXT NOT NULL,"
+                       "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "INDEX idx_session_timestamp (session_id, timestamp),"
+                       "FOREIGN KEY (session_id) REFERENCES " + dbSchema + ".chat_sessions(id) ON DELETE CASCADE"
+                       ")").execute();
+
+        // Create model_states table for storing AI model states
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".model_states ("
+                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                       "session_id BIGINT NOT NULL,"
+                       "model_state JSON NOT NULL,"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "INDEX idx_session_time (session_id, created_at),"
+                       "FOREIGN KEY (session_id) REFERENCES " + dbSchema + ".chat_sessions(id) ON DELETE CASCADE"
+                       ")").execute();
+
         std::cout << "Created main database tables in schema " << dbSchema << std::endl;
         createPredictionResultsTable();
     } catch (const std::exception& ex) {
@@ -255,16 +287,17 @@ void Database::createTables() {
 
 int Database::addDataset(const std::string& datasetName, const std::string& description,
     int numRows, int numFeatures, int numLabels) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         auto result = session->sql("INSERT INTO " + dbSchema + ".datasets (name, description, num_rows, num_features, num_labels) "
-                                    "VALUES (?, ?, ?, ?, ?)")
-                       .bind(datasetName)
-                       .bind(description)
-                       .bind(numRows)
-                       .bind(numFeatures)
-                       .bind(numLabels)
-                       .execute();
+                                     "VALUES (?, ?, ?, ?, ?)")
+                        .bind(datasetName)
+                        .bind(description)
+                        .bind(numRows)
+                        .bind(numFeatures)
+                        .bind(numLabels)
+                        .execute();
 
         // Get the auto-generated ID
         auto idResult = session->sql("SELECT LAST_INSERT_ID() as id").execute();
@@ -288,18 +321,19 @@ int Database::addDataset(const std::string& datasetName, const std::string& desc
 void Database::addDatasetRecord(int& datasetId, int rowIndex,
     const std::vector<float>& featureValues,
     const std::vector<float>& labelValues) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         auto featureBlob = vectorToBlob(featureValues);
         auto labelBlob = vectorToBlob(labelValues);
 
         session->sql("INSERT INTO " + dbSchema + ".dataset_records (dataset_id, row_index, feature_values, label_values) "
-                      "VALUES (?, ?, ?, ?)")
-                .bind(datasetId)
-                .bind(rowIndex)
-                .bind(featureBlob.data(), featureBlob.size())
-                .bind(labelBlob.data(), labelBlob.size())
-                .execute();
+                       "VALUES (?, ?, ?, ?)")
+                 .bind(datasetId)
+                 .bind(rowIndex)
+                 .bind(featureBlob.data(), featureBlob.size())
+                 .bind(labelBlob.data(), labelBlob.size())
+                 .execute();
 
         // Only log every 100th record to avoid spam during data loading
         if (rowIndex % 100 == 0) {
@@ -319,14 +353,15 @@ void Database::addDatasetRecord(int& datasetId, int rowIndex,
 }
 
 Database::DatasetData Database::getDataset(int& datasetId) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         DatasetData data;
 
         // Get dataset metadata
         auto result = session->sql("SELECT name, num_rows, num_features, num_labels FROM " + dbSchema + ".datasets WHERE id = ?")
-                      .bind(datasetId)
-                      .execute();
+                       .bind(datasetId)
+                       .execute();
 
         auto row = result.fetchOne();
         if (!row) {
@@ -386,15 +421,16 @@ Database::DatasetData Database::getDataset(int& datasetId) {
 }
 
 void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std::vector<float>& labelValues) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         auto labelBlob = vectorToBlob(labelValues);
 
         session->sql("UPDATE " + dbSchema + ".dataset_records SET label_values = ? WHERE dataset_id = ? AND row_index = ?")
-               .bind(labelBlob.data(), labelBlob.size())
-               .bind(datasetId)
-               .bind(rowIndex)
-               .execute();
+                .bind(labelBlob.data(), labelBlob.size())
+                .bind(datasetId)
+                .bind(rowIndex)
+                .execute();
 
         std::cout << "Updated labels for dataset " << datasetId << ", row " << rowIndex << std::endl;
     } catch (const std::exception& ex) {
@@ -408,11 +444,12 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
 }
 
 void Database::clearDatasetRecords(long long& datasetId) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         session->sql("DELETE FROM " + dbSchema + ".dataset_records WHERE dataset_id = ?")
-               .bind(datasetId)
-               .execute();
+                .bind(datasetId)
+                .execute();
 
         std::cout << "Cleared all records for dataset " << datasetId << std::endl;
     } catch (const std::exception& ex) {
@@ -433,6 +470,7 @@ void Database::saveAIModelState(int& datasetId,
     const std::vector<float>& hiddenErrorData,
     const std::vector<std::vector<float>>& weightsHiddenInput,
     const std::vector<std::vector<float>>& weightsOutputHidden) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         // Convert matrices and vectors to BLOBs
@@ -445,17 +483,17 @@ void Database::saveAIModelState(int& datasetId,
         auto weightsOutputHiddenBlob = matrixToBlob(weightsOutputHidden);
 
         session->sql("INSERT INTO " + dbSchema + ".ai_model_states (dataset_id, input_data, output_data, hidden_data, "
-                     "hidden_output_data, hidden_error_data, weights_hidden_input, weights_output_hidden) "
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-               .bind(datasetId)
-               .bind(inputBlob.data(), inputBlob.size())
-               .bind(outputBlob.data(), outputBlob.size())
-               .bind(hiddenBlob.data(), hiddenBlob.size())
-               .bind(hiddenOutputBlob.data(), hiddenOutputBlob.size())
-               .bind(hiddenErrorBlob.data(), hiddenErrorBlob.size())
-               .bind(weightsHiddenInputBlob.data(), weightsHiddenInputBlob.size())
-               .bind(weightsOutputHiddenBlob.data(), weightsOutputHiddenBlob.size())
-               .execute();
+                      "hidden_output_data, hidden_error_data, weights_hidden_input, weights_output_hidden) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(datasetId)
+                .bind(inputBlob.data(), inputBlob.size())
+                .bind(outputBlob.data(), outputBlob.size())
+                .bind(hiddenBlob.data(), hiddenBlob.size())
+                .bind(hiddenOutputBlob.data(), hiddenOutputBlob.size())
+                .bind(hiddenErrorBlob.data(), hiddenErrorBlob.size())
+                .bind(weightsHiddenInputBlob.data(), weightsHiddenInputBlob.size())
+                .bind(weightsOutputHiddenBlob.data(), weightsOutputHiddenBlob.size())
+                .execute();
 
         std::cout << "Saved AI model state for dataset " << datasetId << std::endl;
     } catch (const std::exception& ex) {
@@ -469,17 +507,18 @@ void Database::saveAIModelState(int& datasetId,
 }
 
 Database::AIModelState Database::loadLatestAIModelState(int& datasetId) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         AIModelState state;
 
         // Get the latest model state for this dataset
         auto result = session->sql("SELECT input_data, output_data, hidden_data, hidden_output_data, "
-                                   "hidden_error_data, weights_hidden_input, weights_output_hidden "
-                                   "FROM " + dbSchema + ".ai_model_states WHERE dataset_id = ? "
-                                   "ORDER BY created_at DESC LIMIT 1")
-                      .bind(datasetId)
-                      .execute();
+                                    "hidden_error_data, weights_hidden_input, weights_output_hidden "
+                                    "FROM " + dbSchema + ".ai_model_states WHERE dataset_id = ? "
+                                    "ORDER BY created_at DESC LIMIT 1")
+                       .bind(datasetId)
+                       .execute();
 
         auto row = result.fetchOne();
         if (!row) {
@@ -529,6 +568,7 @@ void Database::savePredictionResults(int& datasetId, int sampleIndex,
     const std::vector<float>& inputFeatures,
     const std::vector<float>& actualTargets,
     const std::vector<float>& predictedTargets) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         // Convert vectors to BLOBs
@@ -537,13 +577,13 @@ void Database::savePredictionResults(int& datasetId, int sampleIndex,
         auto predictedBlob = vectorToBlob(predictedTargets);
 
         session->sql("INSERT INTO " + dbSchema + ".prediction_results (dataset_id, sample_index, input_features, actual_targets, predicted_targets) "
-                     "VALUES (?, ?, ?, ?, ?)")
-               .bind(datasetId)
-               .bind(sampleIndex)
-               .bind(inputBlob.data(), inputBlob.size())
-               .bind(actualBlob.data(), actualBlob.size())
-               .bind(predictedBlob.data(), predictedBlob.size())
-               .execute();
+                      "VALUES (?, ?, ?, ?, ?)")
+                .bind(datasetId)
+                .bind(sampleIndex)
+                .bind(inputBlob.data(), inputBlob.size())
+                .bind(actualBlob.data(), actualBlob.size())
+                .bind(predictedBlob.data(), predictedBlob.size())
+                .execute();
 
         std::cout << "Saved prediction results for dataset " << datasetId << ", sample " << sampleIndex << std::endl;
     } catch (const std::exception& ex) {
@@ -561,12 +601,13 @@ bool Database::getDatasetRecords(long long datasetId,
     std::vector<std::vector<float>>& loadedTargets,
     long long& loadedNumSamples,
     int& loadedInputSize, int& loadedOutputSize) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         // Get dataset metadata first
         auto metaResult = session->sql("SELECT num_features, num_labels, num_rows FROM " + dbSchema + ".datasets WHERE id = ?")
-                          .bind(datasetId)
-                          .execute();
+                           .bind(datasetId)
+                           .execute();
 
         auto metaRow = metaResult.fetchOne();
         if (!metaRow) {
@@ -618,25 +659,26 @@ bool Database::getDatasetRecords(long long datasetId,
 
 // NEW: Methods for learning settings management
 void Database::saveLearningSettings(int& datasetId, double learningRate, int batchSize, int epochs,
-                                   double momentum, double weightDecay, double dropoutRate,
-                                   const std::string& optimizer, const std::string& lossFunction,
-                                   const std::string& activationFunction) {
+                                    double momentum, double weightDecay, double dropoutRate,
+                                    const std::string& optimizer, const std::string& lossFunction,
+                                    const std::string& activationFunction) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         session->sql("INSERT INTO " + dbSchema + ".learning_settings (dataset_id, learning_rate, batch_size, epochs, "
-                     "momentum, weight_decay, dropout_rate, optimizer, loss_function, activation_function) "
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-               .bind(datasetId)
-               .bind(learningRate)
-               .bind(batchSize)
-               .bind(epochs)
-               .bind(momentum)
-               .bind(weightDecay)
-               .bind(dropoutRate)
-               .bind(optimizer)
-               .bind(lossFunction)
-               .bind(activationFunction)
-               .execute();
+                      "momentum, weight_decay, dropout_rate, optimizer, loss_function, activation_function) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(datasetId)
+                .bind(learningRate)
+                .bind(batchSize)
+                .bind(epochs)
+                .bind(momentum)
+                .bind(weightDecay)
+                .bind(dropoutRate)
+                .bind(optimizer)
+                .bind(lossFunction)
+                .bind(activationFunction)
+                .execute();
 
         std::cout << "Saved learning settings for dataset " << datasetId << std::endl;
     } catch (const std::exception& ex) {
@@ -650,17 +692,18 @@ void Database::saveLearningSettings(int& datasetId, double learningRate, int bat
 }
 
 Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
+    ensureConnection();
 #ifdef USE_MYSQL
     try {
         LearningSettings settings;
 
         // Get the latest learning settings for this dataset
         auto result = session->sql("SELECT learning_rate, batch_size, epochs, momentum, weight_decay, "
-                                   "dropout_rate, optimizer, loss_function, activation_function "
-                                   "FROM " + dbSchema + ".learning_settings WHERE dataset_id = ? "
-                                   "ORDER BY created_at DESC LIMIT 1")
-                      .bind(datasetId)
-                      .execute();
+                                    "dropout_rate, optimizer, loss_function, activation_function "
+                                    "FROM " + dbSchema + ".learning_settings WHERE dataset_id = ? "
+                                    "ORDER BY created_at DESC LIMIT 1")
+                       .bind(datasetId)
+                       .execute();
 
         auto row = result.fetchOne();
         if (!row) {
@@ -698,5 +741,196 @@ Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
     settings.activationFunction = "relu";
     std::cout << "Database stub: loadLearningSettings(" << datasetId << ") -> default settings" << std::endl;
     return settings;
+#endif
+}
+
+// Chat history management methods
+void Database::saveChatMessage(int sessionId, const std::string& speaker, const std::string& message) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("INSERT INTO " + dbSchema + ".chat_messages (session_id, speaker, message) VALUES (?, ?, ?)")
+                .bind(sessionId)
+                .bind(speaker)
+                .bind(message)
+                .execute();
+
+        // Update session timestamp
+        session->sql("UPDATE " + dbSchema + ".chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(sessionId)
+                .execute();
+
+        // Note: trainer is not available in Database class, removed verbose logging
+    } catch (const std::exception& ex) {
+        std::cerr << "Error saving chat message: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation
+    std::cout << "Database stub: saveChatMessage(sessionId=" << sessionId << ", speaker='" << speaker << "')" << std::endl;
+#endif
+}
+
+std::vector<std::pair<std::string, std::string>> Database::loadChatHistory(int sessionId) {
+    ensureConnection();
+    std::vector<std::pair<std::string, std::string>> conversation;
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT speaker, message FROM " + dbSchema + ".chat_messages WHERE session_id = ? ORDER BY timestamp")
+                       .bind(sessionId)
+                       .execute();
+
+        mysqlx::Row row;
+        while ((row = result.fetchOne())) {
+            std::string speaker = row[0].get<std::string>();
+            std::string message = row[1].get<std::string>();
+            conversation.emplace_back(speaker, message);
+        }
+
+        // Note: trainer is not available in Database class, removed verbose logging
+    } catch (const std::exception& ex) {
+        std::cerr << "Error loading chat history: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation - return empty conversation
+    std::cout << "Database stub: loadChatHistory(sessionId=" << sessionId << ") -> empty conversation" << std::endl;
+#endif
+    return conversation;
+}
+
+void Database::saveModelState(int sessionId, const nlohmann::json& modelState) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        std::string jsonStr = modelState.dump();
+        session->sql("INSERT INTO " + dbSchema + ".model_states (session_id, model_state) VALUES (?, ?)")
+                .bind(sessionId)
+                .bind(jsonStr)
+                .execute();
+
+        // Note: trainer is not available in Database class, removed verbose logging
+    } catch (const std::exception& ex) {
+        std::cerr << "Error saving model state: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation
+    std::cout << "Database stub: saveModelState(sessionId=" << sessionId << ")" << std::endl;
+#endif
+}
+
+nlohmann::json Database::loadLatestModelState(int sessionId) {
+    ensureConnection();
+    nlohmann::json modelState;
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT model_state FROM " + dbSchema + ".model_states WHERE session_id = ? ORDER BY created_at DESC LIMIT 1")
+                       .bind(sessionId)
+                       .execute();
+
+        auto row = result.fetchOne();
+        if (row) {
+            std::string jsonStr = row[0].get<std::string>();
+            modelState = nlohmann::json::parse(jsonStr);
+            // Note: trainer is not available in Database class, removed verbose logging
+        } else {
+            // Note: trainer is not available in Database class, removed verbose logging
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error loading model state: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation - return empty JSON
+    std::cout << "Database stub: loadLatestModelState(sessionId=" << sessionId << ") -> empty state" << std::endl;
+#endif
+    return modelState;
+}
+
+// Connection management methods
+bool Database::isConnectionHealthy() {
+#ifdef USE_MYSQL
+    if (!session) {
+        return false;
+    }
+    try {
+        // Try a simple query to check if connection is alive
+        session->sql("SELECT 1").execute();
+        return true;
+    } catch (const std::exception& ex) {
+        std::cerr << "Connection health check failed: " << ex.what() << std::endl;
+        return false;
+    }
+#else
+    // Stub implementation - always return true
+    return true;
+#endif
+}
+
+void Database::reconnect() {
+#ifdef USE_MYSQL
+    try {
+        std::cout << "Attempting to reconnect to database..." << std::endl;
+
+        // Close existing session if it exists
+        if (session) {
+            session->close();
+            delete session;
+            session = nullptr;
+        }
+
+        // Convert SSLMode enum to mysqlx::SSLMode
+        mysqlx::SSLMode mysqlSslMode;
+        switch (sslMode) {
+            case SSLMode::DISABLED:
+                mysqlSslMode = mysqlx::SSLMode::DISABLED;
+                break;
+            case SSLMode::REQUIRED:
+                mysqlSslMode = mysqlx::SSLMode::REQUIRED;
+                break;
+            case SSLMode::VERIFY_CA:
+                mysqlSslMode = mysqlx::SSLMode::VERIFY_CA;
+                break;
+            case SSLMode::VERIFY_IDENTITY:
+                mysqlSslMode = mysqlx::SSLMode::VERIFY_IDENTITY;
+                break;
+            default:
+                mysqlSslMode = mysqlx::SSLMode::DISABLED;
+                break;
+        }
+
+        // First, connect without schema to ensure database exists
+        mysqlx::Session tempSession(dbHost, dbPort, dbUser, dbPassword);
+        tempSession.sql("CREATE DATABASE IF NOT EXISTS " + dbSchema).execute();
+        tempSession.close();
+
+        // Now establish connection to the specific schema
+        session = new mysqlx::Session(dbHost, dbPort, dbUser, dbPassword, dbSchema);
+        std::cout << "Database reconnection successful to " << dbHost << ":" << dbPort << "/" << dbSchema << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Database reconnection failed: " << ex.what() << std::endl;
+        throw std::runtime_error("Failed to reconnect to database: " + std::string(ex.what()));
+    }
+#else
+    // Stub implementation
+    std::cout << "Database stub: reconnect() called" << std::endl;
+#endif
+}
+
+void Database::ensureConnection() {
+    if (!isConnectionHealthy()) {
+        reconnect();
+    }
+}
+
+// Destructor for proper cleanup
+Database::~Database() {
+#ifdef USE_MYSQL
+    if (session) {
+        session->close();
+        delete session;
+        session = nullptr;
+    }
 #endif
 }
