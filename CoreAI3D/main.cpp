@@ -55,9 +55,40 @@ int main(int argc, char* argv[]) {
         return idx + 1 < argc && std::string(argv[idx + 1]).find("--") != 0;
     };
 
+    // Helper function to extract value from argument, handling both --arg value and --arg=value formats
+    auto extractValue = [&](int& idx, const std::string& argName, const std::string& arg) -> std::string {
+        // Check if value is in the same argument after '='
+        size_t equalsPos = arg.find('=');
+        if (equalsPos != std::string::npos) {
+            return arg.substr(equalsPos + 1);
+        }
+        // Otherwise, expect the next argument to be the value
+        if (hasValue(idx)) {
+            return argv[++idx];
+        }
+        std::cerr << "ERROR: " << argName << " requires a value\n";
+        return "";
+    };
+
     // Basic argument parsing
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        // Handle --arg=value format by checking for '=' in the argument
+        if (arg.find('=') != std::string::npos) {
+            // Split the argument at '='
+            size_t equalsPos = arg.find('=');
+            std::string flag = arg.substr(0, equalsPos);
+            std::string value = arg.substr(equalsPos + 1);
+            arg = flag; // Update arg to just the flag part
+            // Insert the value as the next argument
+            argv[i] = const_cast<char*>(flag.c_str());
+            // Shift remaining arguments and insert value
+            for (int j = argc; j > i + 1; --j) {
+                argv[j] = argv[j - 1];
+            }
+            argv[i + 1] = const_cast<char*>(value.c_str());
+            ++argc;
+        }
         if (arg == "--help" || arg == "-h") {
             std::cout << "CoreAI3D - Advanced AI Training and Prediction Tool\n";
             std::cout << "====================================================\n\n";
@@ -185,21 +216,21 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
         } else if (arg == "--input-file" || arg == "-i") {
-            if (hasValue(i)) inputFile = argv[++i];
-            else std::cerr << "ERROR: --input-file requires a value\n";
+            std::string value = extractValue(i, "--input-file", arg);
+            if (!value.empty()) inputFile = value;
         } else if (arg == "--output-csv" || arg == "-o") {
-            if (hasValue(i)) outputCsvFile = argv[++i];
-            else std::cerr << "ERROR: --output-csv requires a value\n";
+            std::string value = extractValue(i, "--output-csv", arg);
+            if (!value.empty()) outputCsvFile = value;
         } else if (arg == "--api-port") {
-            if (hasValue(i)) apiPort = argv[++i];
-            else std::cerr << "ERROR: --api-port requires a value\n";
+            std::string value = extractValue(i, "--api-port", arg);
+            if (!value.empty()) apiPort = value;
         } else if (arg == "--start-predict") {
             startPredict = true;
         } else if (arg == "--start-chat") {
             startChat = true;
         } else if (arg == "--load-model") {
-            if (hasValue(i)) loadModelId = argv[++i];
-            else std::cerr << "ERROR: --load-model requires a value\n";
+            std::string value = extractValue(i, "--load-model", arg);
+            if (!value.empty()) loadModelId = value;
         } else if (arg == "--offline") {
             isOfflineMode = true;
         } else if (arg == "--enable-websocket") {
@@ -207,20 +238,20 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--create-table") {
             createTableFlag = true;
         } else if (arg == "--db-host") {
-            if (hasValue(i)) dbHost = argv[++i];
-            else std::cerr << "ERROR: --db-host requires a value\n";
+            std::string value = extractValue(i, "--db-host", arg);
+            if (!value.empty()) dbHost = value;
         } else if (arg == "--db-user") {
-            if (hasValue(i)) dbUser = argv[++i];
-            else std::cerr << "ERROR: --db-user requires a value\n";
+            std::string value = extractValue(i, "--db-user", arg);
+            if (!value.empty()) dbUser = value;
         } else if (arg == "--db-password") {
-            if (hasValue(i)) dbPassword = argv[++i];
-            else std::cerr << "ERROR: --db-password requires a value\n";
+            std::string value = extractValue(i, "--db-password", arg);
+            if (!value.empty()) dbPassword = value;
         } else if (arg == "--db-port") {
-            if (hasValue(i)) dbPort = argv[++i];
-            else std::cerr << "ERROR: --db-port requires a value\n";
+            std::string value = extractValue(i, "--db-port", arg);
+            if (!value.empty()) dbPort = value;
         } else if (arg == "--db-schema") {
-            if (hasValue(i)) dbSchema = argv[++i];
-            else std::cerr << "ERROR: --db-schema requires a value\n";
+            std::string value = extractValue(i, "--db-schema", arg);
+            if (!value.empty()) dbSchema = value;
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }

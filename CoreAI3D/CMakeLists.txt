@@ -348,6 +348,16 @@ target_include_directories(CoreAI3D PRIVATE
 # Link the executable against CoreAI3DLib
 target_link_libraries(CoreAI3D PRIVATE CoreAI3DLib)
 
+
+# Copy config.json to build directory
+add_custom_command(TARGET CoreAI3D POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:CoreAI3D>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/config.json $<TARGET_FILE_DIR:CoreAI3D>/config.json
+    COMMENT "Copying config.json to executable directory"
+    VERBATIM
+)
+
+
 # Add post-build automation script (disabled for now due to path issues)
 add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${CMAKE_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
