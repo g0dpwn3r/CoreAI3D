@@ -70,7 +70,8 @@ public:
     // Database interaction methods - only if USE_MYSQL is defined
 #ifdef USE_MYSQL
     bool saveModel(int& datasetId);
-    bool loadModel(int& datasetId);
+    bool loadModel(const int& datasetId);
+    bool loadModel(const std::string& datasetId);
 #endif
     void printFullMatrix(std::vector<std::vector<float>>& data, int len, int precision = 6);
     void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);

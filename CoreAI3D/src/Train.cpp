@@ -754,8 +754,8 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
     return true;
 }
 
-#ifdef USE_MYSQL
 bool Training::loadDatasetFromDB(int& datasetId) {
+#ifdef USE_MYSQL
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot load dataset from database in offline mode or if database manager is not initialized." << std::endl;
         return false;
@@ -811,8 +811,11 @@ bool Training::loadDatasetFromDB(int& datasetId) {
     catch (const std::exception& err) {
         std::cerr << "Database error loading dataset: " << err.what() << std::endl; return false;
     }
-}
+#else
+    std::cerr << "Database functionality not available (USE_MYSQL not defined)." << std::endl;
+    return false;
 #endif
+}
 
 void Training::splitInputOutput(int outputSize) {
     inputs.clear();
@@ -1376,7 +1379,8 @@ bool Training::saveModel(int& datasetId) {
 #endif
 
 #ifdef USE_MYSQL
-bool Training::loadModel(int& datasetId) {
+bool Training::loadModel(const int& datasetId) {
+#ifdef USE_MYSQL
     if (isOfflineMode || !dbManager) {
         std::cerr << "Cannot load model from database in offline mode or if database manager is not initialized." << std::endl;
         return false;
@@ -1384,7 +1388,8 @@ bool Training::loadModel(int& datasetId) {
 
     std::cout << "Loading AI model state from database (ID: " << datasetId << ")...\n";
 
-    Database::AIModelState state = dbManager->loadLatestAIModelState(datasetId);
+    int mutableDatasetId = datasetId;
+    Database::AIModelState state = dbManager->loadLatestAIModelState(mutableDatasetId);
 
     if (state.inputData.empty() || state.outputData.empty() || state.weightsHiddenInput.empty() || state.weightsOutputHidden.empty()) {
         std::cerr << "No valid model state found or loaded for dataset ID " << datasetId << std::endl;
@@ -1408,6 +1413,39 @@ bool Training::loadModel(int& datasetId) {
 
     std::cout << "Model loaded successfully for dataset ID " << datasetId << std::endl;
 	return true;
+#else
+    std::cerr << "Database functionality not available (USE_MYSQL not defined)." << std::endl;
+    return false;
+#endif
+}
+
+bool Training::loadModel(const std::string& datasetId) {
+#ifdef USE_MYSQL
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot load model from database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
+    }
+
+    std::cout << "Loading AI model state from database (Name: " << datasetId << ")...\n";
+
+    // First, find the dataset ID by name
+    // Note: getDatasetIdByName method doesn't exist in Database class
+    // We need to query the database directly or add this method to Database class
+    // For now, assume datasetId is already an ID if it's numeric, otherwise error
+    int actualDatasetId;
+    try {
+        actualDatasetId = std::stoi(datasetId);
+    } catch (const std::exception&) {
+        std::cerr << "Dataset name lookup not implemented. Please provide dataset ID instead of name." << std::endl;
+        return false;
+    }
+
+    // Now load the model using the found ID
+    return loadModel(actualDatasetId);
+#else
+    std::cerr << "Database functionality not available (USE_MYSQL not defined)." << std::endl;
+    return false;
+#endif
 }
 #endif
 

@@ -34,6 +34,7 @@ int main(int argc, char* argv[]) {
     std::string outputSize = "1";
     std::string datasetName = "online-1a";
     std::string datasetId = "-1";
+    std::string loadModelId = "";
     std::string outputCsvFile;
     std::string apiPort = "8080";
     std::string dbHost = "0.0.0.0";
@@ -58,21 +59,128 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
-            std::cout << "CoreAI3D Help\n";
-            std::cout << "--verbose,-v: Enable verbose output\n";
-            std::cout << "--input-file,-i: Input file\n";
-            std::cout << "--output-csv,-o: Output CSV file\n";
-            std::cout << "--api-port: API server port (default: 8080)\n";
-            std::cout << "--db-host: Database host (default: 0.0.0.0)\n";
-            std::cout << "--db-user: Database user (default: root)\n";
-            std::cout << "--db-password: Database password (default: password)\n";
-            std::cout << "--db-port: Database port (default: 3306)\n";
-            std::cout << "--db-schema: Database schema (default: coreai_db)\n";
-            std::cout << "--start-chat: Start chat mode\n";
-            std::cout << "--start-predict: Start prediction mode\n";
-            std::cout << "--offline: Run in offline mode\n";
-            std::cout << "--enable-websocket: Enable WebSocket server in API mode\n";
-            std::cout << "--create-table: Create database tables during initialization\n";
+            std::cout << "CoreAI3D - Advanced AI Training and Prediction Tool\n";
+            std::cout << "====================================================\n\n";
+            std::cout << "USAGE:\n";
+            std::cout << "  CoreAI3D [OPTIONS]\n\n";
+            std::cout << "DESCRIPTION:\n";
+            std::cout << "  CoreAI3D is a comprehensive AI tool that supports training neural networks,\n";
+            std::cout << "  making predictions, running an API server, and interactive chat functionality.\n";
+            std::cout << "  It can operate in online mode (with database) or offline mode.\n\n";
+            std::cout << "MODES:\n";
+            std::cout << "  By default, CoreAI3D runs in API server mode. Use the following flags to select other modes:\n\n";
+            std::cout << "GENERAL OPTIONS:\n";
+            std::cout << "  --help, -h\n";
+            std::cout << "    Display this help message and exit.\n";
+            std::cout << "    Usage: --help or -h\n";
+            std::cout << "    Example: ./CoreAI3D --help\n\n";
+            std::cout << "  --verbose, -v\n";
+            std::cout << "    Enable verbose output for detailed logging and debug information.\n";
+            std::cout << "    This provides additional console output during execution.\n";
+            std::cout << "    Usage: --verbose or -v\n";
+            std::cout << "    Example: ./CoreAI3D --verbose --start-predict\n\n";
+            std::cout << "  --offline\n";
+            std::cout << "    Run in offline mode without database connectivity.\n";
+            std::cout << "    Useful when database is not available or for standalone operations.\n";
+            std::cout << "    Usage: --offline\n";
+            std::cout << "    Example: ./CoreAI3D --offline --start-predict --input-file data.csv\n\n";
+            std::cout << "MODE SELECTION:\n";
+            std::cout << "  --start-chat\n";
+            std::cout << "    Start interactive chat mode for natural language processing.\n";
+            std::cout << "    Requires database connection for embedding storage unless in offline mode.\n";
+            std::cout << "    Usage: --start-chat\n";
+            std::cout << "    Dependencies: Database connection (unless --offline is specified)\n";
+            std::cout << "    Example: ./CoreAI3D --start-chat --db-host localhost\n\n";
+            std::cout << "  --start-predict\n";
+            std::cout << "    Start prediction mode for training and evaluating neural networks.\n";
+            std::cout << "    Requires input and output file specifications.\n";
+            std::cout << "    Usage: --start-predict --input-file <file> --output-csv <file>\n";
+            std::cout << "    Dependencies: --input-file and --output-csv are required\n";
+            std::cout << "    Example: ./CoreAI3D --start-predict --input-file training_data.csv --output-csv predictions.csv\n\n";
+            std::cout << "FILE OPTIONS:\n";
+            std::cout << "  --input-file, -i <file>\n";
+            std::cout << "    Specify the input CSV file for training or prediction data.\n";
+            std::cout << "    Expected value: Path to a valid CSV file\n";
+            std::cout << "    Usage: --input-file <path> or -i <path>\n";
+            std::cout << "    Dependencies: Required for --start-predict mode\n";
+            std::cout << "    Example: --input-file ./data/input.csv\n\n";
+            std::cout << "  --output-csv, -o <file>\n";
+            std::cout << "    Specify the output CSV file for saving prediction results.\n";
+            std::cout << "    Expected value: Path where the output CSV will be written\n";
+            std::cout << "    Usage: --output-csv <path> or -o <path>\n";
+            std::cout << "    Dependencies: Required for --start-predict mode\n";
+            std::cout << "    Example: --output-csv ./results/predictions.csv\n\n";
+            std::cout << "API SERVER OPTIONS:\n";
+            std::cout << "  --api-port <port>\n";
+            std::cout << "    Set the port number for the API server.\n";
+            std::cout << "    Expected value: Integer between 1024-65535 (default: 8080)\n";
+            std::cout << "    Usage: --api-port <number>\n";
+            std::cout << "    Dependencies: Used in API server mode (default mode)\n";
+            std::cout << "    Example: --api-port 3000\n\n";
+            std::cout << "  --enable-websocket\n";
+            std::cout << "    Enable WebSocket server alongside the API server for real-time communication.\n";
+            std::cout << "    Usage: --enable-websocket\n";
+            std::cout << "    Dependencies: Only effective in API server mode\n";
+            std::cout << "    Example: ./CoreAI3D --enable-websocket --api-port 8080\n\n";
+            std::cout << "DATABASE OPTIONS:\n";
+            std::cout << "  --db-host <host>\n";
+            std::cout << "    Specify the database server hostname or IP address.\n";
+            std::cout << "    Expected value: Hostname or IP address (default: 0.0.0.0)\n";
+            std::cout << "    Usage: --db-host <hostname>\n";
+            std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
+            std::cout << "    Example: --db-host mysql.example.com\n\n";
+            std::cout << "  --db-user <username>\n";
+            std::cout << "    Database username for authentication.\n";
+            std::cout << "    Expected value: Valid database username (default: root)\n";
+            std::cout << "    Usage: --db-user <username>\n";
+            std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
+            std::cout << "    Example: --db-user myuser\n\n";
+            std::cout << "  --db-password <password>\n";
+            std::cout << "    Database password for authentication.\n";
+            std::cout << "    Expected value: Database password string (default: password)\n";
+            std::cout << "    Usage: --db-password <password>\n";
+            std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
+            std::cout << "    Example: --db-password mysecretpass\n\n";
+            std::cout << "  --db-port <port>\n";
+            std::cout << "    Database server port number.\n";
+            std::cout << "    Expected value: Integer port number (default: 3306 for MySQL)\n";
+            std::cout << "    Usage: --db-port <number>\n";
+            std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
+            std::cout << "    Example: --db-port 3306\n\n";
+            std::cout << "  --db-schema <schema>\n";
+            std::cout << "    Database schema/name to connect to.\n";
+            std::cout << "    Expected value: Database schema name (default: coreai_db)\n";
+            std::cout << "    Usage: --db-schema <name>\n";
+            std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
+            std::cout << "    Example: --db-schema ai_models\n\n";
+            std::cout << "  --create-table\n";
+            std::cout << "    Automatically create required database tables during initialization.\n";
+            std::cout << "    Use this when setting up the database for the first time.\n";
+            std::cout << "    Usage: --create-table\n";
+            std::cout << "    Dependencies: Requires database connection and appropriate permissions\n";
+            std::cout << "    Example: ./CoreAI3D --create-table --db-host localhost\n\n";
+            std::cout << "MODEL OPTIONS:\n";
+            std::cout << "  --load-model <id_or_name>\n";
+            std::cout << "    Load a pre-trained model from the database by ID or name.\n";
+            std::cout << "    Expected value: Integer ID or string name of saved model\n";
+            std::cout << "    Usage: --load-model <id> or --load-model <name>\n";
+            std::cout << "    Dependencies: Requires database connection; used in prediction mode\n";
+            std::cout << "    Example: --load-model 123 or --load-model my_trained_model\n\n";
+            std::cout << "EXAMPLES:\n";
+            std::cout << "  1. Start API server with WebSocket support:\n";
+            std::cout << "     ./CoreAI3D --enable-websocket --api-port 8080\n\n";
+            std::cout << "  2. Run prediction with custom database settings:\n";
+            std::cout << "     ./CoreAI3D --start-predict --input-file data.csv --output-csv results.csv \\\n";
+            std::cout << "                --db-host db.example.com --db-user aiuser --db-password secret\n\n";
+            std::cout << "  3. Start chat mode in offline mode:\n";
+            std::cout << "     ./CoreAI3D --start-chat --offline\n\n";
+            std::cout << "  4. Create database tables:\n";
+            std::cout << "     ./CoreAI3D --create-table --db-host localhost --db-user root --db-password mypass\n\n";
+            std::cout << "NOTES:\n";
+            std::cout << "  - Database options are ignored when --offline is specified\n";
+            std::cout << "  - API server mode is the default when no specific mode is selected\n";
+            std::cout << "  - All file paths should be accessible from the current working directory\n";
+            std::cout << "  - Verbose mode (--verbose) provides additional debugging information\n\n";
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
@@ -89,6 +197,9 @@ int main(int argc, char* argv[]) {
             startPredict = true;
         } else if (arg == "--start-chat") {
             startChat = true;
+        } else if (arg == "--load-model") {
+            if (hasValue(i)) loadModelId = argv[++i];
+            else std::cerr << "ERROR: --load-model requires a value\n";
         } else if (arg == "--offline") {
             isOfflineMode = true;
         } else if (arg == "--enable-websocket") {
@@ -289,8 +400,9 @@ int main(int argc, char* argv[]) {
             }
 
             std::cout << "[PREDICT MODE] Initializing Training object...\n";
-            Training trainer = Training(true, verbose);
-            std::cout << "[PREDICT MODE] Training object initialized.\n";
+            bool useOnlineMode = (datasetId_val != -1 || !loadModelId.empty());
+            Training trainer = Training(useOnlineMode, verbose);
+            std::cout << "[PREDICT MODE] Training object initialized in " << (useOnlineMode ? "online" : "offline") << " mode.\n";
 
             // Set training parameters (important for model structure if loading from DB)
             trainer.layers = layers_val;
@@ -326,21 +438,37 @@ int main(int argc, char* argv[]) {
             }
 
 
-            std::cout << "[PREDICT MODE] Attempting to load model from database (if datasetId is specified)....\n";
-            if (datasetId_val != -1)
+            std::cout << "[PREDICT MODE] Attempting to load model from database (if datasetId or loadModelId is specified)....\n";
+            if (datasetId_val != -1 || !loadModelId.empty())
             {
-                std::cout << "[PREDICT MODE] Using dataset ID " << datasetId_val
+                int modelIdToLoad = datasetId_val != -1 ? datasetId_val : std::stoi(loadModelId);
+                std::cout << "[PREDICT MODE] Using model ID " << modelIdToLoad
                     << " (likely to load a pre-trained model).\n";
-                if (!trainer.loadDatasetFromDB(datasetId_val)) { // Pass datasetId by value or correct reference
-                    std::cerr << "[PREDICT MODE] Failed to load dataset from DB for ID " << datasetId_val << ". Proceeding without pre-loaded data/model from DB." << std::endl;
+                if (!trainer.loadDatasetFromDB(modelIdToLoad)) { // Pass modelId by value or correct reference
+                    std::cerr << "[PREDICT MODE] Failed to load dataset from DB for ID " << modelIdToLoad << ". Proceeding without pre-loaded data/model from DB." << std::endl;
                 }
-                bool model_loaded_success = trainer.loadModel(datasetId_val); // Capture the bool return value
+#ifdef USE_MYSQL
+                bool model_loaded_success = false;
+                try {
+                    if (!loadModelId.empty()) {
+                        model_loaded_success = trainer.loadModel(loadModelId); // Load by name
+                    } else {
+                        model_loaded_success = trainer.loadModel(modelIdToLoad); // Load by ID
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[PREDICT MODE] Exception during model loading: " << e.what() << std::endl;
+                    model_loaded_success = false;
+                }
+                if (!model_loaded_success) {
+                    std::cerr << "[PREDICT MODE] Failed to load model. Proceeding with new model initialization.\n";
+                }
                 if (model_loaded_success) { // Use the captured bool in the conditional
-                    std::cout << "[PREDICT MODE] Model loaded from database for ID " << datasetId_val << ".\n";
+                    std::cout << "[PREDICT MODE] Model loaded from database for ID " << modelIdToLoad << ".\n";
                 }
                 else {
-                    std::cerr << "[PREDICT MODE] Failed to load model from DB for ID " << datasetId_val << ". Will initialize new model for training.\n";
+                    std::cerr << "[PREDICT MODE] Failed to load model from DB for ID " << modelIdToLoad << ". Will initialize new model for training.\n";
                 }
+#endif
             }
             std::cout << "[PREDICT MODE] Model loading check complete.\n";
 

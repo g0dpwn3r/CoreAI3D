@@ -716,6 +716,14 @@ class CoreAI3DClient:
         """Stop current training session"""
         return await self.post('/training/stop')
 
+    async def load_model(self, model_identifier: str, model_type: str = None) -> APIResponse:
+        """Load a model by dataset ID or name"""
+        data = {
+            'modelIdentifier': model_identifier,
+            'modelType': model_type
+        }
+        return await self.post('/models/load', data)
+
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:
         return await self.get('/neural/topology')

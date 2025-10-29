@@ -849,6 +849,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_training_configuration_tab()
         self.create_testing_tab()
         self.create_predict_tab()
+        self.create_load_model_tab()
         self.create_sandbox_tab()
         self.create_debugging_tab()
         self.create_linux_sandbox_tab()
@@ -1186,6 +1187,65 @@ class CoreAI3DDashboard(QMainWindow):
         self.predict_results_text.setReadOnly(True)
         self.predict_results_text.setPlainText("Prediction results will appear here...")
         results_layout.addWidget(self.predict_results_text)
+
+        layout.addWidget(results_group)
+
+    def create_load_model_tab(self):
+        """Create load model tab"""
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Load Model")
+
+        layout = QVBoxLayout(tab)
+
+        # Model loading configuration
+        load_group = QGroupBox("Load Model")
+        load_layout = QFormLayout(load_group)
+
+        self.load_model_identifier_edit = QLineEdit()
+        self.load_model_identifier_edit.setPlaceholderText("Enter dataset ID or model name...")
+        load_layout.addRow("Model Identifier:", self.load_model_identifier_edit)
+
+        self.load_model_type_combo = QComboBox()
+        self.load_model_type_combo.addItems([
+            "Auto-detect",
+            "Vision",
+            "Audio",
+            "Text",
+            "Multimodal",
+            "Neural Network",
+            "Math",
+            "Web"
+        ])
+        load_layout.addRow("Model Type:", self.load_model_type_combo)
+
+        layout.addWidget(load_group)
+
+        # Load controls
+        controls_layout = QHBoxLayout()
+
+        load_model_btn = QPushButton("Load Model")
+        load_model_btn.clicked.connect(self.load_model)
+        controls_layout.addWidget(load_model_btn)
+
+        clear_load_btn = QPushButton("Clear Results")
+        clear_load_btn.clicked.connect(self.clear_load_results)
+        controls_layout.addWidget(clear_load_btn)
+
+        layout.addLayout(controls_layout)
+
+        # Load progress
+        self.load_progress = QProgressBar()
+        self.load_progress.setVisible(False)
+        layout.addWidget(self.load_progress)
+
+        # Load results
+        results_group = QGroupBox("Load Results")
+        results_layout = QVBoxLayout(results_group)
+
+        self.load_results_text = QTextEdit()
+        self.load_results_text.setReadOnly(True)
+        self.load_results_text.setPlainText("Model loading results will appear here...")
+        results_layout.addWidget(self.load_results_text)
 
         layout.addWidget(results_group)
 
@@ -4465,6 +4525,74 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Clear prediction results"""
         self.predict_results_text.clear()
         self.predict_progress.setVisible(False)
+
+    def load_model(self):
+        """Load a model using the specified identifier"""
+        if not self.client:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                return
+
+        model_identifier = self.load_model_identifier_edit.text().strip()
+        if not model_identifier:
+            QMessageBox.warning(self, "No Identifier", "Please enter a model identifier (dataset ID or name)")
+            return
+
+        model_type = self.load_model_type_combo.currentText()
+        if model_type == "Auto-detect":
+            model_type = None
+        else:
+            # Convert display name to API format
+            type_mapping = {
+                "Vision": "vision",
+                "Audio": "audio",
+                "Text": "text",
+                "Multimodal": "multimodal",
+                "Neural Network": "neural_network",
+                "Math": "math",
+                "Web": "web"
+            }
+            model_type = type_mapping.get(model_type, model_type.lower())
+
+        # Show progress
+        self.load_progress.setVisible(True)
+        self.load_progress.setRange(0, 0)  # Indeterminate progress
+
+        try:
+            async def load():
+                result = await self.client.load_model(model_identifier, model_type)
+                return result
+
+            def on_success(result):
+                self.load_progress.setVisible(False)
+                if result.success:
+                    self.load_results_text.setPlainText(f"✓ Model loaded successfully!\n\n"
+                                                      f"Model: {model_identifier}\n"
+                                                      f"Status: {result.data.get('status', 'Loaded')}\n"
+                                                      f"Details: {result.data.get('message', 'Model is ready for use')}")
+                    self.status_bar.showMessage(f"Model '{model_identifier}' loaded successfully")
+                else:
+                    error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                    self.load_results_text.setPlainText(f"✗ Failed to load model!\n\n"
+                                                      f"Model: {model_identifier}\n"
+                                                      f"Error: {error_msg}")
+                    self.status_bar.showMessage(f"Failed to load model '{model_identifier}'")
+
+            def on_error(error_msg):
+                self.load_progress.setVisible(False)
+                self.load_results_text.setPlainText(f"✗ Load operation failed!\n\nError: {error_msg}")
+                self.status_bar.showMessage("Model loading error")
+
+            self.async_manager.run_async_task(load(), on_success, on_error)
+
+        except Exception as e:
+            self.load_progress.setVisible(False)
+            QMessageBox.warning(self, "Error", f"Failed to start model loading: {str(e)}")
+
+    def clear_load_results(self):
+        """Clear load model results"""
+        self.load_results_text.clear()
+        self.load_progress.setVisible(False)
 
     def parse_csv_file(self, file_path: str, contains_header: bool = False, contains_text: bool = False) -> Dict[str, Any]:
         """Parse CSV file using comma as delimiter and return structured data with improved performance"""
