@@ -360,6 +360,8 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
 add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $HOME/tools/CoreAI3D
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:CoreAI3D> $HOME/tools/CoreAI3D/CoreAI3D
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/config.json $HOME/tools/CoreAI3D/config.json
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/linux_gui $HOME/tools/CoreAI3D/linux_gui
     COMMENT "Copying CoreAI3D executable to $HOME/tools/CoreAI3D"
     VERBATIM)
 
