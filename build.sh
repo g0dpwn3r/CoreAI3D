@@ -6,7 +6,7 @@
 set -e
 
 # Default build type
-BUILD_TYPE="release"
+BUILD_TYPE="debug"
 USE_MYSQL="ON"
 
 # Parse arguments

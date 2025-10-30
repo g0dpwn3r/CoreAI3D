@@ -73,7 +73,8 @@ class CoreAI3DClient:
         self._connecting: bool = False
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._shutdown: bool = False
-        self._state_busy: bool = False
+        self._connection_lock: asyncio.Lock = asyncio.Lock()
+        self._state_lock: asyncio.Lock = asyncio.Lock()
 
         # Configure debug logging
         if self.config['debug']:
@@ -121,32 +122,27 @@ class CoreAI3DClient:
         # Ensure we have a valid event loop
         loop = self._get_event_loop()
 
-        # Use thread-safe boolean flag instead of asyncio.Lock
-        if not self._connecting and not self._is_connected and not self._shutdown:
-            self._connecting = True
-            try:
-                await self._connect_websocket()
-                # Add reconnection logic for WebSocket
-                if self._is_connected and self.ws_connection and not self._shutdown:
-                    # Set up automatic reconnection on connection loss
-                    logger.info("Starting connection monitor task")
-                    self._monitor_task = asyncio.create_task(self._monitor_connection())
-            finally:
-                self._connecting = False
+        async with self._connection_lock:
+            if not self._connecting and not self._is_connected and not self._shutdown:
+                self._connecting = True
+                try:
+                    await self._connect_websocket()
+                    # Add reconnection logic for WebSocket
+                    if self._is_connected and self.ws_connection and not self._shutdown:
+                        # Set up automatic reconnection on connection loss
+                        logger.info("Starting connection monitor task")
+                        self._monitor_task = asyncio.create_task(self._monitor_connection())
+                finally:
+                    self._connecting = False
 
     async def disconnect(self):
         """Close connections"""
         logger.info("Starting client disconnect process")
 
         # Set shutdown flag to prevent new operations
-        # Use thread-safe boolean flag instead of asyncio.Lock
-        if not self._state_busy:
-            self._state_busy = True
-            try:
-                self._shutdown = True
-                self._is_connected = False
-            finally:
-                self._state_busy = False
+        async with self._state_lock:
+            self._shutdown = True
+            self._is_connected = False
 
         # Cancel monitor task first to prevent reconnection attempts
         if self._monitor_task is not None and not self._monitor_task.done():
@@ -208,99 +204,113 @@ class CoreAI3DClient:
         logger.info("Client disconnected successfully")
 
     async def _connect_websocket(self):
-        """Establish WebSocket connection with improved error handling"""
-        # Use thread-safe boolean flag instead of asyncio.Lock
-        if self._connecting:
-            logger.warning("Connection already in progress, skipping")
-            return
-
-        self._connecting = True
-        try:
-            # Check shutdown flag
-            if self._shutdown:
-                logger.warning("Client is shutting down, skipping WebSocket connection")
+        """Establish WebSocket connection with improved error handling and diagnostics"""
+        async with self._connection_lock:
+            if self._connecting:
+                logger.warning("Connection already in progress, skipping")
                 return
 
+            self._connecting = True
             try:
-                logger.info(f"Attempting WebSocket connection to {self.config['ws_url']}")
+                # Check shutdown flag
+                if self._shutdown:
+                    logger.warning("Client is shutting down, skipping WebSocket connection")
+                    return
 
-                # Ensure any existing connection is properly closed
-                if self.ws_connection:
-                    logger.info("Closing existing WebSocket connection")
-                    try:
-                        await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
-                    except (asyncio.TimeoutError, Exception) as e:
-                        logger.warning(f"Error closing existing connection: {e}")
-                    self.ws_connection = None
+                try:
+                    logger.info(f"Attempting WebSocket connection to {self.config['ws_url']}")
+                    logger.info(f"Connection parameters: timeout={self.config['timeout']}, debug={self.config.get('debug', False)}")
 
-                # Cancel any existing WebSocket task
-                if self._ws_task is not None and not self._ws_task.done():
-                    logger.info("Cancelling existing WebSocket task")
-                    self._ws_task.cancel()
-                    try:
-                        await asyncio.wait_for(self._ws_task, timeout=1.0)
-                    except (asyncio.TimeoutError, asyncio.CancelledError):
-                        logger.debug("Previous WebSocket task cancellation completed")
-                    self._ws_task = None
+                    # Ensure any existing connection is properly closed
+                    if self.ws_connection:
+                        logger.info("Closing existing WebSocket connection")
+                        try:
+                            await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
+                        except (asyncio.TimeoutError, Exception) as e:
+                            logger.warning(f"Error closing existing connection: {e}")
+                        self.ws_connection = None
 
-                # Connect to WebSocket with improved timeout settings
-                # Note: extra_headers is not supported in older websockets versions
-                connector = websockets.connect(
-                    self.config['ws_url'],
-                    close_timeout=5.0,
-                    ping_interval=30.0,  # Send ping every 30 seconds
-                    ping_timeout=10.0,   # Wait 10 seconds for pong
-                    max_size=2**20,      # 1MB max message size
-                    compression=None     # Disable compression to avoid issues
-                )
-                logger.info("WebSocket connector created, waiting for connection...")
-                self.ws_connection = await asyncio.wait_for(connector, timeout=10.0)
-                # Use thread-safe boolean flag instead of asyncio.Lock
-                if not self._state_busy:
-                    self._state_busy = True
-                    try:
+                    # Cancel any existing WebSocket task
+                    if self._ws_task is not None and not self._ws_task.done():
+                        logger.info("Cancelling existing WebSocket task")
+                        self._ws_task.cancel()
+                        try:
+                            await asyncio.wait_for(self._ws_task, timeout=1.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            logger.debug("Previous WebSocket task cancellation completed")
+                        self._ws_task = None
+
+                    # Connect to WebSocket with improved timeout settings and diagnostics
+                    logger.info("Creating WebSocket connector with diagnostic parameters...")
+                    connector = websockets.connect(
+                        self.config['ws_url'],
+                        close_timeout=5.0,
+                        ping_interval=30.0,  # Send ping every 30 seconds
+                        ping_timeout=10.0,   # Wait 10 seconds for pong
+                        max_size=2**20,      # 1MB max message size
+                        compression=None     # Disable compression to avoid issues
+                    )
+                    logger.info("WebSocket connector created, waiting for connection...")
+                    logger.info(f"WebSocket URL: {self.config['ws_url']}")
+                    logger.info("Waiting for handshake completion...")
+
+                    self.ws_connection = await asyncio.wait_for(connector, timeout=10.0)
+                    logger.info("WebSocket handshake completed successfully")
+
+                    async with self._state_lock:
                         if not self._shutdown:
                             self._is_connected = True
                             logger.info("WebSocket connected successfully")
+                            logger.info(f"WebSocket connection state: {self.ws_connection.state if hasattr(self.ws_connection, 'state') else 'unknown'}")
 
                             # Start message handler as a proper task
                             self._ws_task = asyncio.create_task(self._handle_websocket_messages())
                             logger.info("WebSocket message handler task started")
                         else:
                             # Shutdown occurred during connection, close it
+                            logger.warning("Shutdown occurred during connection, closing WebSocket")
                             try:
                                 await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
                             except Exception:
                                 pass
                             self.ws_connection = None
-                    finally:
-                        self._state_busy = False
 
-            except asyncio.TimeoutError:
-                logger.error("WebSocket connection timed out after 10 seconds")
-                # Use thread-safe boolean flag instead of asyncio.Lock
-                if not self._state_busy:
-                    self._state_busy = True
-                    try:
+                except asyncio.TimeoutError:
+                    logger.error("WebSocket connection timed out after 10 seconds")
+                    logger.error("Possible causes: server not running, firewall blocking, network issues, or incorrect URL")
+                    async with self._state_lock:
                         self._is_connected = False
                         self.ws_connection = None
                         self._ws_task = None
-                    finally:
-                        self._state_busy = False
-            except Exception as e:
-                logger.error(f"WebSocket connection failed: {e}")
-                # Use thread-safe boolean flag instead of asyncio.Lock
-                if not self._state_busy:
-                    self._state_busy = True
-                    try:
+                    self._connecting = False
+                except websockets.exceptions.InvalidURI as e:
+                    logger.error(f"Invalid WebSocket URI: {e}")
+                    logger.error(f"URL provided: {self.config['ws_url']}")
+                    async with self._state_lock:
                         self._is_connected = False
                         self.ws_connection = None
                         self._ws_task = None
-                    finally:
-                        self._state_busy = False
-                # Don't re-raise the exception to allow retry logic to work
-        finally:
-            self._connecting = False
+                    self._connecting = False
+                except websockets.exceptions.ConnectionClosed as e:
+                    logger.error(f"WebSocket connection closed during handshake: {e}")
+                    async with self._state_lock:
+                        self._is_connected = False
+                        self.ws_connection = None
+                        self._ws_task = None
+                    self._connecting = False
+                except Exception as e:
+                    logger.error(f"WebSocket connection failed: {e}")
+                    logger.error(f"Exception type: {type(e).__name__}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    async with self._state_lock:
+                        self._is_connected = False
+                        self.ws_connection = None
+                        self._ws_task = None
+                    # Don't re-raise the exception to allow retry logic to work
+                    self._connecting = False
+            finally:
+                self._connecting = False
 
     async def _handle_websocket_messages(self):
         """Handle incoming WebSocket messages"""
@@ -329,41 +339,21 @@ class CoreAI3DClient:
                     logger.error(f"Error processing message: {e}")
         except websockets.exceptions.ConnectionClosed:
             logger.info("WebSocket connection closed normally")
-            # Use thread-safe boolean flag instead of asyncio.Lock
-            if not self._state_busy:
-                self._state_busy = True
-                try:
-                    self._is_connected = False
-                finally:
-                    self._state_busy = False
+            async with self._state_lock:
+                self._is_connected = False
         except asyncio.CancelledError:
             logger.info("WebSocket handler cancelled")
-            # Use thread-safe boolean flag instead of asyncio.Lock
-            if not self._state_busy:
-                self._state_busy = True
-                try:
-                    self._is_connected = False
-                finally:
-                    self._state_busy = False
+            async with self._state_lock:
+                self._is_connected = False
             raise  # Re-raise to properly cancel the task
         except Exception as e:
             logger.error(f"WebSocket handler error: {e}")
-            # Use thread-safe boolean flag instead of asyncio.Lock
-            if not self._state_busy:
-                self._state_busy = True
-                try:
-                    self._is_connected = False
-                finally:
-                    self._state_busy = False
+            async with self._state_lock:
+                self._is_connected = False
         finally:
             # Ensure connection state is updated
-            # Use thread-safe boolean flag instead of asyncio.Lock
-            if not self._state_busy:
-                self._state_busy = True
-                try:
-                    self._is_connected = False
-                finally:
-                    self._state_busy = False
+            async with self._state_lock:
+                self._is_connected = False
             logger.info("WebSocket message handler exited")
             # Clean up connection reference
             if self.ws_connection:
@@ -490,20 +480,21 @@ class CoreAI3DClient:
                             await self.session.close()
                         self.session = None
                         # Force reconnection of WebSocket as well
-                        self._is_connected = False
-                        if self.ws_connection:
-                            try:
-                                await asyncio.wait_for(self.ws_connection.close(), timeout=1.0)
-                            except Exception:
-                                pass
-                            self.ws_connection = None
-                        # Cancel existing tasks
-                        if self._ws_task and not self._ws_task.done():
-                            self._ws_task.cancel()
-                            self._ws_task = None
-                        if self._monitor_task and not self._monitor_task.done():
-                            self._monitor_task.cancel()
-                            self._monitor_task = None
+                        async with self._state_lock:
+                            self._is_connected = False
+                            if self.ws_connection:
+                                try:
+                                    await asyncio.wait_for(self.ws_connection.close(), timeout=1.0)
+                                except Exception:
+                                    pass
+                                self.ws_connection = None
+                            # Cancel existing tasks
+                            if self._ws_task and not self._ws_task.done():
+                                self._ws_task.cancel()
+                                self._ws_task = None
+                            if self._monitor_task and not self._monitor_task.done():
+                                self._monitor_task.cancel()
+                                self._monitor_task = None
                         await asyncio.sleep(self.config['retry_delay'] * (2 ** attempt))
                         continue
                     else:
@@ -860,18 +851,16 @@ class CoreAI3DClient:
             logger.info("WebSocket connection monitor started")
             while True:
                 # Check shutdown flag
-                # Use thread-safe boolean flag instead of asyncio.Lock
                 if self._shutdown:
                     logger.info("Connection monitor stopping due to shutdown")
                     break
 
                 await asyncio.sleep(10.0)  # Check every 10 seconds
 
-                # Use thread-safe boolean flag instead of asyncio.Lock
-                connection_lost = not self._is_connected or self.ws_connection is None
+                async with self._state_lock:
+                    connection_lost = not self._is_connected or self.ws_connection is None
 
                 if connection_lost:
-                    # Use thread-safe boolean flag instead of asyncio.Lock
                     if self._shutdown:
                         break
                     if self._reconnect_attempts >= self._max_reconnect_attempts:
@@ -881,21 +870,20 @@ class CoreAI3DClient:
                     logger.info(f"Connection lost, attempting to reconnect (attempt {self._reconnect_attempts + 1}/{self._max_reconnect_attempts})...")
                     try:
                         await self._connect_websocket()
-                        # Use thread-safe boolean flag instead of asyncio.Lock
-                        if self._is_connected and not self._shutdown:
-                            logger.info("Successfully reconnected")
-                            # Preserve session state during reconnection - don't reset session_id
-                            self._reconnect_attempts = 0  # Reset counter on success
-                        elif not self._shutdown:
-                            logger.warning("Reconnection failed")
-                            self._reconnect_attempts += 1
-                            # Exponential backoff with jitter
-                            backoff_time = min(self._reconnect_backoff_base * (2 ** self._reconnect_attempts), self._reconnect_backoff_max)
-                            logger.info(f"Waiting {backoff_time:.1f} seconds before next reconnection attempt")
-                            await asyncio.sleep(backoff_time)
+                        async with self._state_lock:
+                            if self._is_connected and not self._shutdown:
+                                logger.info("Successfully reconnected")
+                                # Preserve session state during reconnection - don't reset session_id
+                                self._reconnect_attempts = 0  # Reset counter on success
+                            elif not self._shutdown:
+                                logger.warning("Reconnection failed")
+                                self._reconnect_attempts += 1
+                                # Exponential backoff with jitter
+                                backoff_time = min(self._reconnect_backoff_base * (2 ** self._reconnect_attempts), self._reconnect_backoff_max)
+                                logger.info(f"Waiting {backoff_time:.1f} seconds before next reconnection attempt")
+                                await asyncio.sleep(backoff_time)
                     except Exception as e:
                         logger.error(f"Reconnection attempt failed: {e}")
-                        # Use thread-safe boolean flag instead of asyncio.Lock
                         if not self._shutdown:
                             self._reconnect_attempts += 1
                             # Exponential backoff with jitter
@@ -912,26 +900,21 @@ class CoreAI3DClient:
                         logger.debug("Connection health check passed")
                     except (asyncio.TimeoutError, Exception) as e:
                         logger.warning(f"Connection health check failed: {e}")
-                        # Use thread-safe boolean flag instead of asyncio.Lock
-                        if not self._state_busy:
-                            self._state_busy = True
-                            try:
-                                self._is_connected = False
-                                if self.ws_connection:
-                                    try:
-                                        await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
-                                    except Exception:
-                                        pass
-                                    self.ws_connection = None
-                                if self._ws_task and not self._ws_task.done():
-                                    self._ws_task.cancel()
-                                    try:
-                                        await asyncio.wait_for(self._ws_task, timeout=1.0)
-                                    except (asyncio.TimeoutError, asyncio.CancelledError):
-                                        pass
-                                    self._ws_task = None
-                            finally:
-                                self._state_busy = False
+                        async with self._state_lock:
+                            self._is_connected = False
+                            if self.ws_connection:
+                                try:
+                                    await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
+                                except Exception:
+                                    pass
+                                self.ws_connection = None
+                            if self._ws_task and not self._ws_task.done():
+                                self._ws_task.cancel()
+                                try:
+                                    await asyncio.wait_for(self._ws_task, timeout=1.0)
+                                except (asyncio.TimeoutError, asyncio.CancelledError):
+                                    pass
+                                self._ws_task = None
         except asyncio.CancelledError:
             logger.info("Connection monitor cancelled")
             raise  # Re-raise to properly cancel the task

@@ -21,6 +21,10 @@ WebSocketSession::~WebSocketSession() {
 }
 
 void WebSocketSession::run() {
+    // Log session start
+    std::cout << "[" << getTimestampString() << "] WebSocketSession: Starting session " << sessionId_
+              << " for client " << clientId_ << std::endl;
+
     // Set custom timeout settings for the websocket to prevent premature timeouts
     websocket::stream_base::timeout opt;
     opt.handshake_timeout = std::chrono::seconds(30);
@@ -51,6 +55,10 @@ void WebSocketSession::onAccept(beast::error_code ec) {
         return;
     }
 
+    // Log successful handshake
+    std::cout << "[" << getTimestampString() << "] WebSocketSession: Handshake completed for session " << sessionId_
+              << " (client " << clientId_ << ")" << std::endl;
+
     doRead();
 }
 
@@ -68,6 +76,8 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t bytes_transferre
 
     if (ec == websocket::error::closed) {
         // Client disconnected normally
+        std::cout << "[" << getTimestampString() << "] WebSocketSession: Client disconnected normally for session " << sessionId_
+                  << " (client " << clientId_ << ")" << std::endl;
         isActive_ = false;
         return;
     }
@@ -85,7 +95,8 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t bytes_transferre
     if (ec) {
         // Check for EOF or other connection errors
         if (ec == boost::asio::error::eof) {
-            std::cerr << "WebSocket read error: End of file (connection closed by peer)" << std::endl;
+            std::cout << "[" << getTimestampString() << "] WebSocketSession: Connection closed by peer for session " << sessionId_
+                      << " (client " << clientId_ << ")" << std::endl;
         } else {
             std::cerr << "WebSocket read error: " << ec.message() << std::endl;
         }
@@ -97,6 +108,10 @@ void WebSocketSession::onRead(beast::error_code ec, std::size_t bytes_transferre
     try {
         std::string message = beast::buffers_to_string(buffer_.data());
         buffer_.consume(buffer_.size());
+
+        // Log message reception
+        std::cout << "[" << getTimestampString() << "] WebSocketSession: Received message (" << bytes_transferred << " bytes) from session " << sessionId_
+                  << " (client " << clientId_ << ")" << std::endl;
 
         json j = json::parse(message);
         handleMessage(j);
@@ -206,6 +221,10 @@ void WebSocketSession::endStream() {
 }
 
 void WebSocketSession::close() {
+    // Log connection closure
+    std::cout << "[" << getTimestampString() << "] WebSocketSession: Closing connection for session " << sessionId_
+              << " (client " << clientId_ << ")" << std::endl;
+
     isActive_ = false;
     isStreaming_ = false;
 
@@ -226,6 +245,10 @@ void WebSocketSession::handleMessage(const json& message) {
     try {
         if (message.contains("type")) {
             std::string messageType = message["type"];
+
+            // Log message processing
+            std::cout << "[" << getTimestampString() << "] WebSocketSession: Processing message type '" << messageType
+                      << "' for session " << sessionId_ << " (client " << clientId_ << ")" << std::endl;
 
             if (messageType == "chat") {
                 processChatMessage(message);
@@ -482,6 +505,10 @@ void WebSocketServer::onAccept(beast::error_code ec, tcp::socket socket) {
     if (ec) {
         std::cerr << "Accept error: " << ec.message() << std::endl;
     } else {
+        // Log new connection attempt
+        std::cout << "[" << getTimestampString() << "] WebSocketServer: New connection accepted from "
+                  << socket.remote_endpoint().address().to_string() << ":" << socket.remote_endpoint().port() << std::endl;
+
         // Create a new session
         std::string sessionId = generateSessionId();
         auto session = std::make_shared<WebSocketSession>(std::move(socket), sessionId);
@@ -491,6 +518,10 @@ void WebSocketServer::onAccept(beast::error_code ec, tcp::socket socket) {
             activeSessions_[sessionId] = session;
             clientToSession_[session->getClientId()] = sessionId;
         }
+
+        // Log session creation
+        std::cout << "[" << getTimestampString() << "] WebSocketServer: Created session " << sessionId
+                  << " for client " << session->getClientId() << std::endl;
 
         // Start the session
         session->run();

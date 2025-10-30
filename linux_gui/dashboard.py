@@ -620,13 +620,15 @@ class CodeDebugger(QObject):
             return test_result
 
 class AsyncTaskThread(QThread):
-    def __init__(self, coro, callback=None, error_callback=None):
+    def __init__(self, coro, callback=None, error_callback=None, timeout=None):
         super().__init__()
         self.coro = coro
         self.callback = callback
         self.error_callback = error_callback
+        self.timeout = timeout  # Timeout in seconds
         self._finished = False
         self._loop = None
+        self._cancelled = False
 
     def run(self):
         try:
@@ -634,9 +636,24 @@ class AsyncTaskThread(QThread):
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
 
-            # Create a task and run it
+            # Create a task and run it with timeout if specified
             task = self._loop.create_task(self.coro)
-            result = self._loop.run_until_complete(task)
+
+            if self.timeout is not None:
+                # Run with timeout
+                try:
+                    result = self._loop.run_until_complete(asyncio.wait_for(task, timeout=self.timeout))
+                except asyncio.TimeoutError:
+                    # Cancel the task on timeout
+                    task.cancel()
+                    try:
+                        self._loop.run_until_complete(task)
+                    except asyncio.CancelledError:
+                        pass
+                    raise asyncio.TimeoutError(f"Task timed out after {self.timeout} seconds")
+            else:
+                # Run without timeout
+                result = self._loop.run_until_complete(task)
 
             # Ensure all pending tasks are cancelled before closing
             pending_tasks = [t for t in asyncio.all_tasks(self._loop) if not t.done()]
@@ -645,12 +662,17 @@ class AsyncTaskThread(QThread):
             if pending_tasks:
                 self._loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
 
-            if self.callback:
+            if self.callback and not self._cancelled:
                 QTimer.singleShot(0, lambda: self.callback(result))
+        except asyncio.TimeoutError as e:
+            error_msg = f"Async task timed out: {str(e)}"
+            logger.error(error_msg)
+            if self.error_callback:
+                QTimer.singleShot(0, lambda: self.error_callback(str(e)))
         except Exception as e:
             error_msg = f"Async task failed: {str(e)}"
             logger.error(error_msg)
-            if self.error_callback:
+            if self.error_callback and not self._cancelled:
                 QTimer.singleShot(0, lambda: self.error_callback(str(e)))
         finally:
             # Properly close the event loop
@@ -660,6 +682,15 @@ class AsyncTaskThread(QThread):
                 except Exception as e:
                     logger.warning(f"Error closing event loop: {e}")
             self._finished = True
+
+    def cancel(self):
+        """Cancel the running task"""
+        self._cancelled = True
+        if self._loop and not self._loop.is_closed():
+            # Cancel all tasks in the loop
+            for task in asyncio.all_tasks(self._loop):
+                if not task.done():
+                    task.cancel()
 
 class AsyncTaskManager(QObject):
     """Manages async tasks with proper Qt integration"""
@@ -673,7 +704,7 @@ class AsyncTaskManager(QObject):
         self._shutdown = False
         self._client_loop = None  # Track the main client event loop
 
-    def run_async_task(self, coro, callback=None, error_callback=None):
+    def run_async_task(self, coro, callback=None, error_callback=None, timeout=None):
         """Run an async coroutine safely with Qt integration"""
         if self._shutdown:
             logger.warning("AsyncTaskManager is shutting down, ignoring new task")
@@ -682,7 +713,7 @@ class AsyncTaskManager(QObject):
         if not asyncio.iscoroutine(coro):
             coro = self._make_coroutine(coro)
 
-        thread = AsyncTaskThread(coro, callback, error_callback)
+        thread = AsyncTaskThread(coro, callback, error_callback, timeout)
         self.active_threads.append(thread)
 
         # Remove thread from active list when finished
@@ -693,6 +724,17 @@ class AsyncTaskManager(QObject):
         thread.finished.connect(cleanup_thread)
         thread.finished.connect(thread.deleteLater)
         thread.start()
+
+    def cancel_all_tasks(self):
+        """Cancel all active tasks"""
+        for thread in self.active_threads[:]:  # Copy list to avoid modification during iteration
+            if thread.isRunning():
+                thread.cancel()
+                # Wait a bit for graceful cancellation
+                if not thread.wait(2000):  # Wait up to 2 seconds
+                    logger.warning("Thread did not cancel gracefully, terminating")
+                    thread.terminate()
+                    thread.wait(1000)  # Give it 1 more second
 
     def _make_coroutine(self, func):
         async def wrapper():
@@ -1694,7 +1736,7 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_training_progress.setVisible(True)
             self.linux_training_progress.setRange(0, 0)
 
-            self.async_manager.run_async_task(execute(), on_success, on_error)
+            self.async_manager.run_async_task(execute(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             self.linux_training_progress.setVisible(False)
@@ -1724,7 +1766,7 @@ class CoreAI3DDashboard(QMainWindow):
             def on_error(error_msg):
                 QMessageBox.warning(self, "Error", f"Failed to start container: {error_msg}")
 
-            self.async_manager.run_async_task(start(), on_success, on_error)
+            self.async_manager.run_async_task(start(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
@@ -1753,7 +1795,7 @@ class CoreAI3DDashboard(QMainWindow):
             def on_error(error_msg):
                 QMessageBox.warning(self, "Error", f"Failed to stop container: {error_msg}")
 
-            self.async_manager.run_async_task(stop(), on_success, on_error)
+            self.async_manager.run_async_task(stop(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to stop container: {str(e)}")
@@ -1796,7 +1838,7 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_training_progress.setVisible(True)
             self.linux_training_progress.setRange(0, 0)
 
-            self.async_manager.run_async_task(train(), on_success, on_error)
+            self.async_manager.run_async_task(train(), on_success, on_error, timeout=300.0)
 
         except Exception as e:
             self.linux_training_progress.setVisible(False)
@@ -1987,7 +2029,7 @@ class CoreAI3DDashboard(QMainWindow):
                 QMessageBox.warning(self, "Generation Error", error_msg)
                 self.status_bar.showMessage("Code generation error")
 
-            self.async_manager.run_async_task(generate(), on_success, on_error)
+            self.async_manager.run_async_task(generate(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             self.generation_progress.setVisible(False)
@@ -3182,7 +3224,7 @@ if __name__ == "__main__":
                     "• Firewall rules"
                 )
 
-            self.async_manager.run_async_task(check_health(), on_success, on_error)
+            self.async_manager.run_async_task(check_health(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             self.status_bar.showMessage("Connection test error")
@@ -3481,7 +3523,7 @@ if __name__ == "__main__":
                 def on_error(error_msg):
                     QMessageBox.warning(self, "Test Error", f"API test failed: {error_msg}")
 
-                self.async_manager.run_async_task(api_test(), on_success, on_error)
+                self.async_manager.run_async_task(api_test(), on_success, on_error, timeout=30.0)
 
             elif test_type == "Module Functionality":
                 module_name = self.test_module_combo.currentText().split()[0].lower()
@@ -3497,7 +3539,7 @@ if __name__ == "__main__":
                 def on_error(error_msg):
                     QMessageBox.warning(self, "Test Error", f"Module test failed: {error_msg}")
 
-                self.async_manager.run_async_task(module_test(), on_success, on_error)
+                self.async_manager.run_async_task(module_test(), on_success, on_error, timeout=30.0)
 
             else:
                 QMessageBox.information(self, "Test", f"Test type '{test_type}' not implemented yet")
@@ -3632,7 +3674,7 @@ if __name__ == "__main__":
             def on_error(error_msg):
                 self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Debug API Error: {error_msg}")
 
-            self.async_manager.run_async_task(debug_api(), on_success, on_error)
+            self.async_manager.run_async_task(debug_api(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             QMessageBox.warning(self, "Debug Error", str(e))
@@ -4542,7 +4584,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.predict_results_text.setPlainText(f"Error: {error_msg}")
                 self.status_bar.showMessage("Prediction error")
 
-            self.async_manager.run_async_task(predict(), on_success, on_error)
+            self.async_manager.run_async_task(predict(), on_success, on_error, timeout=60.0)
 
         except Exception as e:
             self.predict_progress.setVisible(False)
@@ -4610,7 +4652,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.load_results_text.setPlainText(f"✗ Load operation failed!\n\nError: {error_msg}")
                 self.status_bar.showMessage("Model loading error")
 
-            self.async_manager.run_async_task(load(), on_success, on_error)
+            self.async_manager.run_async_task(load(), on_success, on_error, timeout=60.0)
 
         except Exception as e:
             self.load_progress.setVisible(False)
@@ -5092,7 +5134,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 else:
                     self.activity_text.setPlainText(error_msg_full)
 
-            self.async_manager.run_async_task(refresh_data(), on_success, on_error)
+            self.async_manager.run_async_task(refresh_data(), on_success, on_error, timeout=30.0)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to refresh neural data: {str(e)}")
