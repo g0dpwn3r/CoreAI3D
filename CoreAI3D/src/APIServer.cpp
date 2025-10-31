@@ -322,6 +322,9 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "neural") {
             return handleNeuralAPI(action, requestData);
         }
+        else if (module == "sessions") {
+            return handleSessionsAPI(action, requestData, method);
+        }
         else if (module == "status") {
             return getAPIStatus();
         }
@@ -481,6 +484,38 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
     }
     catch (const std::exception& e) {
         return createErrorResponse("Neural API error: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::handleSessionsAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (method == "POST" && action.empty()) {
+            // Create new session
+            std::string clientId = parameters.value("clientId", "");
+            std::string sessionId = createSession(clientId);
+            return createSuccessResponse("Session created", {{"sessionId", sessionId}});
+        }
+        else if (method == "DELETE" && !action.empty()) {
+            // Destroy session
+            std::string sessionId = action;
+            destroySession(sessionId);
+            return createSuccessResponse("Session destroyed", {{"sessionId", sessionId}});
+        }
+        else if (method == "GET" && !action.empty()) {
+            // Get session data
+            std::string sessionId = action;
+            if (!validateSession(sessionId)) {
+                return createErrorResponse("Invalid session", 401);
+            }
+            json sessionData = getSessionData(sessionId);
+            return createSuccessResponse("Session data retrieved", {{"sessionData", sessionData}});
+        }
+        else {
+            return createErrorResponse("Invalid session operation", 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Session API error: " + std::string(e.what()), 500);
     }
 }
 

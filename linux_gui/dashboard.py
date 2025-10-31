@@ -661,6 +661,9 @@ class CoreAI3DDashboard(QMainWindow):
         # Initialize async task serialization lock
         self.client_lock = asyncio.Lock()
 
+        # Connection test synchronization
+        self.connection_test_running = False
+
         # Learning configuration settings
         self.learning_config = {
             'normalization_min': self.norm_min,
