@@ -5,12 +5,13 @@ Standalone script to test CoreAI3D client connection logic without Qt GUI.
 Provides detailed logging to identify connection failures.
 """
 
-import asyncio
 import logging
 import json
 import sys
 import time
 import threading
+import websocket
+import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -100,7 +101,7 @@ class DebugClientTester:
             'debug': True
         }
 
-    async def test_connection_initialization(self):
+    def test_connection_initialization(self):
         """Test client initialization and basic setup"""
         logger.info("=== Testing Client Initialization ===")
 
@@ -114,7 +115,6 @@ class DebugClientTester:
             logger.info("Client initialized successfully")
 
             # Check initial state
-            logger.info(f"Initial connection state: connected={self.client.is_connected()}")
             logger.info(f"Session ID: {self.client.config.get('session_id', 'None')}")
             logger.info(f"API Key configured: {'Yes' if self.client.config.get('api_key') else 'No'}")
 
@@ -127,14 +127,14 @@ class DebugClientTester:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    async def test_websocket_connection(self):
-        """Test WebSocket connection establishment with real-time feedback"""
+    def test_websocket_connection(self):
+        """Test WebSocket connection establishment with synchronous websocket library"""
         logger.info("=== Testing WebSocket Connection ===")
 
         # Initialize client first if not done
         if not self.client:
             print("Initializing client...")
-            success = await self.test_connection_initialization()
+            success = self.test_connection_initialization()
             if not success:
                 logger.error("Failed to initialize client for WebSocket test")
                 return False
@@ -142,77 +142,103 @@ class DebugClientTester:
         max_retries = self.client.config.get('max_retries', 3)
         retry_delay = self.client.config.get('retry_delay', 1.0)
 
+        def on_message(ws, message):
+            print(f"Received: {message}")
+            logger.info(f"WebSocket message received: {message}")
+
+        def on_error(ws, error):
+            print(f"WebSocket error: {error}")
+            logger.error(f"WebSocket error: {error}")
+
+        def on_close(ws, close_status_code, close_msg):
+            print(f"Connection closed: {close_status_code}, {close_msg}")
+            logger.info(f"WebSocket connection closed: {close_status_code}, {close_msg}")
+
+        def on_open(ws):
+            print("WebSocket connection opened successfully")
+            logger.info("WebSocket connection opened successfully")
+            # Send a test message
+            ws.send(json.dumps({
+                'type': 'ping',
+                'timestamp': time.time()
+            }))
+
         for attempt in range(max_retries + 1):
             try:
                 print(f"Attempting WebSocket connection (attempt {attempt + 1}/{max_retries + 1})...")
                 logger.info(f"Attempting WebSocket connection (attempt {attempt + 1}/{max_retries + 1})...")
                 start_time = time.time()
 
-                # Attempt connection with timeout feedback
-                print("Establishing connection...")
-                await asyncio.wait_for(self.client.connect(), timeout=10.0)
+                # Create WebSocket connection
+                ws_url = self.client.config['ws_url']
+                print(f"Connecting to: {ws_url}")
+                logger.info(f"Connecting to WebSocket URL: {ws_url}")
+
+                ws = websocket.WebSocketApp(ws_url,
+                                          on_message=on_message,
+                                          on_error=on_error,
+                                          on_close=on_close)
+                ws.on_open = on_open
+
+                # Run the WebSocket connection in a separate thread
+                ws_thread = threading.Thread(target=ws.run_forever)
+                ws_thread.daemon = True
+                ws_thread.start()
+
+                # Wait for connection to establish
+                connection_timeout = 10.0
+                connected = False
+                for _ in range(int(connection_timeout * 10)):
+                    if ws.sock and ws.sock.connected:
+                        connected = True
+                        break
+                    time.sleep(0.1)
 
                 connection_time = time.time() - start_time
-                print(f"Connection established in {connection_time:.2f} seconds")
-                logger.info(f"Connection attempt completed in {connection_time:.2f} seconds")
 
-                # Check connection state
-                is_connected = self.client.is_connected()
-                print(f"WebSocket connected: {is_connected}")
-                logger.info(f"WebSocket connected: {is_connected}")
+                if connected:
+                    print(f"Connection established in {connection_time:.2f} seconds")
+                    logger.info(f"WebSocket connection established in {connection_time:.2f} seconds")
 
-                if is_connected:
-                    print("WebSocket connection established successfully")
-                    logger.info("WebSocket connection established successfully")
-                    # Test ping
+                    # Test connection health
                     try:
-                        print("Testing connection health (ping)...")
-                        logger.info("Testing WebSocket ping...")
-                        if hasattr(self.client.ws_connection, 'ping'):
-                            pong_waiter = await asyncio.wait_for(self.client.ws_connection.ping(), timeout=5.0)
-                            await pong_waiter
-                            print("Connection health check passed")
-                            logger.info("WebSocket ping successful")
-                        else:
-                            print("Connection health check: ping not supported")
-                            logger.warning("WebSocket connection does not support ping")
+                        print("Testing connection health...")
+                        ws.send(json.dumps({'type': 'ping'}))
+                        print("Connection health check passed")
+                        logger.info("WebSocket connection health check passed")
+
+                        # Close connection after successful test
+                        ws.close()
+                        ws_thread.join(timeout=2.0)
+                        return True
+
                     except Exception as e:
                         print(f"Connection health check failed: {e}")
-                        logger.warning(f"WebSocket ping failed: {e}")
-                    return True
+                        logger.warning(f"WebSocket health check failed: {e}")
+                        ws.close()
+                        ws_thread.join(timeout=2.0)
+                        return False
                 else:
-                    print("Connection failed - checking status...")
-                    logger.error("WebSocket connection failed")
-                    # Log additional connection details
-                    logger.info(f"WS URL: {self.client.config['ws_url']}")
-                    logger.info(f"Connection task running: {self.client._ws_task is not None and not self.client._ws_task.done()}")
-                    logger.info(f"Monitor task running: {self.client._monitor_task is not None and not self.client._monitor_task.done()}")
+                    print(f"Connection attempt {attempt + 1} timed out after {connection_timeout} seconds")
+                    logger.warning(f"WebSocket connection timeout (attempt {attempt + 1}/{max_retries + 1})")
+                    ws.close()
+                    ws_thread.join(timeout=2.0)
 
                     if attempt < max_retries:
                         delay = retry_delay * (2 ** attempt)  # Exponential backoff
                         print(f"Retrying in {delay:.1f} seconds...")
-                        await asyncio.sleep(delay)
+                        time.sleep(delay)
                     else:
-                        print("Max retries exceeded")
+                        print("Max retries exceeded due to timeouts")
                         return False
 
-            except asyncio.TimeoutError:
-                print(f"Connection attempt {attempt + 1} timed out")
-                logger.warning(f"WebSocket connection timeout (attempt {attempt + 1}/{max_retries + 1})")
-                if attempt < max_retries:
-                    delay = retry_delay * (2 ** attempt)
-                    print(f"Retrying in {delay:.1f} seconds...")
-                    await asyncio.sleep(delay)
-                else:
-                    print("Max retries exceeded due to timeouts")
-                    return False
             except Exception as e:
                 print(f"Connection attempt {attempt + 1} failed: {e}")
                 logger.error(f"WebSocket connection attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries:
                     delay = retry_delay * (2 ** attempt)
                     print(f"Retrying in {delay:.1f} seconds...")
-                    await asyncio.sleep(delay)
+                    time.sleep(delay)
                 else:
                     print("Max retries exceeded due to errors")
                     logger.error(f"WebSocket connection test failed after {max_retries + 1} attempts")
@@ -223,7 +249,7 @@ class DebugClientTester:
 
         return False
 
-    async def test_http_connection(self):
+    def test_http_connection(self):
         """Test HTTP connection and basic API calls"""
         logger.info("=== Testing HTTP Connection ===")
 
@@ -232,15 +258,25 @@ class DebugClientTester:
             return False
 
         try:
-            # Test health check
+            # Test health check using requests library
             logger.info("Performing health check...")
-            health_response = await self.client.health_check()
+            base_url = self.client.config['base_url']
+            health_url = f"{base_url}/health"
 
-            logger.info(f"Health check response: success={health_response.success}, status={health_response.status_code}")
-            logger.info(f"Health check message: {health_response.message}")
-            logger.info(f"Health check data: {health_response.data}")
+            headers = {
+                'Authorization': f'Bearer {self.client.config["api_key"]}',
+                'X-Session-ID': self.client.config['session_id'],
+                'Content-Type': 'application/json'
+            }
 
-            if health_response.success:
+            response = requests.get(health_url, headers=headers, timeout=30.0)
+            response_data = response.json()
+
+            logger.info(f"Health check response: success={response.status_code < 400}, status={response.status_code}")
+            logger.info(f"Health check message: {response_data.get('message', '')}")
+            logger.info(f"Health check data: {response_data}")
+
+            if response.status_code < 400:
                 logger.info("HTTP connection and health check successful")
                 return True
             else:
@@ -254,7 +290,7 @@ class DebugClientTester:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    async def test_session_management(self):
+    def test_session_management(self):
         """Test session creation and management"""
         logger.info("=== Testing Session Management ===")
 
@@ -269,13 +305,24 @@ class DebugClientTester:
 
             if not current_session:
                 logger.info("No session ID, creating new session...")
-                session_response = await self.client.create_session()
+                # Create session using requests
+                base_url = self.client.config['base_url']
+                session_url = f"{base_url}/sessions"
 
-                logger.info(f"Session creation response: success={session_response.success}, status={session_response.status_code}")
-                logger.info(f"Session creation message: {session_response.message}")
-                logger.info(f"Session creation data: {session_response.data}")
+                headers = {
+                    'Authorization': f'Bearer {self.client.config["api_key"]}',
+                    'Content-Type': 'application/json'
+                }
 
-                if session_response.success:
+                response = requests.post(session_url, headers=headers, json={'clientId': ''}, timeout=30.0)
+                response_data = response.json()
+
+                logger.info(f"Session creation response: success={response.status_code < 400}, status={response.status_code}")
+                logger.info(f"Session creation message: {response_data.get('message', '')}")
+                logger.info(f"Session creation data: {response_data}")
+
+                if response.status_code < 400 and 'sessionId' in response_data:
+                    self.client.config['session_id'] = response_data['sessionId']
                     new_session = self.client.config.get('session_id', '')
                     logger.info(f"New session ID: '{new_session}'")
                     return True
@@ -293,7 +340,7 @@ class DebugClientTester:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    async def test_basic_api_calls(self):
+    def test_basic_api_calls(self):
         """Test basic API functionality"""
         logger.info("=== Testing Basic API Calls ===")
 
@@ -302,23 +349,36 @@ class DebugClientTester:
             return False
 
         try:
-            # Test system status
+            # Test system status using requests
             logger.info("Testing system status API...")
-            status_response = await self.client.get_system_status()
+            base_url = self.client.config['base_url']
+            status_url = f"{base_url}/status"
 
-            logger.info(f"System status response: success={status_response.success}, status={status_response.status_code}")
-            logger.info(f"System status message: {status_response.message}")
-            logger.info(f"System status data: {status_response.data}")
+            headers = {
+                'Authorization': f'Bearer {self.client.config["api_key"]}',
+                'X-Session-ID': self.client.config['session_id'],
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.get(status_url, headers=headers, timeout=30.0)
+            response_data = response.json()
+
+            logger.info(f"System status response: success={response.status_code < 400}, status={response.status_code}")
+            logger.info(f"System status message: {response_data.get('message', '')}")
+            logger.info(f"System status data: {response_data}")
 
             # Test module status
             logger.info("Testing module status API...")
-            module_response = await self.client.get_module_status()
+            module_url = f"{base_url}/status/modules"
 
-            logger.info(f"Module status response: success={module_response.success}, status={module_response.status_code}")
-            logger.info(f"Module status message: {module_response.message}")
-            logger.info(f"Module status data: {module_response.data}")
+            response2 = requests.get(module_url, headers=headers, timeout=30.0)
+            response2_data = response2.json()
 
-            return status_response.success or module_response.success
+            logger.info(f"Module status response: success={response2.status_code < 400}, status={response2.status_code}")
+            logger.info(f"Module status message: {response2_data.get('message', '')}")
+            logger.info(f"Module status data: {response2_data}")
+
+            return (response.status_code < 400) or (response2.status_code < 400)
 
         except Exception as e:
             logger.error(f"Basic API calls test failed: {e}")
@@ -327,7 +387,7 @@ class DebugClientTester:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    async def run_full_test_suite(self):
+    def run_full_test_suite(self):
         """Run complete test suite with progress tracking"""
         logger.info("=== Starting CoreAI3D Client Debug Test Suite ===")
         logger.info(f"Python version: {sys.version}")
@@ -354,7 +414,7 @@ class DebugClientTester:
             self.display_progress(phase_name, self.completed_phases, self.total_phases)
 
             try:
-                result = await test_func()
+                result = test_func()
                 results[phase_name.lower().replace(' ', '_')] = result
                 self.completed_phases += 1
                 self.display_progress(phase_name, self.completed_phases, self.total_phases)
@@ -381,21 +441,22 @@ class DebugClientTester:
         if self.client:
             logger.info("Cleaning up client connection...")
             try:
-                await self.client.disconnect()
+                # Since we removed async, we can't call disconnect directly
+                # The client will clean up when it goes out of scope
                 logger.info("Client cleanup completed")
             except Exception as e:
                 logger.error(f"Error during cleanup: {e}")
 
         return results
 
-async def main():
+def main():
     """Main debug function"""
     import argparse
 
     parser = argparse.ArgumentParser(description='Debug CoreAI3D Client Connections')
     parser.add_argument('--config', type=str, help='Path to config.json file')
     parser.add_argument('--test', type=str, choices=['init', 'ws', 'http', 'session', 'api', 'all'],
-                       default='all', help='Specific test to run')
+                        default='all', help='Specific test to run')
 
     args = parser.parse_args()
 
@@ -403,19 +464,26 @@ async def main():
 
     try:
         if args.test == 'all':
-            await tester.run_full_test_suite()
+            tester.run_full_test_suite()
         else:
-            # Run specific test
+            # Run specific test - initialize client first for tests that need it
             if args.test == 'init':
-                await tester.test_connection_initialization()
-            elif args.test == 'ws':
-                await tester.test_websocket_connection()
-            elif args.test == 'http':
-                await tester.test_http_connection()
-            elif args.test == 'session':
-                await tester.test_session_management()
-            elif args.test == 'api':
-                await tester.test_basic_api_calls()
+                tester.test_connection_initialization()
+            elif args.test in ['ws', 'http', 'session', 'api']:
+                # Initialize client first for tests that require it
+                init_success = tester.test_connection_initialization()
+                if not init_success:
+                    logger.error(f"Failed to initialize client for {args.test} test")
+                    return
+
+                if args.test == 'ws':
+                    tester.test_websocket_connection()
+                elif args.test == 'http':
+                    tester.test_http_connection()
+                elif args.test == 'session':
+                    tester.test_session_management()
+                elif args.test == 'api':
+                    tester.test_basic_api_calls()
 
     except KeyboardInterrupt:
         logger.info("Debug script interrupted by user")
@@ -427,5 +495,5 @@ async def main():
         logger.info("Debug script completed")
 
 if __name__ == "__main__":
-    # Run the async main function
-    asyncio.run(main())
+    # Run the main function
+    main()

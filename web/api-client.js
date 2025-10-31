@@ -208,9 +208,9 @@ class CoreAI3DClient {
     // Chat functionality
     async sendChatMessage(message, options = {}) {
         const messageData = {
-            type: 'chat_message',
-            content: message,
-            timestamp: new Date().toISOString(),
+            type: 'chat',
+            message: message,
+            messageType: "text",
             ...options
         };
 

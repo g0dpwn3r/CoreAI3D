@@ -6,7 +6,6 @@ Easy-to-use Python client for automated API calls to the CoreAI3D system
 
 import asyncio
 import aiohttp
-import websockets
 import json
 import logging
 import time
@@ -14,16 +13,16 @@ from typing import Dict, List, Any, Optional, Union, Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin
 import os
-import threading
 from pathlib import Path
+import qasync
 
 # Configure logging with reduced verbosity
 logging.basicConfig(level=logging.WARNING)  # Changed from INFO to WARNING
 logger = logging.getLogger(__name__)
 
 # Reduce verbosity of third-party libraries
-logging.getLogger('websockets').setLevel(logging.WARNING)
-logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('websocket').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
 
 @dataclass
 class APIResponse:
@@ -60,7 +59,7 @@ class CoreAI3DClient:
         }
 
         self.session: Optional[aiohttp.ClientSession] = None
-        self.ws_connection: Optional[Any] = None
+        self.ws_connection: Optional[aiohttp.ClientWebSocketResponse] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._monitor_task: Optional[asyncio.Task] = None
         self._is_connected: bool = False
@@ -71,7 +70,6 @@ class CoreAI3DClient:
         self._reconnect_backoff_base: float = 1.0
         self._reconnect_backoff_max: float = 60.0
         self._connecting: bool = False
-        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         self._shutdown: bool = False
         self._connection_lock: asyncio.Lock = asyncio.Lock()
         self._state_lock: asyncio.Lock = asyncio.Lock()
@@ -79,7 +77,7 @@ class CoreAI3DClient:
         # Configure debug logging
         if self.config['debug']:
             logging.getLogger('aiohttp').setLevel(logging.DEBUG)
-            logging.getLogger('websockets').setLevel(logging.DEBUG)
+            logging.getLogger('aiohttp').setLevel(logging.DEBUG)
 
     async def __aenter__(self):
         await self.connect()
@@ -87,25 +85,10 @@ class CoreAI3DClient:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.disconnect()
-        # Don't cancel the current task here as it may cause issues
-        # Let the context manager handle cleanup properly
 
-    def _get_event_loop(self) -> asyncio.AbstractEventLoop:
-        """Get or create an event loop safely"""
-        try:
-            loop = asyncio.get_running_loop()
-            self._event_loop = loop
-            return loop
-        except RuntimeError:
-            # No running loop, create a new one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._event_loop = loop
-            return loop
-
-    def _ensure_http_session(self):
+    async def _ensure_http_session(self):
         """Ensure we have a valid HTTP session, create one if needed"""
-        if self.session is None or (hasattr(self.session, 'closed') and self.session.closed):
+        if self.session is None:
             logger.info("Creating new HTTP session")
             timeout = aiohttp.ClientTimeout(total=self.config['timeout'])
             self.session = aiohttp.ClientSession(timeout=timeout)
@@ -119,13 +102,15 @@ class CoreAI3DClient:
             logger.warning("Client is shutting down, skipping connection")
             return
 
-        # Ensure we have a valid event loop
-        loop = self._get_event_loop()
-
         async with self._connection_lock:
             if not self._connecting and not self._is_connected and not self._shutdown:
                 self._connecting = True
                 try:
+                    # Ensure we have a valid session before attempting WebSocket connection
+                    if not await self._ensure_session():
+                        logger.error("Failed to establish session, cannot proceed with WebSocket connection")
+                        return
+
                     await self._connect_websocket()
                     # Add reconnection logic for WebSocket
                     if self._is_connected and self.ws_connection and not self._shutdown:
@@ -144,57 +129,52 @@ class CoreAI3DClient:
             self._shutdown = True
             self._is_connected = False
 
-        # Cancel monitor task first to prevent reconnection attempts
+        # Stop monitor task first to prevent reconnection attempts
         if self._monitor_task is not None and not self._monitor_task.done():
-            logger.info("Cancelling monitor task")
+            logger.info("Stopping monitor task")
             self._monitor_task.cancel()
             try:
                 await asyncio.wait_for(self._monitor_task, timeout=1.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
-                logger.debug("Monitor task cancellation completed")
+                pass
             self._monitor_task = None
 
-        # Cancel streaming tasks with proper task lifecycle management
+        # Stop streaming tasks
         for task_name, task in list(self.streaming_tasks.items()):
             if not task.done():
-                logger.info(f"Cancelling streaming task: {task_name}")
+                logger.info(f"Stopping streaming task: {task_name}")
                 task.cancel()
                 try:
                     await asyncio.wait_for(task, timeout=0.5)
                 except (asyncio.TimeoutError, asyncio.CancelledError):
-                    logger.debug(f"Streaming task {task_name} cancellation completed")
+                    pass
         self.streaming_tasks.clear()
 
-        # Cancel WebSocket task to stop message processing
+        # Stop WebSocket task
         if self._ws_task is not None and not self._ws_task.done():
-            logger.info("Cancelling WebSocket task")
+            logger.info("Stopping WebSocket task")
+            self._ws_task.cancel()
             try:
-                self._ws_task.cancel()
-                # Wait for task to complete cancellation, but don't fail if it doesn't
-                try:
-                    await asyncio.wait_for(self._ws_task, timeout=2.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    logger.debug("WebSocket task cancellation completed")
-            except Exception as e:
-                logger.warning(f"Error cancelling WebSocket task: {e}")
-            finally:
-                self._ws_task = None
+                await asyncio.wait_for(self._ws_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            self._ws_task = None
 
         # Close WebSocket connection
         if self.ws_connection:
             logger.info("Closing WebSocket connection")
             try:
-                await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
-            except (asyncio.TimeoutError, Exception) as e:
+                await self.ws_connection.close()
+            except Exception as e:
                 logger.warning(f"Error closing WebSocket: {e}")
             self.ws_connection = None
 
         # Close HTTP session
-        if self.session and not self.session.closed:
+        if self.session:
             logger.info("Closing HTTP session")
             try:
-                await asyncio.wait_for(self.session.close(), timeout=2.0)
-            except (asyncio.TimeoutError, Exception) as e:
+                await self.session.close()
+            except Exception as e:
                 logger.warning(f"Error closing session: {e}")
             self.session = None
 
@@ -225,74 +205,67 @@ class CoreAI3DClient:
                     if self.ws_connection:
                         logger.info("Closing existing WebSocket connection")
                         try:
-                            await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
-                        except (asyncio.TimeoutError, Exception) as e:
+                            await self.ws_connection.close()
+                        except Exception as e:
                             logger.warning(f"Error closing existing connection: {e}")
                         self.ws_connection = None
 
-                    # Cancel any existing WebSocket task
+                    # Stop any existing WebSocket task
                     if self._ws_task is not None and not self._ws_task.done():
-                        logger.info("Cancelling existing WebSocket task")
+                        logger.info("Stopping existing WebSocket task")
                         self._ws_task.cancel()
                         try:
                             await asyncio.wait_for(self._ws_task, timeout=1.0)
                         except (asyncio.TimeoutError, asyncio.CancelledError):
-                            logger.debug("Previous WebSocket task cancellation completed")
+                            pass
                         self._ws_task = None
 
-                    # Connect to WebSocket with improved timeout settings and diagnostics
-                    logger.info("Creating WebSocket connector with diagnostic parameters...")
-                    connector = websockets.connect(
-                        self.config['ws_url'],
-                        close_timeout=5.0,
-                        ping_interval=30.0,  # Send ping every 30 seconds
-                        ping_timeout=10.0,   # Wait 10 seconds for pong
-                        max_size=2**20,      # 1MB max message size
-                        compression=None     # Disable compression to avoid issues
-                    )
-                    logger.info("WebSocket connector created, waiting for connection...")
+                    # Connect to WebSocket with aiohttp
+                    logger.info("Creating WebSocket connection...")
                     logger.info(f"WebSocket URL: {self.config['ws_url']}")
-                    logger.info("Waiting for handshake completion...")
 
-                    self.ws_connection = await asyncio.wait_for(connector, timeout=10.0)
-                    logger.info("WebSocket handshake completed successfully")
+                    # Prepare authentication headers (same as HTTP requests)
+                    api_key = self.config["api_key"].replace('\n', '').replace('\r', '')
+                    session_id = self.config['session_id'].replace('\n', '').replace('\r', '')
+                    headers = {
+                        'Authorization': f'Bearer {api_key}',
+                        'X-Session-ID': session_id
+                    }
+
+                    self.ws_connection = await self.session.ws_connect(
+                        self.config['ws_url'],
+                        headers=headers
+                    )
+                    logger.info("WebSocket connection established successfully")
 
                     async with self._state_lock:
                         if not self._shutdown:
                             self._is_connected = True
                             logger.info("WebSocket connected successfully")
-                            logger.info(f"WebSocket connection state: {self.ws_connection.state if hasattr(self.ws_connection, 'state') else 'unknown'}")
 
-                            # Start message handler as a proper task
+                            # Start message handler as a task
                             self._ws_task = asyncio.create_task(self._handle_websocket_messages())
                             logger.info("WebSocket message handler task started")
                         else:
                             # Shutdown occurred during connection, close it
                             logger.warning("Shutdown occurred during connection, closing WebSocket")
                             try:
-                                await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
+                                await self.ws_connection.close()
                             except Exception:
                                 pass
                             self.ws_connection = None
 
                 except asyncio.TimeoutError:
-                    logger.error("WebSocket connection timed out after 10 seconds")
+                    logger.error("WebSocket connection timed out")
                     logger.error("Possible causes: server not running, firewall blocking, network issues, or incorrect URL")
                     async with self._state_lock:
                         self._is_connected = False
                         self.ws_connection = None
                         self._ws_task = None
                     self._connecting = False
-                except websockets.exceptions.InvalidURI as e:
-                    logger.error(f"Invalid WebSocket URI: {e}")
+                except aiohttp.ClientConnectorError as e:
+                    logger.error(f"WebSocket connection failed: {e}")
                     logger.error(f"URL provided: {self.config['ws_url']}")
-                    async with self._state_lock:
-                        self._is_connected = False
-                        self.ws_connection = None
-                        self._ws_task = None
-                    self._connecting = False
-                except websockets.exceptions.ConnectionClosed as e:
-                    logger.error(f"WebSocket connection closed during handshake: {e}")
                     async with self._state_lock:
                         self._is_connected = False
                         self.ws_connection = None
@@ -322,34 +295,30 @@ class CoreAI3DClient:
 
             logger.info("WebSocket message handler started")
 
-            async for message in self.ws_connection:
+            async for msg in self.ws_connection:
+                if self._shutdown:
+                    break
+
                 try:
-                    # Check shutdown flag and connection state
-                    # Use thread-safe boolean flag instead of asyncio.Lock
-                    if self._shutdown or not self._is_connected or not self.ws_connection:
-                        logger.info("WebSocket handler stopping due to shutdown or disconnection")
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        logger.debug(f"Received WebSocket message: {len(msg.data)} bytes")
+                        data = json.loads(msg.data)
+                        self._process_message(data)
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        logger.error(f"WebSocket error: {self.ws_connection.exception()}")
+                        break
+                    elif msg.type == aiohttp.WSMsgType.CLOSED:
+                        logger.info("WebSocket connection closed")
                         break
 
-                    logger.debug(f"Received WebSocket message: {len(message)} bytes")
-                    data = json.loads(message)
-                    await self._process_message(data)
                 except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received: {message}")
+                    logger.warning(f"Invalid JSON received: {msg.data}")
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-        except websockets.exceptions.ConnectionClosed:
-            logger.info("WebSocket connection closed normally")
-            async with self._state_lock:
-                self._is_connected = False
-        except asyncio.CancelledError:
-            logger.info("WebSocket handler cancelled")
-            async with self._state_lock:
-                self._is_connected = False
-            raise  # Re-raise to properly cancel the task
+                    break
+
         except Exception as e:
             logger.error(f"WebSocket handler error: {e}")
-            async with self._state_lock:
-                self._is_connected = False
         finally:
             # Ensure connection state is updated
             async with self._state_lock:
@@ -359,7 +328,7 @@ class CoreAI3DClient:
             if self.ws_connection:
                 self.ws_connection = None
 
-    async def _process_message(self, data: Dict[str, Any]):
+    def _process_message(self, data: Dict[str, Any]):
         """Process incoming WebSocket message"""
         message_type = data.get('type', 'unknown')
         logger.info(f"Received WebSocket message: type={message_type}, data={data}")
@@ -368,7 +337,7 @@ class CoreAI3DClient:
         if message_type in self.message_handlers:
             for handler in self.message_handlers[message_type]:
                 try:
-                    await handler(data)
+                    handler(data)
                 except Exception as e:
                     logger.error(f"Error in message handler for {message_type}: {e}")
 
@@ -379,7 +348,7 @@ class CoreAI3DClient:
             if 'chat_response' in self.message_handlers:
                 for handler in self.message_handlers['chat_response']:
                     try:
-                        await handler(data)
+                        handler(data)
                     except Exception as e:
                         logger.error(f"Error in chat response handler: {e}")
         elif message_type == 'stream_data':
@@ -393,7 +362,7 @@ class CoreAI3DClient:
             self.message_handlers[event_type] = []
         self.message_handlers[event_type].append(handler)
 
-    def off(self, event_type: str, handler: Callable = None):
+    def off(self, event_type: str, handler: Optional[Callable] = None):
         """Unregister event handler"""
         if event_type in self.message_handlers:
             if handler:
@@ -404,24 +373,10 @@ class CoreAI3DClient:
             else:
                 self.message_handlers[event_type].clear()
 
-    async def _make_request(self, method: str, endpoint: str, data: Any = None) -> APIResponse:
+    async def _make_request(self, method: str, endpoint: str, data: Optional[Any] = None) -> APIResponse:
         """Make HTTP request with retry logic"""
-        # Ensure we have a session and it's not closed
-        if not self.session or self.session.closed:
-            # Create session directly in async context to avoid timeout context manager error
-            logger.info("Creating new HTTP session in async context")
-            timeout = aiohttp.ClientTimeout(total=self.config['timeout'])
-            self.session = aiohttp.ClientSession(timeout=timeout)
-
-        # Check if session is still valid after creation attempt
-        if not self.session or self.session.closed:
-            return APIResponse(
-                success=False,
-                data=None,
-                message="Failed to establish HTTP session",
-                status_code=503,
-                metadata={}
-            )
+        # Ensure we have a session
+        await self._ensure_http_session()
 
         # Sanitize api_key and session_id to prevent header injection
         api_key = self.config["api_key"].replace('\n', '').replace('\r', '')
@@ -436,23 +391,14 @@ class CoreAI3DClient:
 
         for attempt in range(self.config['max_retries'] + 1):
             try:
-                # Double-check session validity before making request
-                if not self.session or self.session.closed:
-                    logger.warning("Session became invalid, reconnecting...")
-                    await self.connect()
-                    if not self.session or self.session.closed:
-                        continue
-
-                async with self.session.request(
-                    method, url, json=data, headers=headers
-                ) as response:
+                async with self.session.request(method.upper(), url, json=data, headers=headers) as response:
                     response_data = await response.json()
                     return APIResponse(
                         success=response.status < 400,
                         data=response_data,
                         message=response_data.get('message', ''),
                         status_code=response.status,
-                        metadata=dict(response.headers)  # Convert to dict to avoid type issues
+                        metadata=dict(response.headers)
                     )
 
             except asyncio.TimeoutError:
@@ -470,42 +416,6 @@ class CoreAI3DClient:
 
             except Exception as e:
                 error_msg = str(e)
-                # Check if it's an event loop closed error
-                if "Event loop is closed" in error_msg:
-                    if attempt < self.config['max_retries']:
-                        logger.warning(f"Event loop closed, retrying ({attempt + 1}/{self.config['max_retries'] + 1})")
-                        logger.info("Creating new HTTP session and resetting WebSocket connection")
-                        # Create new session for next attempt
-                        if self.session and not self.session.closed:
-                            await self.session.close()
-                        self.session = None
-                        # Force reconnection of WebSocket as well
-                        async with self._state_lock:
-                            self._is_connected = False
-                            if self.ws_connection:
-                                try:
-                                    await asyncio.wait_for(self.ws_connection.close(), timeout=1.0)
-                                except Exception:
-                                    pass
-                                self.ws_connection = None
-                            # Cancel existing tasks
-                            if self._ws_task and not self._ws_task.done():
-                                self._ws_task.cancel()
-                                self._ws_task = None
-                            if self._monitor_task and not self._monitor_task.done():
-                                self._monitor_task.cancel()
-                                self._monitor_task = None
-                        await asyncio.sleep(self.config['retry_delay'] * (2 ** attempt))
-                        continue
-                    else:
-                        return APIResponse(
-                            success=False,
-                            data=None,
-                            message="Event loop closed - connection lost",
-                            status_code=503,
-                            metadata={}
-                        )
-
                 if attempt < self.config['max_retries']:
                     # Reduce verbosity of retry messages - only log every 3rd attempt
                     if (attempt + 1) % 3 == 0:
@@ -572,11 +482,11 @@ class CoreAI3DClient:
         return APIResponse(success=True, data=None, message="No active session", status_code=200, metadata={})
 
     # Chat API
-    async def send_chat_message(self, message: str, options: Dict[str, Any] = None) -> APIResponse:
+    async def send_chat_message(self, message: str, options: Optional[Dict[str, Any]] = None) -> APIResponse:
         data = {
-            'type': 'chat_message',
-            'content': message,
-            'timestamp': time.time(),
+            'type': 'chat',
+            'message': message,
+            'messageType': "text",
             **(options or {})
         }
         return await self.post('/chat/message', data)
@@ -588,7 +498,7 @@ class CoreAI3DClient:
         return await self.post('/chat/clear')
 
     # Vision API
-    async def analyze_image(self, image_path: str, analysis_types: List[str] = None) -> APIResponse:
+    async def analyze_image(self, image_path: str, analysis_types: Optional[List[str]] = None) -> APIResponse:
         return await self.post('/vision/analyze', {
             'imagePath': image_path,
             'analysisTypes': analysis_types or ['classification', 'objects']
@@ -606,7 +516,7 @@ class CoreAI3DClient:
     async def analyze_faces(self, image_path: str) -> APIResponse:
         return await self.post('/vision/faces', {'imagePath': image_path})
 
-    async def process_video(self, video_path: str, operations: List[str] = None) -> APIResponse:
+    async def process_video(self, video_path: str, operations: Optional[List[str]] = None) -> APIResponse:
         return await self.post('/vision/video', {
             'videoPath': video_path,
             'operations': operations or []
@@ -622,7 +532,7 @@ class CoreAI3DClient:
     async def analyze_audio(self, audio_path: str) -> APIResponse:
         return await self.post('/audio/analyze', {'audioPath': audio_path})
 
-    async def process_audio(self, audio_path: str, effects: List[str] = None) -> APIResponse:
+    async def process_audio(self, audio_path: str, effects: Optional[List[str]] = None) -> APIResponse:
         return await self.post('/audio/process', {'audioPath': audio_path, 'effects': effects or []})
 
     # System API
@@ -632,16 +542,16 @@ class CoreAI3DClient:
     async def get_running_processes(self) -> APIResponse:
         return await self.get('/system/processes')
 
-    async def start_application(self, app_name: str, args: List[str] = None) -> APIResponse:
+    async def start_application(self, app_name: str, args: Optional[List[str]] = None) -> APIResponse:
         return await self.post('/system/start', {'appName': app_name, 'args': args or []})
 
     async def stop_application(self, app_name: str) -> APIResponse:
         return await self.post('/system/stop', {'appName': app_name})
 
-    async def capture_screen(self, output_path: str = None) -> APIResponse:
+    async def capture_screen(self, output_path: Optional[str] = None) -> APIResponse:
         return await self.post('/system/capture', {'outputPath': output_path})
 
-    async def automate_task(self, task_type: str, parameters: Dict[str, Any] = None) -> APIResponse:
+    async def automate_task(self, task_type: str, parameters: Optional[Dict[str, Any]] = None) -> APIResponse:
         return await self.post('/system/automate', {'taskType': task_type, 'parameters': parameters or {}})
 
     # Web API
@@ -667,11 +577,11 @@ class CoreAI3DClient:
     async def get_statistics(self, data: List[float]) -> APIResponse:
         return await self.post('/math/statistics', {'data': data})
 
-    async def matrix_operation(self, operation: str, matrix_name: str, parameters: Dict[str, Any] = None) -> APIResponse:
+    async def matrix_operation(self, operation: str, matrix_name: str, parameters: Optional[Dict[str, Any]] = None) -> APIResponse:
         return await self.post('/math/matrix', {'operation': operation, 'matrixName': matrix_name, 'parameters': parameters or {}})
 
     # Multi-modal Processing
-    async def analyze_multimodal(self, content_type: str, content: str, analysis_types: List[str] = None) -> APIResponse:
+    async def analyze_multimodal(self, content_type: str, content: str, analysis_types: Optional[List[str]] = None) -> APIResponse:
         return await self.post('/multimodal/analyze', {
             'contentType': content_type,
             'content': content,
@@ -682,7 +592,7 @@ class CoreAI3DClient:
         return await self.post('/ai/process', {'content': content, 'processingType': processing_type})
 
     # Real-time Processing
-    async def start_stream(self, stream_type: str, parameters: Dict[str, Any] = None) -> APIResponse:
+    async def start_stream(self, stream_type: str, parameters: Optional[Dict[str, Any]] = None) -> APIResponse:
         response = await self.post('/streams/start', {'streamType': stream_type, 'parameters': parameters or {}})
         if response.success:
             self.streaming_tasks[stream_type] = asyncio.create_task(self._handle_stream(stream_type))
@@ -711,58 +621,60 @@ class CoreAI3DClient:
             logger.error(f"Stream {stream_type} error: {e}")
 
     # File Operations
-    async def upload_file(self, file_path: str, metadata: Dict[str, Any] = None) -> APIResponse:
+    async def upload_file(self, file_path: str, metadata: Optional[Dict[str, Any]] = None) -> APIResponse:
         if not self.session:
             await self.connect()
 
-        file_path = Path(file_path)
-        if not file_path.exists():
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
             return APIResponse(success=False, data=None, message="File not found", status_code=404, metadata={})
 
-        with open(file_path, 'rb') as f:
-            data = aiohttp.FormData()
-            data.add_field('file', f, filename=file_path.name)
-            if metadata:
-                data.add_field('metadata', json.dumps(metadata))
+        async with aiohttp.ClientSession() as temp_session:
+            with open(file_path_obj, 'rb') as f:
+                data = aiohttp.FormData()
+                data.add_field('file', f, filename=file_path_obj.name)
+                if metadata:
+                    data.add_field('metadata', json.dumps(metadata))
 
-            url = urljoin(self.config['base_url'], '/files/upload')
-            headers = {'Authorization': f'Bearer {self.config["api_key"]}'}
+                url = urljoin(self.config['base_url'], '/files/upload')
+                headers = {'Authorization': f'Bearer {self.config["api_key"]}'}
 
-            async with self.session.post(url, data=data, headers=headers) as response:
-                response_data = await response.json()
-                return APIResponse(
-                    success=response.status < 400,
-                    data=response_data,
-                    message=response_data.get('message', ''),
-                    status_code=response.status,
-                    metadata=dict(response.headers)
-                )
+                async with temp_session.post(url, data=data, headers=headers) as response:
+                    response_data = await response.json()
+                    return APIResponse(
+                        success=response.status < 400,
+                        data=response_data,
+                        message=response_data.get('message', ''),
+                        status_code=response.status,
+                        metadata=dict(response.headers)
+                    )
 
     async def download_file(self, file_id: str, download_path: str) -> APIResponse:
-        url = urljoin(self.config['base_url'], f'/files/download/{file_id}')
-        headers = {'Authorization': f'Bearer {self.config["api_key"]}'}
+        async with aiohttp.ClientSession() as temp_session:
+            url = urljoin(self.config['base_url'], f'/files/download/{file_id}')
+            headers = {'Authorization': f'Bearer {self.config["api_key"]}'}
 
-        async with self.session.get(url, headers=headers) as response:
-            if response.status != 200:
-                response_data = await response.json()
+            async with temp_session.get(url, headers=headers) as response:
+                if response.status != 200:
+                    response_data = await response.json()
+                    return APIResponse(
+                        success=False,
+                        data=response_data,
+                        message=response_data.get('message', ''),
+                        status_code=response.status,
+                        metadata={}
+                    )
+
+                with open(download_path, 'wb') as f:
+                    f.write(await response.read())
+
                 return APIResponse(
-                    success=False,
-                    data=response_data,
-                    message=response_data.get('message', ''),
-                    status_code=response.status,
+                    success=True,
+                    data={'fileId': file_id, 'path': download_path},
+                    message="File downloaded successfully",
+                    status_code=200,
                     metadata={}
                 )
-
-            with open(download_path, 'wb') as f:
-                f.write(await response.read())
-
-            return APIResponse(
-                success=True,
-                data={'fileId': file_id, 'path': download_path},
-                message="File downloaded successfully",
-                status_code=200,
-                metadata={}
-            )
 
     # Status and Health
     async def health_check(self) -> APIResponse:
@@ -791,13 +703,13 @@ class CoreAI3DClient:
     async def get_system_status(self) -> APIResponse:
         return await self.get('/status')
 
-    async def get_module_status(self, module_name: str = None) -> APIResponse:
+    async def get_module_status(self, module_name: Optional[str] = None) -> APIResponse:
         endpoint = f'/status/modules{ f"/{module_name}" if module_name else ""}'
         return await self.get(endpoint)
 
     # Prediction API
     async def run_prediction(self, model_name: str, input_data: Any, input_type: str,
-                           contains_header: bool = False, contains_text: bool = False) -> APIResponse:
+                            contains_header: bool = False, contains_text: bool = False) -> APIResponse:
         """Run prediction with specified model and input data"""
         data = {
             'modelName': model_name,
@@ -817,7 +729,7 @@ class CoreAI3DClient:
         """Stop current training session"""
         return await self.post('/training/stop')
 
-    async def load_model(self, model_identifier: str, model_type: str = None) -> APIResponse:
+    async def load_model(self, model_identifier: str, model_type: Optional[str] = None) -> APIResponse:
         """Load a model by dataset ID or name"""
         data = {
             'modelIdentifier': model_identifier,
@@ -895,16 +807,15 @@ class CoreAI3DClient:
                     try:
                         logger.debug("Performing connection health check (ping)")
                         # Send a ping to check connection health
-                        pong_waiter = await asyncio.wait_for(self.ws_connection.ping(), timeout=5.0)
-                        await pong_waiter  # Wait for pong response
+                        await self.ws_connection.ping()
                         logger.debug("Connection health check passed")
-                    except (asyncio.TimeoutError, Exception) as e:
+                    except Exception as e:
                         logger.warning(f"Connection health check failed: {e}")
                         async with self._state_lock:
                             self._is_connected = False
                             if self.ws_connection:
                                 try:
-                                    await asyncio.wait_for(self.ws_connection.close(), timeout=2.0)
+                                    await self.ws_connection.close()
                                 except Exception:
                                     pass
                                 self.ws_connection = None

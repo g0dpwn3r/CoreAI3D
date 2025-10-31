@@ -74,6 +74,7 @@ private:
     void processCommand(const json& commandData);
     void processFileUpload(const json& fileData);
     void processRealTimeRequest(const json& requestData);
+    void processPingMessage(const json& pingData);
 };
 
 class WebSocketServer {

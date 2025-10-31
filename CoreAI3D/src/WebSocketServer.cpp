@@ -258,6 +258,8 @@ void WebSocketSession::handleMessage(const json& message) {
                 processFileUpload(message);
             } else if (messageType == "realtime") {
                 processRealTimeRequest(message);
+            } else if (messageType == "ping") {
+                processPingMessage(message);
             } else {
                 sendError("Unknown message type", 400);
             }
@@ -344,6 +346,25 @@ void WebSocketSession::processRealTimeRequest(const json& requestData) {
     }
     catch (const std::exception& e) {
         sendError("Error processing real-time request", 500);
+    }
+}
+
+void WebSocketSession::processPingMessage(const json& pingData) {
+    try {
+        // Extract timestamp if provided
+        double clientTimestamp = pingData.value("timestamp", 0.0);
+
+        // Create pong response
+        json pongResponse = {
+            {"type", "pong"},
+            {"timestamp", getTimestampString()},
+            {"clientTimestamp", clientTimestamp}
+        };
+
+        sendMessage(pongResponse);
+    }
+    catch (const std::exception& e) {
+        sendError("Error processing ping message", 500);
     }
 }
 
