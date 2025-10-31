@@ -489,7 +489,7 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
 
 json APIServer::handleSessionsAPI(const std::string& action, const json& parameters, const std::string& method) {
     try {
-        if (method == "POST" && action.empty()) {
+        if (method == "POST" && (action.empty() || action == "status")) {
             // Create new session
             std::string clientId = parameters.value("clientId", "");
             std::string sessionId = createSession(clientId);
