@@ -321,8 +321,9 @@ class DebugClientTester:
                 logger.info(f"Session creation message: {response_data.get('message', '')}")
                 logger.info(f"Session creation data: {response_data}")
 
-                if response.status_code < 400 and 'sessionId' in response_data:
-                    self.client.config['session_id'] = response_data['sessionId']
+                # Check for sessionId in the data field
+                if response.status_code < 400 and response_data.get('data', {}).get('sessionId'):
+                    self.client.config['session_id'] = response_data['data']['sessionId']
                     new_session = self.client.config.get('session_id', '')
                     logger.info(f"New session ID: '{new_session}'")
                     return True

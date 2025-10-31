@@ -694,7 +694,7 @@ class CoreAI3DDashboard(QMainWindow):
         # Initialize client immediately with proper config
         self.client_initialized = False
         # Set the API key from user input
-        self.config.api_key = "32c8b481bbc"
+        self.config.api_key = "2956a13167"
         self.initialize_client()
 
         logger.info("CoreAI3D Dashboard initialized")
@@ -3090,27 +3090,91 @@ if __name__ == "__main__":
     # UI action methods
     @qasync.asyncSlot()
     async def test_connection(self):
-        """Test API connection"""
+        """Test API connection with enhanced error handling and debugging"""
         async with self.client_lock:
             try:
                 # Show progress indicator
                 self.status_bar.showMessage("Testing connection...")
+                logger.info("Starting connection test")
 
                 # Initialize client if not already done
                 if not self.client_initialized:
+                    logger.info("Client not initialized, attempting initialization...")
                     if not self.initialize_client():
+                        logger.error("Client initialization failed")
                         QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
                         return
 
+                # Verify client is properly initialized after initialization attempt
+                if self.client is None:
+                    logger.error("Client is None after initialization attempt")
+                    QMessageBox.critical(
+                        self, "Connection Error",
+                        "✗ Client initialization failed!\n\n"
+                        "The client object is None after initialization.\n"
+                        "This indicates a critical initialization error.\n\n"
+                        "Please check:\n"
+                        "• API URL configuration\n"
+                        "• API key validity\n"
+                        "• Network connectivity\n"
+                        "• Application logs for detailed error information"
+                    )
+                    return
+
+                # Log connection details for debugging
+                logger.info(f"Testing connection to API server at {self.config.api_url}")
+                logger.info(f"WebSocket URL: {self.config.ws_url}")
+                logger.info(f"API key configured: {bool(self.config.api_key)}")
+                logger.info(f"Connection timeout: {self.config.connection_timeout}s")
+                logger.info(f"Max connections: {self.config.max_connections}")
+
                 # The client will connect automatically when making requests
 
-                # Test connection directly using the client
+                # Test connection directly using the client with enhanced null safety
                 logger.info("Testing connection to API server...")
-                result = await self.client.health_check()
+                result = None
+                try:
+                    # Enhanced null check for Pylance static analysis and runtime safety
+                    if self.client is None:
+                        raise RuntimeError("Client object is None - initialization failed")
+    
+                    # Additional validation that client has required methods
+                    if not hasattr(self.client, 'health_check'):
+                        raise AttributeError("Client object missing health_check method")
+    
+                    # Log detailed connection attempt information
+                    logger.info("Attempting health check call...")
+                    logger.info(f"Client type: {type(self.client).__name__}")
+                    logger.info(f"Client has health_check method: {hasattr(self.client, 'health_check')}")
+    
+                    result = await self.client.health_check()
+                    logger.info(f"Health check result: success={result.success}")
+                    if result.data:
+                        logger.info(f"Health check data: {result.data}")
+    
+                except AttributeError as e:
+                    logger.error(f"Client method access error: {str(e)}")
+                    result = type('Result', (), {'success': False, 'data': {'error': str(e)}})()
+                    QMessageBox.critical(
+                        self, "Connection Error",
+                        f"✗ Client method access error!\n\n"
+                        f"Error: {str(e)}\n\n"
+                        "The client object does not have the expected methods.\n"
+                        "This may indicate an incompatible client version."
+                    )
+                    return
+                except Exception as e:
+                    logger.error(f"Health check call failed: {str(e)}")
+                    logger.error(f"Exception type: {type(e).__name__}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    result = type('Result', (), {'success': False, 'data': {'error': str(e)}})()
+                    # Continue to result processing below
 
                 self.status_bar.showMessage("Connection test completed")
 
                 if result.success:
+                    logger.info("Connection test successful")
                     QMessageBox.information(
                         self, "Connection Test Successful",
                         "✓ API connection successful!\n\n"
@@ -3119,18 +3183,35 @@ if __name__ == "__main__":
                     )
                 else:
                     error_details = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
-                    QMessageBox.warning(
-                        self, "Connection Test Failed",
-                        f"✗ API connection failed!\n\n"
-                        f"Error: {error_details}\n\n"
-                        "Please check:\n"
-                        "• Server is running\n"
-                        "• Network connectivity\n"
-                        "• API URL configuration"
-                    )
+                    logger.warning(f"Connection test failed: {error_details}")
+
+                    # Enhanced error reporting with debugging options
+                    debug_info = self._generate_connection_debug_info(error_details)
+
+                    msg_box = QMessageBox()
+                    msg_box.setIcon(QMessageBox.Icon.Warning)
+                    msg_box.setWindowTitle("Connection Test Failed")
+                    msg_box.setText("✗ API connection failed!")
+                    msg_box.setDetailedText(debug_info)
+
+                    # Add manual debugging buttons
+                    manual_debug_btn = msg_box.addButton("Manual Debug", QMessageBox.ButtonRole.ActionRole)
+                    retry_btn = msg_box.addButton("Retry Test", QMessageBox.ButtonRole.ActionRole)
+                    cancel_btn = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+
+                    msg_box.setDefaultButton(cancel_btn)
+                    msg_box.exec()
+
+                    clicked_button = msg_box.clickedButton()
+                    if clicked_button == manual_debug_btn:
+                        self._run_manual_connection_debug()
+                    elif clicked_button == retry_btn:
+                        # Schedule retry after a short delay
+                        QTimer.singleShot(1000, lambda: asyncio.ensure_future(self.test_connection()))
 
             except RuntimeError as e:
                 # Handle case where no event loop is running
+                logger.error(f"Event loop error during connection test: {str(e)}")
                 self.status_bar.showMessage("Connection test error")
                 QMessageBox.critical(
                     self, "Connection Error",
@@ -3138,8 +3219,11 @@ if __name__ == "__main__":
                     f"Error: {str(e)}\n\n"
                     "This may indicate the qasync event loop is not properly initialized.\n"
                     "Please restart the application and try again."
-                )
+                )            
             except Exception as e:
+                logger.error(f"Unexpected error during connection test: {str(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 self.status_bar.showMessage("Connection test error")
                 QMessageBox.critical(
                     self, "Connection Error",
@@ -3147,6 +3231,262 @@ if __name__ == "__main__":
                     f"Error: {str(e)}\n\n"
                     "Please check the application logs for more details."
                 )
+        
+        
+    def _generate_connection_debug_info(self, error_details: str) -> str:
+        """Generate detailed connection debugging information"""
+        debug_lines = []
+        debug_lines.append("=== CONNECTION DEBUG INFORMATION ===")
+        debug_lines.append("")
+        debug_lines.append("Error Details:")
+        debug_lines.append(f"  {error_details}")
+        debug_lines.append("")
+        debug_lines.append("Configuration:")
+        debug_lines.append(f"  API URL: {self.config.api_url}")
+        debug_lines.append(f"  WebSocket URL: {self.config.ws_url}")
+        debug_lines.append(f"  API Key Configured: {bool(self.config.api_key)}")
+        debug_lines.append(f"  Connection Timeout: {self.config.connection_timeout}s")
+        debug_lines.append(f"  Max Connections: {self.config.max_connections}")
+        debug_lines.append("")
+        debug_lines.append("Client State:")
+        debug_lines.append(f"  Client Initialized: {self.client_initialized}")
+        debug_lines.append(f"  Client Object: {type(self.client).__name__ if self.client else 'None'}")
+        debug_lines.append("")
+        debug_lines.append("Troubleshooting Steps:")
+        debug_lines.append("  1. Verify the CoreAI3D server is running")
+        debug_lines.append("  2. Check network connectivity to the server")
+        debug_lines.append("  3. Validate API URL and port configuration")
+        debug_lines.append("  4. Ensure API key is correct (if required)")
+        debug_lines.append("  5. Check firewall settings")
+        debug_lines.append("  6. Review server logs for additional error details")
+        debug_lines.append("")
+        debug_lines.append("Recent Log Entries:")
+        log_file = 'logs/dashboard.log'
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()[-10:]  # Last 10 lines
+                    for line in lines:
+                        debug_lines.append(f"  {line.strip()}")
+            except Exception as e:
+                debug_lines.append(f"  Error reading logs: {str(e)}")
+        else:
+            debug_lines.append("  No log file found")
+
+        return "\n".join(debug_lines)
+
+    def _run_manual_connection_debug(self):
+        """Run manual connection debugging"""
+        try:
+            logger.info("Starting manual connection debug")
+
+            # Create debug dialog
+            debug_dialog = QDialog(self)
+            debug_dialog.setWindowTitle("Manual Connection Debug")
+            debug_dialog.setModal(True)
+            debug_dialog.resize(600, 400)
+
+            layout = QVBoxLayout(debug_dialog)
+
+            # Debug output
+            debug_output = QPlainTextEdit()
+            debug_output.setReadOnly(True)
+            layout.addWidget(debug_output)
+
+            # Progress bar
+            progress_bar = QProgressBar()
+            progress_bar.setVisible(False)
+            layout.addWidget(progress_bar)
+
+            # Control buttons
+            button_layout = QHBoxLayout()
+
+            test_network_btn = QPushButton("Test Network")
+            test_network_btn.clicked.connect(lambda: self._test_network_connectivity(debug_output, progress_bar))
+            button_layout.addWidget(test_network_btn)
+
+            test_api_btn = QPushButton("Test API Endpoint")
+            test_api_btn.clicked.connect(lambda: self._test_api_endpoint(debug_output, progress_bar))
+            button_layout.addWidget(test_api_btn)
+
+            test_websocket_btn = QPushButton("Test WebSocket")
+            test_websocket_btn.clicked.connect(lambda: self._test_websocket_connection(debug_output, progress_bar))
+            button_layout.addWidget(test_websocket_btn)
+
+            clear_btn = QPushButton("Clear Output")
+            clear_btn.clicked.connect(debug_output.clear)
+            button_layout.addWidget(clear_btn)
+
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(debug_dialog.accept)
+            button_layout.addWidget(close_btn)
+
+            layout.addLayout(button_layout)
+
+            # Initial debug info
+            debug_output.appendPlainText("Manual Connection Debug Tool")
+            debug_output.appendPlainText("=" * 40)
+            debug_output.appendPlainText("")
+            debug_output.appendPlainText("Configuration:")
+            debug_output.appendPlainText(f"  API URL: {self.config.api_url}")
+            debug_output.appendPlainText(f"  WebSocket URL: {self.config.ws_url}")
+            debug_output.appendPlainText(f"  API Key: {'Configured' if self.config.api_key else 'Not configured'}")
+            debug_output.appendPlainText("")
+            debug_output.appendPlainText("Use the buttons above to test different connection aspects.")
+
+            debug_dialog.exec()
+
+        except Exception as e:
+            logger.error(f"Error in manual connection debug: {str(e)}")
+            QMessageBox.warning(self, "Debug Error", f"Failed to open debug tool: {str(e)}")
+
+    def _test_network_connectivity(self, output_widget: QPlainTextEdit, progress_bar: QProgressBar):
+        """Test basic network connectivity"""
+        try:
+            output_widget.appendPlainText("\n=== Testing Network Connectivity ===")
+            progress_bar.setVisible(True)
+            progress_bar.setRange(0, 0)  # Indeterminate
+
+            # Extract host and port from API URL
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.config.api_url)
+            host = parsed_url.hostname
+            port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+
+            output_widget.appendPlainText(f"Testing connection to {host}:{port}...")
+
+            # Test basic connectivity
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+
+            try:
+                result = sock.connect_ex((host, port))
+                if result == 0:
+                    output_widget.appendPlainText("✓ Network connectivity: SUCCESS")
+                    output_widget.appendPlainText(f"  Connected to {host}:{port}")
+                else:
+                    output_widget.appendPlainText("✗ Network connectivity: FAILED")
+                    output_widget.appendPlainText(f"  Could not connect to {host}:{port} (error code: {result})")
+            except Exception as e:
+                output_widget.appendPlainText("✗ Network connectivity: ERROR")
+                output_widget.appendPlainText(f"  Error: {str(e)}")
+            finally:
+                sock.close()
+
+            progress_bar.setVisible(False)
+
+        except Exception as e:
+            output_widget.appendPlainText(f"✗ Network test error: {str(e)}")
+            progress_bar.setVisible(False)
+
+    def _test_api_endpoint(self, output_widget: QPlainTextEdit, progress_bar: QProgressBar):
+        """Test API endpoint connectivity"""
+        try:
+            output_widget.appendPlainText("\n=== Testing API Endpoint ===")
+            progress_bar.setVisible(True)
+            progress_bar.setRange(0, 0)  # Indeterminate
+
+            # Test with urllib for basic HTTP connectivity
+            import urllib.request
+            import urllib.error
+
+            output_widget.appendPlainText(f"Testing HTTP GET to {self.config.api_url}...")
+
+            try:
+                # Create request with timeout
+                req = urllib.request.Request(self.config.api_url)
+                req.add_header('User-Agent', 'CoreAI3D-Dashboard/1.3.0')
+
+                # Add API key if configured
+                if self.config.api_key:
+                    req.add_header('Authorization', f'Bearer {self.config.api_key}')
+
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    output_widget.appendPlainText("✓ API endpoint: SUCCESS")
+                    output_widget.appendPlainText(f"  Status Code: {response.getcode()}")
+                    output_widget.appendPlainText(f"  Content-Type: {response.headers.get('content-type', 'Unknown')}")
+
+                    # Try to read a small amount of response
+                    content = response.read(1024).decode('utf-8', errors='ignore')
+                    if content:
+                        output_widget.appendPlainText(f"  Response Preview: {content[:200]}...")
+
+            except urllib.error.HTTPError as e:
+                output_widget.appendPlainText("✗ API endpoint: HTTP ERROR")
+                output_widget.appendPlainText(f"  Status Code: {e.code}")
+                output_widget.appendPlainText(f"  Reason: {e.reason}")
+            except urllib.error.URLError as e:
+                output_widget.appendPlainText("✗ API endpoint: URL ERROR")
+                output_widget.appendPlainText(f"  Reason: {e.reason}")
+            except Exception as e:
+                output_widget.appendPlainText("✗ API endpoint: ERROR")
+                output_widget.appendPlainText(f"  Error: {str(e)}")
+
+            progress_bar.setVisible(False)
+
+        except Exception as e:
+            output_widget.appendPlainText(f"✗ API test error: {str(e)}")
+            progress_bar.setVisible(False)
+
+    def _test_websocket_connection(self, output_widget: QPlainTextEdit, progress_bar: QProgressBar):
+        """Test WebSocket connectivity"""
+        try:
+            output_widget.appendPlainText("\n=== Testing WebSocket Connection ===")
+            progress_bar.setVisible(True)
+            progress_bar.setRange(0, 0)  # Indeterminate
+
+            output_widget.appendPlainText(f"Testing WebSocket connection to {self.config.ws_url}...")
+
+            # Note: This is a basic connectivity test
+            # Full WebSocket testing would require websockets library
+            try:
+                # Extract host and port from WebSocket URL
+                from urllib.parse import urlparse
+                parsed_url = urlparse(self.config.ws_url)
+                host = parsed_url.hostname
+                port = parsed_url.port or (443 if parsed_url.scheme == 'wss' else 80)
+
+                output_widget.appendPlainText(f"WebSocket host: {host}:{port}")
+
+                # Test basic TCP connectivity to WebSocket port
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(10)
+
+                try:
+                    result = sock.connect_ex((host, port))
+                    if result == 0:
+                        output_widget.appendPlainText("✓ WebSocket port: ACCESSIBLE")
+                        output_widget.appendPlainText("  Basic TCP connectivity successful")
+                        output_widget.appendPlainText("  Note: Full WebSocket handshake requires websockets library")
+                    else:
+                        output_widget.appendPlainText("✗ WebSocket port: NOT ACCESSIBLE")
+                        output_widget.appendPlainText(f"  Could not connect to {host}:{port}")
+                except Exception as e:
+                    output_widget.appendPlainText("✗ WebSocket port test: ERROR")
+                    output_widget.appendPlainText(f"  Error: {str(e)}")
+                finally:
+                    sock.close()
+
+            except Exception as e:
+                output_widget.appendPlainText("✗ WebSocket test setup error: {str(e)}")
+
+            progress_bar.setVisible(False)
+
+        except Exception as e:
+            output_widget.appendPlainText(f"✗ WebSocket test error: {str(e)}")
+            progress_bar.setVisible(False)
+
+        except Exception as e:
+            logger.error(f"Unexpected error during connection test: {str(e)}", exc_info=True)
+            self.status_bar.showMessage("Connection test error")
+            QMessageBox.critical(
+                self, "Connection Error",
+                f"✗ Unexpected error during connection test!\n\n"
+                f"Error: {str(e)}\n\n"
+                "Please check the application logs for more details."
+            )
 
     async def _test_connection_async(self):
         """Async part of connection test"""

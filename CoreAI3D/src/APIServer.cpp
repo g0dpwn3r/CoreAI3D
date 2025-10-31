@@ -293,12 +293,8 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             startIndex = 2;
         }
 
-        if (startIndex >= pathParts.size()) {
-            return createErrorResponse("Invalid endpoint", 400);
-        }
-
-        std::string module = pathParts[startIndex];
-        std::string action = pathParts.size() > startIndex + 1 ? pathParts[startIndex + 1] : "status";
+        std::string module = (startIndex < pathParts.size()) ? pathParts[startIndex] : "";
+        std::string action = (startIndex + 1 < pathParts.size()) ? pathParts[startIndex + 1] : "status";
 
         // Route to appropriate handler
         if (module == "vision") {
