@@ -343,6 +343,9 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             }
             return createSuccessResponse("API key generated", {{"api_key", apiKey}});
         }
+        else if (module == "sessions") {
+            return handleSessionsAPI(action, requestData, method);
+        }
         else if (module.empty() || module == "/") {
             // Handle root endpoint
             return getAPIStatus();
@@ -489,46 +492,75 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
 
 json APIServer::handleSessionsAPI(const std::string& action, const json& parameters, const std::string& method) {
     try {
-        if (method == "POST" && action.empty()) {
+        if (method == "POST") {
             // Create new session
             std::string clientId = parameters.value("clientId", "");
             std::string sessionId = createSession(clientId);
-            return createSuccessResponse("Session created", {
+
+            json response = {
                 {"sessionId", sessionId},
-                {"clientId", clientId}
-            });
+                {"clientId", clientId},
+                {"created", true},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
         }
-        else if (method == "DELETE" && !action.empty()) {
-            // Destroy session
+        else if (method == "DELETE") {
+            // Destroy session - extract session ID from action (e.g., "session123")
             std::string sessionId = action;
-            if (validateSession(sessionId)) {
-                destroySession(sessionId);
-                return createSuccessResponse("Session destroyed", {{"sessionId", sessionId}});
-            } else {
-                return createErrorResponse("Session not found", 404);
+            if (sessionId.empty()) {
+                return createErrorResponse("Session ID required for DELETE", 400);
             }
+
+            destroySession(sessionId);
+            json response = {
+                {"sessionId", sessionId},
+                {"destroyed", true},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
         }
-        else if (method == "GET" && !action.empty()) {
-            // Get session data
+        else if (method == "GET") {
+            // Get session info - extract session ID from action
             std::string sessionId = action;
-            if (validateSession(sessionId)) {
+            if (sessionId.empty()) {
+                // Return all active sessions
+                json sessions = json::array();
+                for (const auto& pair : activeSessions) {
+                    sessions.push_back({
+                        {"sessionId", pair.first},
+                        {"clientId", pair.second},
+                        {"created", getTimestampString()}
+                    });
+                }
+                return sessions;
+            }
+            else {
+                // Return specific session info
+                if (!validateSession(sessionId)) {
+                    return createErrorResponse("Session not found", 404);
+                }
+
                 json sessionData = getSessionData(sessionId);
-                return createSuccessResponse("Session data retrieved", {
+                json response = {
                     {"sessionId", sessionId},
-                    {"data", sessionData}
-                });
-            } else {
-                return createErrorResponse("Session not found", 404);
+                    {"clientId", activeSessions[sessionId]},
+                    {"data", sessionData},
+                    {"valid", true},
+                    {"timestamp", getTimestampString()}
+                };
+                return response;
             }
         }
         else {
-            return createErrorResponse("Invalid session operation", 400);
+            return createErrorResponse("Method not allowed for sessions", 405);
         }
     }
     catch (const std::exception& e) {
-        return createErrorResponse("Session API error: " + std::string(e.what()), 500);
+        return createErrorResponse("Sessions API error: " + std::string(e.what()), 500);
     }
 }
+
 
 
 json APIServer::getNeuralTopology() {
