@@ -2645,7 +2645,7 @@ if __name__ == "__main__":
 
         # Min value input
         self.norm_min_spin = QDoubleSpinBox()
-        self.norm_min_spin.setRange(-10.0, 10.0)
+        self.norm_min_spin.setRange(-1000000.0, 1000000.0)
         self.norm_min_spin.setValue(self.norm_min)
         self.norm_min_spin.setSingleStep(0.1)
         self.norm_min_spin.setDecimals(1)
@@ -2654,7 +2654,7 @@ if __name__ == "__main__":
 
         # Max value input
         self.norm_max_spin = QDoubleSpinBox()
-        self.norm_max_spin.setRange(-10.0, 10.0)
+        self.norm_max_spin.setRange(-1000000.0, 1000000.0)
         self.norm_max_spin.setValue(self.norm_max)
         self.norm_max_spin.setSingleStep(0.1)
         self.norm_max_spin.setDecimals(1)
@@ -2669,14 +2669,14 @@ if __name__ == "__main__":
 
         # Neurons input
         self.neurons_spin = QSpinBox()
-        self.neurons_spin.setRange(1, 100000)
+        self.neurons_spin.setRange(1, 10000000)
         self.neurons_spin.setValue(self.neurons)
         self.neurons_spin.valueChanged.connect(self.on_neurons_changed)
         network_layout.addRow("Neurons (-n):", self.neurons_spin)
 
         # Samples input
         self.samples_spin = QSpinBox()
-        self.samples_spin.setRange(0, 1000000)
+        self.samples_spin.setRange(0, 100000000)
         self.samples_spin.setValue(self.samples)
         self.samples_spin.setSpecialValueText("All samples (0)")
         self.samples_spin.valueChanged.connect(self.on_samples_changed)
@@ -2684,14 +2684,14 @@ if __name__ == "__main__":
 
         # Epochs input
         self.epochs_spin = QSpinBox()
-        self.epochs_spin.setRange(1, 100000)
+        self.epochs_spin.setRange(1, 10000000)
         self.epochs_spin.setValue(self.epochs)
         self.epochs_spin.valueChanged.connect(self.on_epochs_changed)
         network_layout.addRow("Epochs (-e):", self.epochs_spin)
 
         # Layers input
         self.layers_spin = QSpinBox()
-        self.layers_spin.setRange(1, 1000)
+        self.layers_spin.setRange(1, 100000)
         self.layers_spin.setValue(self.layers)
         self.layers_spin.valueChanged.connect(self.on_layers_changed)
         network_layout.addRow("Layers (-l):", self.layers_spin)
@@ -2704,10 +2704,10 @@ if __name__ == "__main__":
 
         # Learning rate input
         self.learning_rate_spin = QDoubleSpinBox()
-        self.learning_rate_spin.setRange(0.0001, 1.0)
+        self.learning_rate_spin.setRange(0.000001, 100.0)
         self.learning_rate_spin.setValue(self.learning_rate)
         self.learning_rate_spin.setSingleStep(0.0001)
-        self.learning_rate_spin.setDecimals(4)
+        self.learning_rate_spin.setDecimals(6)
         self.learning_rate_spin.valueChanged.connect(self.on_learning_rate_changed)
         training_layout.addRow("Learning Rate (--learning-rate):", self.learning_rate_spin)
 
