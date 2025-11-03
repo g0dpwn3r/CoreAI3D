@@ -12,6 +12,7 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
+    trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     gen(std::random_device{}()) // Initialize random number generator
 {
     // Parameter validation
@@ -30,6 +31,7 @@ Training::Training(bool isOffline, bool verbose)
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
+    trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     gen(std::random_device{}()) // Initialize random number generator
 {
     if (isOfflineMode && verbose) {
@@ -1096,6 +1098,150 @@ void Training::train(double learningRate, int epochs) {
     if (verbose) {
         std::cout << "\nTraining Complete!\n";
     }
+}
+
+bool Training::startTraining(double learningRate, int epochs) {
+    if (trainingActive.load()) {
+        return false; // Already training
+    }
+
+    if (!core) {
+        std::cerr << "Error: CoreAI not initialized. Cannot start training." << std::endl;
+        return false;
+    }
+
+    // Parameter validation
+    if (learningRate <= 0.0 || learningRate > 1.0) {
+        throw std::invalid_argument("Training::startTraining: learningRate must be between 0 and 1");
+    }
+    if (epochs <= 0) {
+        throw std::invalid_argument("Training::startTraining: epochs must be positive");
+    }
+    if (inputs.empty() || targets.empty()) {
+        throw std::invalid_argument("Training::startTraining: No training data available");
+    }
+
+    // Reset training state
+    resetTrainingState();
+    trainingActive = true;
+    trainingStopRequested = false;
+    currentEpoch = 0;
+    totalEpochs = epochs;
+    trainingStatus = "starting";
+    trainingStartTime = std::chrono::steady_clock::now();
+
+    // Start training in a separate thread
+    trainingFuture = std::async(std::launch::async, [this, learningRate, epochs]() {
+        try {
+            trainingStatus = "running";
+            const int barWidth = 70;
+
+            // Early stopping variables
+            float previous_loss = std::numeric_limits<float>::max();
+            int patience = 10;
+            int patience_counter = 0;
+            float min_improvement = 1e-6f;
+
+            for (int i = 0; i < epochs; ++i) {
+                if (trainingStopRequested.load()) {
+                    trainingStatus = "stopped";
+                    break;
+                }
+
+                currentEpoch = i + 1;
+                printProgressBar("Training Progress", i + 1, epochs, barWidth);
+                core->forward(inputs);
+                core->train(inputs, targets, learningRate, numSamples);
+
+                // Calculate current loss
+                currentLoss = calculateMSE();
+                if (verbose && i % 10 == 0) {
+                    std::cout << "Epoch " << i << " - MSE: " << currentLoss << std::endl;
+                }
+
+                // Early stopping check
+                if (previous_loss - currentLoss > min_improvement) {
+                    patience_counter = 0;
+                } else {
+                    patience_counter++;
+                    if (patience_counter >= patience) {
+                        trainingStatus = "completed_early_stopping";
+                        break;
+                    }
+                }
+                previous_loss = currentLoss;
+            }
+
+            if (!trainingStopRequested.load()) {
+                if (epochs > 0) {
+                    printProgressBar("Training Progress", epochs, epochs, barWidth);
+                }
+                trainingStatus = "completed";
+            }
+
+            trainingActive = false;
+        }
+        catch (const std::exception& e) {
+            trainingStatus = "error: " + std::string(e.what());
+            trainingActive = false;
+        }
+    });
+
+    return true;
+}
+
+bool Training::isTraining() const {
+    return trainingActive.load();
+}
+
+std::string Training::getTrainingStatus() const {
+    if (!trainingActive.load()) {
+        return trainingStatus;
+    }
+
+    std::stringstream ss;
+    ss << "running: epoch " << currentEpoch << "/" << totalEpochs;
+    if (currentLoss > 0.0f) {
+        ss << ", loss: " << currentLoss;
+    }
+
+    auto elapsed = std::chrono::steady_clock::now() - trainingStartTime;
+    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+    ss << ", elapsed: " << elapsed_seconds << "s";
+
+    return ss.str();
+}
+
+bool Training::stopTraining() {
+    if (!trainingActive.load()) {
+        return false;
+    }
+
+    trainingStopRequested = true;
+
+    // Wait for training to stop (with timeout)
+    auto start = std::chrono::steady_clock::now();
+    while (trainingActive.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > 30) {
+            // Force stop after 30 seconds
+            trainingActive = false;
+            trainingStatus = "force_stopped";
+            break;
+        }
+    }
+
+    return true;
+}
+
+void Training::resetTrainingState() {
+    trainingActive = false;
+    trainingStopRequested = false;
+    trainingStatus = "idle";
+    currentEpoch = 0;
+    totalEpochs = 0;
+    currentLoss = 0.0f;
 }
 
 float Training::calculateRMSE() {

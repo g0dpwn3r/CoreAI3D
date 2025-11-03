@@ -324,7 +324,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "predict") {
             return handlePredictAPI(action, requestData, method);
         }
-        else if (module == "train") {
+        else if (module == "training") {
             return handleTrainAPI(action, requestData, method);
         }
         else if (module == "sessions") {
@@ -669,74 +669,142 @@ json APIServer::handlePredictAPI(const std::string& action, const json& paramete
 
 json APIServer::handleTrainAPI(const std::string& action, const json& parameters, const std::string& method) {
     try {
+        if (!trainingModule) {
+            return createErrorResponse("Training module not available", 503);
+        }
+
         if (action == "start" && method == "POST") {
             // Handle training start request
-            std::string dataset = parameters.value("dataset", "");
-            std::string modelType = parameters.value("model", "default");
+            double learningRate = parameters.value("learning_rate", 0.01);
             int epochs = parameters.value("epochs", 10);
+            std::string datasetName = parameters.value("dataset_name", "");
 
-            if (dataset.empty()) {
-                return createErrorResponse("Dataset cannot be empty", 400);
+            // Validate parameters
+            if (learningRate <= 0.0 || learningRate > 1.0) {
+                return createErrorResponse("Learning rate must be between 0 and 1", 400);
+            }
+            if (epochs <= 0) {
+                return createErrorResponse("Epochs must be positive", 400);
             }
 
-            // For now, return a mock training response
-            // TODO: Integrate with actual training module
+            // Check if already training
+            if (trainingModule->isTraining()) {
+                return createErrorResponse("Training is already in progress", 409);
+            }
+
+            // Start training asynchronously
+            bool started = trainingModule->startTraining(learningRate, epochs);
+
+            if (!started) {
+                return createErrorResponse("Failed to start training", 500);
+            }
+
             json response = {
-                {"dataset", dataset},
-                {"model", modelType},
-                {"epochs", epochs},
-                {"training_id", generateUniqueId()},
                 {"status", "started"},
-                {"message", "Training initiated"},
+                {"learning_rate", learningRate},
+                {"epochs", epochs},
+                {"dataset_name", datasetName},
+                {"message", "Training started successfully"},
                 {"timestamp", getTimestampString()}
             };
             return response;
         }
         else if (action == "status" && method == "GET") {
             // Handle training status check
-            std::string trainingId = parameters.value("training_id", "");
+            std::string status = trainingModule->getTrainingStatus();
+            bool isActive = trainingModule->isTraining();
 
-            if (trainingId.empty()) {
-                return createErrorResponse("Training ID required", 400);
-            }
-
-            // For now, return mock status
-            // TODO: Integrate with actual training module
             json response = {
-                {"training_id", trainingId},
-                {"status", "running"},
-                {"progress", 0.45},
-                {"current_epoch", 4},
-                {"total_epochs", 10},
-                {"loss", 0.123},
+                {"status", isActive ? "running" : "idle"},
+                {"details", status},
+                {"is_active", isActive},
                 {"timestamp", getTimestampString()}
             };
             return response;
         }
         else if (action == "stop" && method == "POST") {
             // Handle training stop request
-            std::string trainingId = parameters.value("training_id", "");
-
-            if (trainingId.empty()) {
-                return createErrorResponse("Training ID required", 400);
+            if (!trainingModule->isTraining()) {
+                return createErrorResponse("No training is currently running", 400);
             }
 
-            // For now, return mock stop response
-            // TODO: Integrate with actual training module
+            bool stopped = trainingModule->stopTraining();
+
             json response = {
-                {"training_id", trainingId},
-                {"status", "stopped"},
-                {"message", "Training stopped by user"},
+                {"status", stopped ? "stopped" : "failed"},
+                {"message", stopped ? "Training stopped successfully" : "Failed to stop training"},
                 {"timestamp", getTimestampString()}
             };
             return response;
         }
+        else if (action == "load_dataset" && method == "POST") {
+            // Handle dataset loading
+            std::string filename = parameters.value("filename", "");
+            int outputSize = parameters.value("output_size", 1);
+            bool hasHeader = parameters.value("has_header", true);
+            bool containsText = parameters.value("contains_text", false);
+            std::string datasetName = parameters.value("dataset_name", "api_dataset");
+
+            if (filename.empty()) {
+                return createErrorResponse("Filename is required", 400);
+            }
+
+            // Load CSV dataset
+            bool loaded = trainingModule->loadCSV(filename, -1, outputSize, hasHeader, containsText, ',', datasetName);
+
+            if (!loaded) {
+                return createErrorResponse("Failed to load dataset", 500);
+            }
+
+            json response = {
+                {"status", "loaded"},
+                {"filename", filename},
+                {"dataset_name", datasetName},
+                {"samples", trainingModule->numSamples},
+                {"input_size", trainingModule->inputSize},
+                {"output_size", trainingModule->outputSize},
+                {"message", "Dataset loaded successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "preprocess" && method == "POST") {
+            // Handle data preprocessing
+            float minRange = parameters.value("min_range", 0.0f);
+            float maxRange = parameters.value("max_range", 1.0f);
+            int layers = parameters.value("layers", 3);
+            int neurons = parameters.value("neurons", 10);
+
+            if (minRange >= maxRange) {
+                return createErrorResponse("min_range must be less than max_range", 400);
+            }
+
+            try {
+                trainingModule->layers = layers;
+                trainingModule->neurons = neurons;
+                trainingModule->preprocess(minRange, maxRange);
+
+                json response = {
+                    {"status", "preprocessed"},
+                    {"min_range", minRange},
+                    {"max_range", maxRange},
+                    {"layers", layers},
+                    {"neurons", neurons},
+                    {"message", "Data preprocessing completed"},
+                    {"timestamp", getTimestampString()}
+                };
+                return response;
+            }
+            catch (const std::exception& e) {
+                return createErrorResponse("Preprocessing failed: " + std::string(e.what()), 500);
+            }
+        }
         else {
-            return createErrorResponse("Unknown train action: " + action + " with method " + method, 400);
+            return createErrorResponse("Unknown training action: " + action + " with method " + method, 400);
         }
     }
     catch (const std::exception& e) {
-        return createErrorResponse("Train API error: " + std::string(e.what()), 500);
+        return createErrorResponse("Training API error: " + std::string(e.what()), 500);
     }
 }
 

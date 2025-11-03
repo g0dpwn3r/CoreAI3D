@@ -1,2 +1,10 @@
 build/
+*.exe
+*.dll
+*.o
+*.a
+*.so
+*.dylib
 *.log
+.cache/
+.vscode/

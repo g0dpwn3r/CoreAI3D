@@ -82,7 +82,15 @@ public:
     // New method to save results to CSV
     bool saveResultsToCSV(const std::string& filename, const std::string& inputFilename, bool hasHeader, const char& delimiter); // New parameter for input filename and header
     std::vector<std::vector<float>> denormalizeMatrix(const std::vector<std::vector<float>>& normalized_data) const;
-private:
+
+    // Asynchronous training methods
+    bool startTraining(double learningRate, int epochs);
+    bool isTraining() const;
+    std::string getTrainingStatus() const;
+    bool stopTraining();
+    void resetTrainingState();
+
+ private:
     std::mt19937 gen;
     std::vector<std::vector<float>> raw_data; // Might be less used now
     std::vector<std::vector<float>> inputs;
@@ -93,11 +101,22 @@ private:
 
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Language> langProc;
-public:
+
+    // Training state for async operations
+    std::atomic<bool> trainingActive;
+    std::atomic<bool> trainingStopRequested;
+    std::future<void> trainingFuture;
+    std::string trainingStatus;
+    int currentEpoch;
+    int totalEpochs;
+    float currentLoss;
+    std::chrono::steady_clock::time_point trainingStartTime;
+
+ public:
     // Database manager - only if USE_MYSQL is defined
-#ifdef USE_MYSQL
+ #ifdef USE_MYSQL
     std::unique_ptr<Database> dbManager; // Changed to unique_ptr
-#endif
+ #endif
     std::vector<std::vector<float>> normalizeData(const std::vector<std::vector<float>>& data_to_normalize,
         float original_min, float original_max,
         float target_min, float target_max) const;
