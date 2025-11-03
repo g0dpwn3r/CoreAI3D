@@ -9,6 +9,7 @@
 #include "WebModule.hpp"
 #include "MathModule.hpp"
 #include "Train.hpp"
+#include "Predict.hpp"
 #include "Database.hpp"
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
@@ -30,6 +31,7 @@ class APIServer {
 private:
     std::unique_ptr<ModuleOrchestrator> orchestrator;
     std::unique_ptr<Training> trainingModule;
+    std::unique_ptr<Predict> predictModule;
     std::string serverName;
     bool isInitialized;
     std::atomic<bool> isRunning;
@@ -139,6 +141,7 @@ public:
     bool addWebModule(const std::string& name, std::unique_ptr<WebModule> module);
     bool addMathModule(const std::string& name, std::unique_ptr<MathModule> module);
     void setTrainingModule(std::unique_ptr<Training> training);
+    void setPredictModule(std::unique_ptr<Predict> predict);
 
     // Database configuration getters
     const std::string& getDBHost() const { return dbHost; }

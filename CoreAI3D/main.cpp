@@ -491,6 +491,12 @@ int main(int argc, char* argv[]) {
             // Set training module for neural API endpoints
             apiServer.setTrainingModule(std::move(trainer));
 
+            // Initialize and set predict module for prediction API endpoints
+            std::cout << "[API MODE] Initializing Predict module...\n";
+            std::unique_ptr<Predict> predictor = std::make_unique<Predict>(verbose);
+            apiServer.setPredictModule(std::move(predictor));
+            std::cout << "[API MODE] Predict module initialized.\n";
+
             // Start API Server
             std::cout << "[API MODE] Starting API Server...\n";
             if (!apiServer.start()) {

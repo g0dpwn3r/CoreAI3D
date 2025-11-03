@@ -1,5 +1,6 @@
 #include "APIServer.hpp"
 #include "MathModule.hpp"
+#include "Predict.hpp"
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
@@ -627,22 +628,56 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
 
 json APIServer::handlePredictAPI(const std::string& action, const json& parameters, const std::string& method) {
     try {
+        if (!predictModule) {
+            return createErrorResponse("Prediction module not available", 503);
+        }
+
         if (action == "run" && method == "POST") {
             // Handle prediction request
-            std::string inputData = parameters.value("data", "");
-            std::string modelType = parameters.value("model", "default");
+            std::string inputFile = parameters.value("input_file", "");
+            std::string outputCsvFile = parameters.value("output_file", "predictions.csv");
+            std::string targetFile = parameters.value("target_file", "");
+            std::string loadModelId = parameters.value("load_model_id", "");
+            int datasetId = parameters.value("dataset_id", -1);
+            int layers = parameters.value("layers", 3);
+            int neurons = parameters.value("neurons", 10);
+            float minRange = parameters.value("min_range", 0.0f);
+            float maxRange = parameters.value("max_range", 1.0f);
+            int inputSize = parameters.value("input_size", 1);
+            int outputSize = parameters.value("output_size", 1);
+            int numSamples = parameters.value("num_samples", 0);
+            double learningRate = parameters.value("learning_rate", 0.01);
+            int epochs = parameters.value("epochs", 10);
+            std::string embeddingFile = parameters.value("embedding_file", "embedding.txt");
+            std::string language = parameters.value("language", "en");
+            std::string datasetName = parameters.value("dataset_name", "online-1a");
+            bool hasHeader = parameters.value("has_header", true);
+            bool containsText = parameters.value("contains_text", false);
+            char delimiter = parameters.value("delimiter", ',');
 
-            if (inputData.empty()) {
-                return createErrorResponse("Input data cannot be empty", 400);
+            if (inputFile.empty()) {
+                return createErrorResponse("Input file cannot be empty", 400);
             }
 
-            // For now, return a mock prediction response
-            // TODO: Integrate with actual prediction module
+            // Run prediction
+            bool success = predictModule->runPrediction(inputFile, outputCsvFile, targetFile, loadModelId,
+                                                      datasetId, layers, neurons, minRange, maxRange,
+                                                      inputSize, outputSize, numSamples, learningRate,
+                                                      epochs, embeddingFile, language, datasetName,
+                                                      hasHeader, containsText, delimiter);
+
+            if (!success) {
+                return createErrorResponse("Prediction failed", 500);
+            }
+
+            // Get evaluation metrics
             json response = {
-                {"input", inputData},
-                {"model", modelType},
-                {"prediction", "Mock prediction result"},
-                {"confidence", 0.85},
+                {"input_file", inputFile},
+                {"output_file", outputCsvFile},
+                {"rmse", predictModule->getRMSE()},
+                {"mse", predictModule->getMSE()},
+                {"accuracy", predictModule->getAccuracy()},
+                {"training_time", predictModule->getTrainingTime()},
                 {"timestamp", getTimestampString()},
                 {"status", "success"}
             };
@@ -1555,4 +1590,8 @@ bool APIServer::addMathModule(const std::string& name, std::unique_ptr<MathModul
 
 void APIServer::setTrainingModule(std::unique_ptr<Training> training) {
     trainingModule = std::move(training);
+}
+
+void APIServer::setPredictModule(std::unique_ptr<Predict> predict) {
+    predictModule = std::move(predict);
 }
