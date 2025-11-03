@@ -318,6 +318,15 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "neural") {
             return handleNeuralAPI(action, requestData);
         }
+        else if (module == "chat") {
+            return handleChatAPI(action, requestData, method);
+        }
+        else if (module == "predict") {
+            return handlePredictAPI(action, requestData, method);
+        }
+        else if (module == "train") {
+            return handleTrainAPI(action, requestData, method);
+        }
         else if (module == "sessions") {
             return handleSessionsAPI(action, requestData, method);
         }
@@ -613,6 +622,121 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
     }
     catch (const std::exception& e) {
         return createErrorResponse("Chat API error: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::handlePredictAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (action == "run" && method == "POST") {
+            // Handle prediction request
+            std::string inputData = parameters.value("data", "");
+            std::string modelType = parameters.value("model", "default");
+
+            if (inputData.empty()) {
+                return createErrorResponse("Input data cannot be empty", 400);
+            }
+
+            // For now, return a mock prediction response
+            // TODO: Integrate with actual prediction module
+            json response = {
+                {"input", inputData},
+                {"model", modelType},
+                {"prediction", "Mock prediction result"},
+                {"confidence", 0.85},
+                {"timestamp", getTimestampString()},
+                {"status", "success"}
+            };
+            return response;
+        }
+        else if (action == "models" && method == "GET") {
+            // Handle available models listing
+            json response = {
+                {"models", json::array({"default", "advanced", "experimental"})},
+                {"count", 3},
+                {"timestamp", getTimestampString()},
+                {"status", "success"}
+            };
+            return response;
+        }
+        else {
+            return createErrorResponse("Unknown predict action: " + action + " with method " + method, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Predict API error: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::handleTrainAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (action == "start" && method == "POST") {
+            // Handle training start request
+            std::string dataset = parameters.value("dataset", "");
+            std::string modelType = parameters.value("model", "default");
+            int epochs = parameters.value("epochs", 10);
+
+            if (dataset.empty()) {
+                return createErrorResponse("Dataset cannot be empty", 400);
+            }
+
+            // For now, return a mock training response
+            // TODO: Integrate with actual training module
+            json response = {
+                {"dataset", dataset},
+                {"model", modelType},
+                {"epochs", epochs},
+                {"training_id", generateUniqueId()},
+                {"status", "started"},
+                {"message", "Training initiated"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "status" && method == "GET") {
+            // Handle training status check
+            std::string trainingId = parameters.value("training_id", "");
+
+            if (trainingId.empty()) {
+                return createErrorResponse("Training ID required", 400);
+            }
+
+            // For now, return mock status
+            // TODO: Integrate with actual training module
+            json response = {
+                {"training_id", trainingId},
+                {"status", "running"},
+                {"progress", 0.45},
+                {"current_epoch", 4},
+                {"total_epochs", 10},
+                {"loss", 0.123},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "stop" && method == "POST") {
+            // Handle training stop request
+            std::string trainingId = parameters.value("training_id", "");
+
+            if (trainingId.empty()) {
+                return createErrorResponse("Training ID required", 400);
+            }
+
+            // For now, return mock stop response
+            // TODO: Integrate with actual training module
+            json response = {
+                {"training_id", trainingId},
+                {"status", "stopped"},
+                {"message", "Training stopped by user"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else {
+            return createErrorResponse("Unknown train action: " + action + " with method " + method, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Train API error: " + std::string(e.what()), 500);
     }
 }
 

@@ -79,6 +79,8 @@ protected:
     virtual json handleOrchestratorAPI(const std::string& action, const json& parameters);
     virtual json handleSessionsAPI(const std::string& action, const json& parameters, const std::string& method);
     virtual json handleChatAPI(const std::string& action, const json& parameters, const std::string& method);
+    virtual json handlePredictAPI(const std::string& action, const json& parameters, const std::string& method);
+    virtual json handleTrainAPI(const std::string& action, const json& parameters, const std::string& method);
 
     // HTTP request handling
     virtual void handleRequest(http::request<http::string_body>&& req, tcp::socket socket);
