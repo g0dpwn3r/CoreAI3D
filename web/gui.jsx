@@ -52,20 +52,46 @@ const App = () => {
         setter(e.target.checked);
     };
 
-    // Simulate API calls (replace with actual fetch to your C++ backend)
-    const simulateApiCall = async (actionName) => {
+    // Real API calls to C++ backend using Training class
+    const apiCall = async (endpoint, params = {}) => {
         setIsLoading(true);
-        showMessage(`Executing ${actionName}...`, 'info');
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setIsLoading(false);
-        showMessage(`${actionName} completed successfully! (Simulated)`, 'success');
-        console.log(`Action: ${actionName}`, {
-            inputFile, targetFile, outputCsv, delimiter, numSamples, language, embeddingFile,
-            epochs, learningRate, layers, neurons, minRange, maxRange,
-            dbHost, dbPort, dbUser, dbPassword, dbSchema, sslMode, createTables,
-            containsHeader, containsText, datasetId
-        });
+        showMessage(`Executing ${endpoint}...`, 'info');
+
+        try {
+            const response = await fetch(`http://localhost:8080/${endpoint}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    inputFile, targetFile, outputCsv, delimiter, numSamples, language, embeddingFile,
+                    epochs, learningRate, layers, neurons, minRange, maxRange,
+                    dbHost, dbPort, dbUser, dbPassword, dbSchema, sslMode, createTables,
+                    containsHeader, containsText, datasetId,
+                    ...params
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                showMessage(`${endpoint} completed successfully!`, 'success');
+            } else {
+                showMessage(`Error: ${result.error || 'Unknown error'}`, 'error');
+            }
+
+            return result;
+        } catch (error) {
+            console.error(`API call failed:`, error);
+            showMessage(`Failed to execute ${endpoint}: ${error.message}`, 'error');
+            return { success: false, error: error.message };
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -140,15 +166,15 @@ const App = () => {
 
                 <SectionContent>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <ActionButton onClick={() => simulateApiCall('Load CSV')} disabled={isLoading} label="Load CSV" />
-                        <ActionButton onClick={() => simulateApiCall('Load Targets CSV')} disabled={isLoading} label="Load Targets CSV" />
-                        <ActionButton onClick={() => simulateApiCall('Load Dataset from DB')} disabled={isLoading || datasetId === -1} label="Load Dataset from DB" />
-                        <ActionButton onClick={() => simulateApiCall('Preprocess Data')} disabled={isLoading} label="Preprocess Data" />
-                        <ActionButton onClick={() => simulateApiCall('Train Model')} disabled={isLoading} label="Train Model" />
-                        <ActionButton onClick={() => simulateApiCall('Calculate RMSE')} disabled={isLoading} label="Calculate RMSE" />
-                        <ActionButton onClick={() => simulateApiCall('Save Model')} disabled={isLoading || datasetId === -1} label="Save Model" />
-                        <ActionButton onClick={() => simulateApiCall('Load Model')} disabled={isLoading || datasetId === -1} label="Load Model" />
-                        <ActionButton onClick={() => simulateApiCall('Save Results to CSV')} disabled={isLoading} label="Save Results to CSV" />
+                        <ActionButton onClick={() => apiCall('load-csv')} disabled={isLoading} label="Load CSV" />
+                        <ActionButton onClick={() => apiCall('load-targets-csv')} disabled={isLoading} label="Load Targets CSV" />
+                        <ActionButton onClick={() => apiCall('load-dataset-db')} disabled={isLoading || datasetId === -1} label="Load Dataset from DB" />
+                        <ActionButton onClick={() => apiCall('preprocess')} disabled={isLoading} label="Preprocess Data" />
+                        <ActionButton onClick={() => apiCall('train')} disabled={isLoading} label="Train Model" />
+                        <ActionButton onClick={() => apiCall('calculate-rmse')} disabled={isLoading} label="Calculate RMSE" />
+                        <ActionButton onClick={() => apiCall('save-model')} disabled={isLoading || datasetId === -1} label="Save Model" />
+                        <ActionButton onClick={() => apiCall('load-model')} disabled={isLoading || datasetId === -1} label="Load Model" />
+                        <ActionButton onClick={() => apiCall('save-results-csv')} disabled={isLoading} label="Save Results to CSV" />
                     </div>
                 </SectionContent>
             </div>

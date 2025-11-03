@@ -81,16 +81,27 @@ function initializeElements() {
     elements.loadProgress = document.getElementById('load-progress');
     elements.loadResults = document.getElementById('load-results');
 
-    // Sandbox elements
-    elements.sandboxStatus = document.getElementById('sandbox-status');
-    elements.containerName = document.getElementById('container-name');
-    elements.startupCommand = document.getElementById('startup-command');
-    elements.networking = document.getElementById('networking');
-    elements.dropRights = document.getElementById('drop-rights');
-    elements.startSandboxBtn = document.getElementById('start-sandbox');
-    elements.stopSandboxBtn = document.getElementById('stop-sandbox');
-    elements.sandboxLogs = document.getElementById('sandbox-logs');
-    elements.clearSandboxLogsBtn = document.getElementById('clear-sandbox-logs');
+    // Windows VM elements
+    elements.windowsVmStatus = document.getElementById('windows-vm-status');
+    elements.vmName = document.getElementById('vm-name');
+    elements.windowsVersion = document.getElementById('windows-version');
+    elements.cpuCores = document.getElementById('cpu-cores');
+    elements.ramGb = document.getElementById('ram-gb');
+    elements.diskSize = document.getElementById('disk-size');
+    elements.enableNetworking = document.getElementById('enable-networking');
+    elements.enableGpu = document.getElementById('enable-gpu');
+    elements.startWindowsVmBtn = document.getElementById('start-windows-vm');
+    elements.stopWindowsVmBtn = document.getElementById('stop-windows-vm');
+    elements.restartWindowsVmBtn = document.getElementById('restart-windows-vm');
+    elements.vmCommand = document.getElementById('vm-command');
+    elements.executeVmCommandBtn = document.getElementById('execute-vm-command');
+    elements.openVmShellBtn = document.getElementById('open-vm-shell');
+    elements.vmProgress = document.getElementById('vm-progress');
+    elements.windowsVmLogs = document.getElementById('windows-vm-logs');
+    elements.clearWindowsVmLogsBtn = document.getElementById('clear-windows-vm-logs');
+    elements.exportVmLogsBtn = document.getElementById('export-vm-logs');
+    elements.vmPerformance = document.getElementById('vm-performance');
+    elements.refreshVmPerformanceBtn = document.getElementById('refresh-vm-performance');
 
     // Debugging elements
     elements.systemInfo = document.getElementById('system-info');
@@ -213,10 +224,15 @@ function setupEventListeners() {
     elements.loadModelBtn.addEventListener('click', loadModel);
     elements.clearLoadResultsBtn.addEventListener('click', clearLoadResults);
 
-    // Sandbox
-    elements.startSandboxBtn.addEventListener('click', startSandbox);
-    elements.stopSandboxBtn.addEventListener('click', stopSandbox);
-    elements.clearSandboxLogsBtn.addEventListener('click', clearSandboxLogs);
+    // Windows VM
+    elements.startWindowsVmBtn.addEventListener('click', startWindowsVm);
+    elements.stopWindowsVmBtn.addEventListener('click', stopWindowsVm);
+    elements.restartWindowsVmBtn.addEventListener('click', restartWindowsVm);
+    elements.executeVmCommandBtn.addEventListener('click', executeVmCommand);
+    elements.openVmShellBtn.addEventListener('click', openVmShell);
+    elements.clearWindowsVmLogsBtn.addEventListener('click', clearWindowsVmLogs);
+    elements.exportVmLogsBtn.addEventListener('click', exportVmLogs);
+    elements.refreshVmPerformanceBtn.addEventListener('click', refreshVmPerformance);
 
     // Debugging
     elements.refreshSystemInfoBtn.addEventListener('click', updateSystemInfo);
@@ -615,50 +631,149 @@ function clearLoadResults() {
     elements.loadResults.textContent = 'Model loading results will appear here...';
 }
 
-// Sandbox functionality
-async function startSandbox() {
+// Windows VM functionality using winboat
+async function startWindowsVm() {
     const config = {
-        container_name: elements.containerName.value || 'coreai3d_container',
-        startup_command: elements.startupCommand.value || 'echo "Container started"',
-        networking: elements.networking.value === 'Enable' ? 'enable' : 'disable',
-        privileged: !elements.dropRights.checked
+        vm_name: elements.vmName.value || 'coreai3d_windows_vm',
+        windows_version: elements.windowsVersion.value,
+        cpu_cores: parseInt(elements.cpuCores.value) || 2,
+        ram_gb: parseInt(elements.ramGb.value) || 4,
+        disk_size_gb: parseInt(elements.diskSize.value) || 20,
+        enable_networking: elements.enableNetworking.checked,
+        enable_gpu: elements.enableGpu.checked
     };
 
     try {
-        const result = await ipcRenderer.invoke('start-sandbox', config);
+        const result = await ipcRenderer.invoke('start-windows-vm', config);
         if (result.success) {
-            elements.sandboxStatus.textContent = 'Running';
-            elements.sandboxLogs.textContent += `[${new Date().toLocaleTimeString()}] Container started successfully\n`;
-            showMessage('Sandbox started successfully', 'success');
+            elements.windowsVmStatus.textContent = 'Running';
+            elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Windows VM started successfully\n`;
+            showMessage('Windows VM started successfully', 'success');
         } else {
-            elements.sandboxLogs.textContent += `[${new Date().toLocaleTimeString()}] Failed to start container: ${result.error}\n`;
-            showMessage(`Failed to start sandbox: ${result.error}`, 'error');
+            elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Failed to start VM: ${result.error}\n`;
+            showMessage(`Failed to start Windows VM: ${result.error}`, 'error');
         }
     } catch (error) {
-        elements.sandboxLogs.textContent += `[${new Date().toLocaleTimeString()}] Error starting container: ${error.message}\n`;
-        showMessage(`Error starting sandbox: ${error.message}`, 'error');
+        elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Error starting VM: ${error.message}\n`;
+        showMessage(`Error starting Windows VM: ${error.message}`, 'error');
     }
 }
 
-async function stopSandbox() {
+async function stopWindowsVm() {
     try {
-        const result = await ipcRenderer.invoke('stop-sandbox');
+        const result = await ipcRenderer.invoke('stop-windows-vm');
         if (result.success) {
-            elements.sandboxStatus.textContent = 'Stopped';
-            elements.sandboxLogs.textContent += `[${new Date().toLocaleTimeString()}] Container stopped successfully\n`;
-            showMessage('Sandbox stopped successfully', 'success');
+            elements.windowsVmStatus.textContent = 'Stopped';
+            elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Windows VM stopped successfully\n`;
+            showMessage('Windows VM stopped successfully', 'success');
         } else {
-            elements.sandboxLogs.textContent += `[${new Date().toLocaleTimeString()}] Failed to stop container: ${result.error}\n`;
-            showMessage(`Failed to stop sandbox: ${result.error}`, 'error');
+            elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Failed to stop VM: ${result.error}\n`;
+            showMessage(`Failed to stop Windows VM: ${result.error}`, 'error');
         }
     } catch (error) {
-        elements.sandboxLogs.textContent += `[${new Date().toLocaleTimeString()}] Error stopping container: ${error.message}\n`;
-        showMessage(`Error stopping sandbox: ${error.message}`, 'error');
+        elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Error stopping VM: ${error.message}\n`;
+        showMessage(`Error stopping Windows VM: ${error.message}`, 'error');
     }
 }
 
-function clearSandboxLogs() {
-    elements.sandboxLogs.textContent = '';
+async function restartWindowsVm() {
+    try {
+        const result = await ipcRenderer.invoke('restart-windows-vm');
+        if (result.success) {
+            elements.windowsVmStatus.textContent = 'Restarting...';
+            elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Windows VM restarting...\n`;
+            showMessage('Windows VM restarting...', 'info');
+            // Update status after restart
+            setTimeout(() => {
+                elements.windowsVmStatus.textContent = 'Running';
+                elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Windows VM restarted successfully\n`;
+            }, 5000);
+        } else {
+            elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Failed to restart VM: ${result.error}\n`;
+            showMessage(`Failed to restart Windows VM: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        elements.windowsVmLogs.textContent += `[${new Date().toLocaleTimeString()}] Error restarting VM: ${error.message}\n`;
+        showMessage(`Error restarting Windows VM: ${error.message}`, 'error');
+    }
+}
+
+async function executeVmCommand() {
+    const command = elements.vmCommand.value;
+    if (!command) {
+        showMessage('Please enter a command', 'error');
+        return;
+    }
+
+    try {
+        elements.vmProgress.style.display = 'block';
+        const result = await ipcRenderer.invoke('execute-vm-command', { command });
+
+        if (result.success) {
+            elements.windowsVmLogs.textContent += `$ ${command}\n${result.output}\n`;
+            showMessage('Command executed successfully', 'success');
+        } else {
+            elements.windowsVmLogs.textContent += `$ ${command}\nError: ${result.error}\n`;
+            showMessage('Command execution failed', 'error');
+        }
+    } catch (error) {
+        elements.windowsVmLogs.textContent += `$ ${command}\nError: ${error.message}\n`;
+        showMessage('Command execution error', 'error');
+    } finally {
+        elements.vmProgress.style.display = 'none';
+    }
+}
+
+async function openVmShell() {
+    try {
+        const result = await ipcRenderer.invoke('open-vm-shell');
+        if (result.success) {
+            showMessage('VM shell opened successfully', 'success');
+        } else {
+            showMessage(`Failed to open VM shell: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showMessage(`Error opening VM shell: ${error.message}`, 'error');
+    }
+}
+
+function clearWindowsVmLogs() {
+    elements.windowsVmLogs.textContent = '';
+}
+
+async function exportVmLogs() {
+    try {
+        const logs = elements.windowsVmLogs.textContent;
+        if (!logs.trim()) {
+            showMessage('No logs to export', 'warning');
+            return;
+        }
+
+        const result = await ipcRenderer.invoke('export-vm-logs', logs);
+        if (result.success) {
+            showMessage(`Logs exported to ${result.path}`, 'success');
+        } else {
+            showMessage('Failed to export logs', 'error');
+        }
+    } catch (error) {
+        showMessage('Error exporting logs', 'error');
+    }
+}
+
+async function refreshVmPerformance() {
+    try {
+        const result = await ipcRenderer.invoke('get-vm-performance');
+        if (result.success) {
+            elements.vmPerformance.textContent = JSON.stringify(result.data, null, 2);
+            showMessage('VM performance data refreshed', 'success');
+        } else {
+            elements.vmPerformance.textContent = `Error: ${result.error}`;
+            showMessage(`Failed to get VM performance: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        elements.vmPerformance.textContent = `Error: ${error.message}`;
+        showMessage(`Error getting VM performance: ${error.message}`, 'error');
+    }
 }
 
 // Debugging functionality

@@ -23,7 +23,7 @@
             <button class="tab-button" data-tab="testing">Testing</button>
             <button class="tab-button" data-tab="predict">Predict</button>
             <button class="tab-button" data-tab="load-model">Load Model</button>
-            <button class="tab-button" data-tab="sandbox">Docker Sandbox</button>
+            <button class="tab-button" data-tab="windows-vm">Windows VM</button>
             <button class="tab-button" data-tab="debugging">Debugging</button>
             <button class="tab-button" data-tab="linux-sandbox">Linux Sandbox</button>
             <button class="tab-button" data-tab="downloads">Model Downloads</button>
@@ -251,48 +251,84 @@
                 </div>
             </div>
 
-            <!-- Docker Sandbox Tab -->
-            <div id="sandbox-tab" class="tab-panel">
+            <!-- Windows VM Tab -->
+            <div id="windows-vm-tab" class="tab-panel">
                 <div class="grid">
                     <div class="card">
-                        <h3>Docker Status</h3>
-                        <div id="sandbox-status">Docker: Not Running</div>
-                        <p>Docker provides container-based isolation with process and filesystem sandboxing</p>
+                        <h3>Windows VM Status</h3>
+                        <div id="windows-vm-status">Windows VM: Not Running</div>
+                        <p>Windows VM provides full Windows environment isolation using winboat</p>
                     </div>
 
                     <div class="card">
-                        <h3>Docker Configuration</h3>
-                        <form id="sandbox-config">
+                        <h3>VM Configuration</h3>
+                        <form id="windows-vm-config">
                             <div class="form-group">
-                                <label>Container Name:</label>
-                                <input type="text" id="container-name" value="coreai3d_container">
+                                <label>VM Name:</label>
+                                <input type="text" id="vm-name" value="coreai3d_windows_vm">
                             </div>
                             <div class="form-group">
-                                <label>Startup Command:</label>
-                                <input type="text" id="startup-command" value="echo 'Docker container started'">
-                            </div>
-                            <div class="form-group">
-                                <label>Networking:</label>
-                                <select id="networking">
-                                    <option value="enable">Enable</option>
-                                    <option value="disable">Disable</option>
+                                <label>Windows Version:</label>
+                                <select id="windows-version">
+                                    <option value="windows-10">Windows 10</option>
+                                    <option value="windows-11">Windows 11</option>
+                                    <option value="windows-server-2019">Windows Server 2019</option>
+                                    <option value="windows-server-2022">Windows Server 2022</option>
                                 </select>
                             </div>
+                            <div class="form-group">
+                                <label>CPU Cores:</label>
+                                <input type="number" id="cpu-cores" value="2" min="1" max="8">
+                            </div>
+                            <div class="form-group">
+                                <label>RAM (GB):</label>
+                                <input type="number" id="ram-gb" value="4" min="1" max="16">
+                            </div>
+                            <div class="form-group">
+                                <label>Disk Size (GB):</label>
+                                <input type="number" id="disk-size" value="20" min="10" max="100">
+                            </div>
                             <div class="checkbox-group">
-                                <label><input type="checkbox" id="drop-rights" checked> Run as Non-Root User</label>
+                                <label><input type="checkbox" id="enable-networking" checked> Enable Networking</label>
+                                <label><input type="checkbox" id="enable-gpu" checked> Enable GPU Passthrough</label>
                             </div>
                         </form>
                         <div class="actions">
-                            <button id="start-sandbox" class="btn btn-success">Start Container</button>
-                            <button id="stop-sandbox" class="btn btn-danger">Stop Container</button>
+                            <button id="start-windows-vm" class="btn btn-success">Start VM</button>
+                            <button id="stop-windows-vm" class="btn btn-danger">Stop VM</button>
+                            <button id="restart-windows-vm" class="btn btn-warning">Restart VM</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>VM Management</h3>
+                        <div class="form-group">
+                            <label>VM Command:</label>
+                            <input type="text" id="vm-command" placeholder="Enter PowerShell command...">
+                        </div>
+                        <div class="actions">
+                            <button id="execute-vm-command" class="btn btn-primary">Execute Command</button>
+                            <button id="open-vm-shell" class="btn btn-secondary">Open Shell</button>
+                        </div>
+                        <div class="progress-bar" id="vm-progress" style="display: none;">
+                            <div class="progress-fill"></div>
                         </div>
                     </div>
 
                     <div class="card full-width">
-                        <h3>Docker Logs</h3>
-                        <div id="sandbox-logs" class="logs-area"></div>
+                        <h3>VM Logs</h3>
+                        <div id="windows-vm-logs" class="logs-area"></div>
                         <div class="actions">
-                            <button id="clear-sandbox-logs" class="btn btn-secondary">Clear Logs</button>
+                            <button id="clear-windows-vm-logs" class="btn btn-secondary">Clear Logs</button>
+                            <button id="export-vm-logs" class="btn btn-secondary">Export Logs</button>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>VM Performance</h3>
+                        <div id="vm-performance" class="info-area"></div>
+                        <div class="actions">
+                            <button id="refresh-vm-performance" class="btn btn-secondary">Refresh Performance</button>
                         </div>
                     </div>
                 </div>
