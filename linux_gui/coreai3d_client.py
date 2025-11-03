@@ -762,6 +762,14 @@ class CoreAI3DClient:
         """Start neural network training with specified configuration"""
         return await self.post('/training/start', config)
 
+    async def initialize_neural_network(self, config: Dict[str, Any]) -> APIResponse:
+        """Initialize neural network with specified configuration"""
+        return await self.post('/neural/initialize', config)
+
+    async def train_neural_network(self, config: Dict[str, Any]) -> APIResponse:
+        """Train neural network with specified configuration"""
+        return await self.post('/neural/train', config)
+
     async def stop_training(self) -> APIResponse:
         """Stop current training session"""
         return await self.post('/training/stop')

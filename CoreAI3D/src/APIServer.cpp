@@ -487,6 +487,84 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
         else if (action == "activity") {
             return trainingModule->getNetworkActivity();
         }
+        else if (action == "initialize") {
+            // Initialize neural network with provided parameters
+            double learningRate = parameters.value("learning_rate", 0.01);
+            int epochs = parameters.value("epochs", 10);
+            int layers = parameters.value("layers", 3);
+            int neurons = parameters.value("neurons", 10);
+            float minRange = parameters.value("min_range", 0.0f);
+            float maxRange = parameters.value("max_range", 1.0f);
+
+            // Validate parameters
+            if (learningRate <= 0.0 || learningRate > 1.0) {
+                return createErrorResponse("Learning rate must be between 0 and 1", 400);
+            }
+            if (epochs <= 0) {
+                return createErrorResponse("Epochs must be positive", 400);
+            }
+            if (layers <= 0) {
+                return createErrorResponse("Layers must be positive", 400);
+            }
+            if (neurons <= 0) {
+                return createErrorResponse("Neurons must be positive", 400);
+            }
+
+            // Initialize the network
+            trainingModule->layers = layers;
+            trainingModule->neurons = neurons;
+            trainingModule->learningRate = learningRate;
+            trainingModule->preprocess(minRange, maxRange);
+
+            json response = {
+                {"status", "initialized"},
+                {"learning_rate", learningRate},
+                {"epochs", epochs},
+                {"layers", layers},
+                {"neurons", neurons},
+                {"min_range", minRange},
+                {"max_range", maxRange},
+                {"message", "Neural network initialized successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "train") {
+            // Start training with provided parameters
+            double learningRate = parameters.value("learning_rate", 0.01);
+            int epochs = parameters.value("epochs", 10);
+            std::string datasetName = parameters.value("dataset_name", "");
+
+            // Validate parameters
+            if (learningRate <= 0.0 || learningRate > 1.0) {
+                return createErrorResponse("Learning rate must be between 0 and 1", 400);
+            }
+            if (epochs <= 0) {
+                return createErrorResponse("Epochs must be positive", 400);
+            }
+
+            // Check if already training
+            if (trainingModule->isTraining()) {
+                return createErrorResponse("Training is already in progress", 409);
+            }
+
+            // Start training asynchronously
+            bool started = trainingModule->startTraining(learningRate, epochs);
+
+            if (!started) {
+                return createErrorResponse("Failed to start training", 500);
+            }
+
+            json response = {
+                {"status", "started"},
+                {"learning_rate", learningRate},
+                {"epochs", epochs},
+                {"dataset_name", datasetName},
+                {"message", "Training started successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
         else {
             return createErrorResponse("Unknown neural action: " + action, 400);
         }

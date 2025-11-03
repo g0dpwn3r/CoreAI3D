@@ -587,9 +587,9 @@ class CodeDebugger(QObject):
                 message = "Web search completed" if success else "Web search failed"
 
             elif module_name == "math":
-                result = await self.client.solve_math(test_data.get('expression', ''))
+                result = await self.client.calculate(test_data.get('expression', ''))
                 success = result.success
-                message = "Math solution completed" if success else "Math solution failed"
+                message = "Math calculation completed" if success else "Math calculation failed"
 
             else:
                 success = False
@@ -4891,7 +4891,7 @@ capabilities, training data, performance metrics, and usage instructions."""
             elif model_type == "Text Models":
                 result = await self.client.process_with_ai(input_data, 'text')
             elif model_type == "Math Models":
-                result = await self.client.solve_math(input_data)
+                result = await self.client.calculate(input_data)
             elif model_type == "Web Models":
                 result = await self.client.web_search(input_data)
             else:
