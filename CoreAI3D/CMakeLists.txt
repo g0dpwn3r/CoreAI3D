@@ -178,6 +178,7 @@ set(SOURCE_FILES
     main.cpp
     src/Core.cpp
     src/Train.cpp
+    src/Predict.cpp
     src/Database.cpp
     src/Language.cpp
     src/APIServer.cpp

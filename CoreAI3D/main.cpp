@@ -10,6 +10,7 @@
 #include "include/Language.hpp"
 #include "include/APIServer.hpp"
 #include "include/WebSocketServer.hpp"
+#include "include/Predict.hpp"
 
 // External library headers (Boost, cURL, MySQL, etc.)
 // Include specific Boost headers as needed for their functionality.
@@ -423,129 +424,29 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
-            if (inputFile.empty() || outputCsvFile.empty())
-            {
-                std::cerr << "Error: Input and output files are required for "
-                    "'predict' mode. Exiting.\n";
+            // Create Predict instance and run prediction
+            Predict predictor(verbose);
+            bool success = predictor.runPrediction(
+                inputFile, outputCsvFile, targetFile, loadModelId, datasetId_val,
+                layers_val, neurons_val, minRange_val, maxRange_val,
+                inputSize_val, outputSize_val, numSamples_val,
+                learningRate_val, epochs_val, embeddingFile, language,
+                datasetName, hasHeader, containsText, delimiter_char
+            );
+
+            if (!success) {
+                std::cerr << "Prediction failed." << std::endl;
                 return 1;
             }
 
-            std::cout << "[PREDICT MODE] Initializing Training object...\n";
-            bool useOnlineMode = (datasetId_val != -1 || !loadModelId.empty());
-            Training trainer = Training(useOnlineMode, verbose);
-            std::cout << "[PREDICT MODE] Training object initialized in " << (useOnlineMode ? "online" : "offline") << " mode.\n";
+            // Display final metrics
+            std::cout << "\n[PREDICT MODE] Final Evaluation Metrics:\n";
+            std::cout << "RMSE: " << predictor.getRMSE() << "\n";
+            std::cout << "MSE: " << predictor.getMSE() << "\n";
+            std::cout << "Accuracy: " << predictor.getAccuracy() * 100.0f << "%\n";
+            std::cout << "Training Execution Time: " << predictor.getTrainingTime() << " seconds\n";
 
-            // Set training parameters (important for model structure if loading from DB)
-            trainer.layers = layers_val;
-            trainer.embedding_file = embeddingFile;
-            trainer.language = language;
-            trainer.neurons = neurons_val;
-            trainer.min = minRange_val;
-            trainer.max = maxRange_val;
-            trainer.outputSize = outputSize_val; // Ensure this is set for backend actions
-            trainer.numSamples = numSamples_val;
-            // Set inputSize for trainer, as it's needed for CoreAI initialization later in preprocess
-            trainer.inputSize = inputSize_val;
-
-            // Skip language processor initialization entirely to avoid MySQL errors
-            std::cout << "[PREDICT MODE] Skipping language processor initialization to avoid database connection issues.\n";
-            // Proceed directly to CSV loading
-
-            std::cout << "[PREDICT MODE] Loading data from: " << inputFile << std::endl;
-            if (!trainer.loadCSV(inputFile, numSamples_val, outputSize_val, hasHeader, containsText, delimiter_char, datasetName)) {
-                std::cerr << "Failed to load CSV data for prediction. Exiting." << std::endl;
-                return 1;
-            }
-            std::cout << "[PREDICT MODE] CSV data loaded.\n";
-
-            // If target-file is provided, load targets separately
-            if (!targetFile.empty()) {
-                std::cout << "[PREDICT MODE] Loading targets from: " << targetFile << std::endl;
-                if (!trainer.loadTargetsCSV(targetFile, delimiter_char, hasHeader, containsText, datasetId_val)) {
-                    std::cerr << "Failed to load target CSV data for prediction. Exiting." << std::endl;
-                    return 1;
-                }
-                std::cout << "[PREDICT MODE] Target CSV data loaded.\n";
-            }
-
-
-            std::cout << "[PREDICT MODE] Attempting to load model from database (if datasetId or loadModelId is specified)....\n";
-            if (datasetId_val != -1 || !loadModelId.empty())
-            {
-                int modelIdToLoad = datasetId_val != -1 ? datasetId_val : std::stoi(loadModelId);
-                std::cout << "[PREDICT MODE] Using model ID " << modelIdToLoad
-                    << " (likely to load a pre-trained model).\n";
-                if (!trainer.loadDatasetFromDB(modelIdToLoad)) { // Pass modelId by value or correct reference
-                    std::cerr << "[PREDICT MODE] Failed to load dataset from DB for ID " << modelIdToLoad << ". Proceeding without pre-loaded data/model from DB." << std::endl;
-                }
-#ifdef USE_MYSQL
-                bool model_loaded_success = false;
-                try {
-                    if (!loadModelId.empty()) {
-                        model_loaded_success = trainer.loadModel(loadModelId); // Load by name
-                    } else {
-                        model_loaded_success = trainer.loadModel(modelIdToLoad); // Load by ID
-                    }
-                } catch (const std::exception& e) {
-                    std::cerr << "[PREDICT MODE] Exception during model loading: " << e.what() << std::endl;
-                    model_loaded_success = false;
-                }
-                if (!model_loaded_success) {
-                    std::cerr << "[PREDICT MODE] Failed to load model. Proceeding with new model initialization.\n";
-                }
-                if (model_loaded_success) { // Use the captured bool in the conditional
-                    std::cout << "[PREDICT MODE] Model loaded from database for ID " << modelIdToLoad << ".\n";
-                }
-                else {
-                    std::cerr << "[PREDICT MODE] Failed to load model from DB for ID " << modelIdToLoad << ". Will initialize new model for training.\n";
-                }
-#endif
-            }
-            std::cout << "[PREDICT MODE] Model loading check complete.\n";
-
-
-            std::cout << "[PREDICT MODE] Preprocessing data (normalization, CoreAI initialization)....\n";
-            trainer.preprocess(minRange_val, maxRange_val); // This re-normalizes and initializes CoreAI
-            std::cout << "[PREDICT MODE] Data preprocessing complete. CoreAI initialized.\n";
-
-            // DEBUG: Log data statistics after preprocessing
-            if (verbose) {
-                std::cout << "[DEBUG PREDICT] After preprocessing - numSamples: " << trainer.numSamples
-                          << ", inputSize: " << trainer.inputSize << ", outputSize: " << trainer.outputSize << std::endl;
-                if (!trainer.getTargets().empty()) {
-                    std::cout << "[DEBUG PREDICT] First target value: " << trainer.getTargets()[0][0] << std::endl;
-                }
-            }
-
-            std::cout << "[PREDICT MODE] Starting model training...\n";
-            auto start_time = std::chrono::high_resolution_clock::now();
-            trainer.train(learningRate_val, epochs_val);
-            auto end_time = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> training_duration = end_time - start_time;
-            std::cout << "[PREDICT MODE] Model training complete.\n";
-
-            // Calculate and display metrics
-            float rmse = trainer.calculateRMSE();
-            float mse = trainer.calculateMSE();
-            float accuracy = trainer.calculateAccuracy();
-
-            std::cout << "\n[PREDICT MODE] Evaluation Metrics:\n";
-            std::cout << "RMSE: " << rmse << "\n";
-            std::cout << "MSE: " << mse << "\n";
-            std::cout << "Accuracy: " << accuracy * 100.0f << "%\n";
-            std::cout << "Training Execution Time: " << training_duration.count() << " seconds\n";
-
-
-            std::cout << "[PREDICT MODE] Saving prediction results to: " << outputCsvFile << std::endl;
-            if (trainer.saveResultsToCSV(outputCsvFile, inputFile, hasHeader, delimiter_char)) {
-                std::cout << "[PREDICT MODE] Results saved successfully.\n";
-            }
-            else {
-                std::cerr << "[PREDICT MODE] Failed to save results to CSV.\n";
-            }
-
-
-            std::cout << "Prediction mode finished.\n";
+            std::cout << "Prediction mode finished successfully.\n";
         }
         else if (apiMode)
         { // API server mode
