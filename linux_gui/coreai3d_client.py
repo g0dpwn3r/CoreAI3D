@@ -495,7 +495,19 @@ class CoreAI3DClient:
     async def create_session(self, client_id: str = '') -> APIResponse:
         response = await self.post('/sessions', {'clientId': client_id})
         if response.success and 'sessionId' in response.data:
-            self.config['session_id'] = response.data['sessionId']
+            session_id = response.data['sessionId']
+            if session_id and session_id.strip():  # Check if not empty or whitespace-only
+                self.config['session_id'] = session_id
+            else:
+                # Server returned empty or invalid session ID
+                logger.error("Server returned empty or invalid session ID")
+                return APIResponse(
+                    success=False,
+                    data=None,
+                    message="Server returned empty or invalid session ID",
+                    status_code=response.status_code,
+                    metadata=response.metadata
+                )
         return response
 
     async def destroy_session(self) -> APIResponse:

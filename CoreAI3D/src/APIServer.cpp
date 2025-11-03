@@ -557,6 +557,65 @@ json APIServer::handleSessionsAPI(const std::string& action, const json& paramet
     }
 }
 
+json APIServer::handleChatAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (action == "message" && method == "POST") {
+            // Handle chat message sending
+            std::string message = parameters.value("message", "");
+            std::string messageType = parameters.value("messageType", "text");
+
+            if (message.empty()) {
+                return createErrorResponse("Message cannot be empty", 400);
+            }
+
+            // For now, return a simple echo response
+            // TODO: Integrate with Language class for actual AI chat processing
+            json response = {
+                {"message", message},
+                {"messageType", messageType},
+                {"response", "Echo: " + message},
+                {"timestamp", getTimestampString()},
+                {"status", "success"}
+            };
+            return response;
+        }
+        else if (action == "history" && method == "GET") {
+            // Handle chat history retrieval
+            int limit = 50; // Default limit
+            if (parameters.contains("limit")) {
+                limit = parameters["limit"];
+            }
+
+            // For now, return empty history
+            // TODO: Integrate with database to retrieve actual chat history
+            json response = {
+                {"history", json::array()},
+                {"limit", limit},
+                {"count", 0},
+                {"timestamp", getTimestampString()},
+                {"status", "success"}
+            };
+            return response;
+        }
+        else if (action == "clear" && method == "POST") {
+            // Handle chat history clearing
+            // TODO: Integrate with database to clear actual chat history
+            json response = {
+                {"cleared", true},
+                {"timestamp", getTimestampString()},
+                {"status", "success"}
+            };
+            return response;
+        }
+        else {
+            return createErrorResponse("Unknown chat action: " + action + " with method " + method, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Chat API error: " + std::string(e.what()), 500);
+    }
+}
+
 
 
 json APIServer::getNeuralTopology() {

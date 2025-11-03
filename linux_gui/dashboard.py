@@ -3166,7 +3166,8 @@ if __name__ == "__main__":
         """
         # Schedule the async connection test in the event loop
         try:
-            asyncio.create_task(self._test_connection_async())
+            task = asyncio.create_task(self._test_connection_async())
+            task.add_done_callback(self._handle_connection_test_result)
         except RuntimeError:
             # No running event loop, defer until event loop is available
             logger.warning("No running event loop for connection test, deferring")
