@@ -28,7 +28,7 @@ logging.getLogger('requests').setLevel(logging.WARNING)
 class APIResponse:
     """Standardized API response structure"""
     success: bool
-    data: Any
+    data: Optional[Any]
     message: str
     status_code: int
     metadata: Dict[str, Any]
@@ -71,8 +71,8 @@ class CoreAI3DClient:
         self._reconnect_backoff_max: float = 60.0
         self._connecting: bool = False
         self._shutdown: bool = False
-        self._connection_lock: asyncio.Lock = asyncio.Lock()
-        self._state_lock: asyncio.Lock = asyncio.Lock()
+        self._connection_lock = asyncio.Lock()
+        self._state_lock = asyncio.Lock()
 
         # Configure debug logging
         if self.config['debug']:
@@ -89,9 +89,17 @@ class CoreAI3DClient:
     async def _ensure_http_session(self):
         """Ensure we have a valid HTTP session, create one if needed"""
         if self.session is None:
-            logger.info("Creating new HTTP session")
-            timeout = aiohttp.ClientTimeout(total=self.config['timeout'])
-            self.session = aiohttp.ClientSession(timeout=timeout)
+            try:
+                # Check if we have a running event loop (important for qasync integration)
+                asyncio.get_running_loop()
+                logger.info("Creating new HTTP session")
+                timeout = aiohttp.ClientTimeout(total=self.config['timeout'])
+                self.session = aiohttp.ClientSession(timeout=timeout)
+            except RuntimeError:
+                # No running event loop yet, defer session creation
+                logger.debug("No running event loop, deferring HTTP session creation")
+                return False
+        return True
 
     async def connect(self):
         """Initialize HTTP session and WebSocket connection"""
@@ -200,6 +208,11 @@ class CoreAI3DClient:
                 try:
                     logger.info(f"Attempting WebSocket connection to {self.config['ws_url']}")
                     logger.info(f"Connection parameters: timeout={self.config['timeout']}, debug={self.config.get('debug', False)}")
+
+                    # Ensure we have a valid HTTP session before WebSocket connection
+                    if not await self._ensure_http_session():
+                        logger.error("Cannot establish WebSocket connection - HTTP session not available")
+                        return
 
                     # Ensure any existing connection is properly closed
                     if self.ws_connection:
@@ -376,7 +389,14 @@ class CoreAI3DClient:
     async def _make_request(self, method: str, endpoint: str, data: Optional[Any] = None) -> APIResponse:
         """Make HTTP request with retry logic"""
         # Ensure we have a session
-        await self._ensure_http_session()
+        if not await self._ensure_http_session():
+            return APIResponse(
+                success=False,
+                data=None,
+                message="HTTP session not available - event loop not running",
+                status_code=503,
+                metadata={}
+            )
 
         # Sanitize api_key and session_id to prevent header injection
         api_key = self.config["api_key"].replace('\n', '').replace('\r', '')
@@ -443,6 +463,11 @@ class CoreAI3DClient:
         """Ensure we have a valid session, create one if needed"""
         if not self.config['session_id']:
             logger.info("No session ID, creating new session")
+            # First ensure we have an HTTP session available
+            if not await self._ensure_http_session():
+                logger.error("Cannot create session - HTTP session not available")
+                return False
+
             session_response = await self.create_session()
             if not session_response.success:
                 logger.error(f"Failed to create session: {session_response.message}")

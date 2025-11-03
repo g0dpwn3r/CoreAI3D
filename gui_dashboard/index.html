@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoreAI3D Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>CoreAI3D Dashboard</h1>
+            <div class="status-bar">
+                <span id="connection-status">Disconnected</span>
+                <button id="test-connection" class="btn btn-primary">Test Connection</button>
+                <button id="theme-toggle" class="btn btn-secondary">🌙 Dark Mode</button>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-button active" data-tab="dashboard">Dashboard</button>
+            <button class="tab-button" data-tab="training">Training Data</button>
+            <button class="tab-button" data-tab="testing">Testing</button>
+            <button class="tab-button" data-tab="predict">Predict</button>
+            <button class="tab-button" data-tab="load-model">Load Model</button>
+            <button class="tab-button" data-tab="sandbox">Docker Sandbox</button>
+            <button class="tab-button" data-tab="debugging">Debugging</button>
+            <button class="tab-button" data-tab="linux-sandbox">Linux Sandbox</button>
+            <button class="tab-button" data-tab="downloads">Model Downloads</button>
+            <button class="tab-button" data-tab="code-gen">Code Generation</button>
+            <button class="tab-button" data-tab="chat">Chat</button>
+            <button class="tab-button" data-tab="neural">Neural Network</button>
+            <button class="tab-button" data-tab="settings">Settings</button>
+        </nav>
+
+        <main class="tab-content">
+            <!-- Dashboard Tab -->
+            <div id="dashboard-tab" class="tab-panel active">
+                <div class="grid">
+                    <div class="card">
+                        <h3>System Status</h3>
+                        <div class="metrics">
+                            <div class="metric">
+                                <label>CPU Usage:</label>
+                                <span id="cpu-usage">0%</span>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="cpu-bar"></div>
+                                </div>
+                            </div>
+                            <div class="metric">
+                                <label>Memory Usage:</label>
+                                <span id="memory-usage">0%</span>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="memory-bar"></div>
+                                </div>
+                            </div>
+                            <div class="metric">
+                                <label>Disk Usage:</label>
+                                <span id="disk-usage">0%</span>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="disk-bar"></div>
+                                </div>
+                            </div>
+                            <div class="metric">
+                                <label>Network:</label>
+                                <span id="network-usage">0 KB/s</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Quick Actions</h3>
+                        <div class="actions">
+                            <button id="refresh-metrics" class="btn btn-secondary">Refresh Metrics</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>System Health</h3>
+                        <div class="health-score">
+                            <label>Overall Health Score:</label>
+                            <span id="health-score">100%</span>
+                            <div class="progress-bar">
+                                <div class="progress-fill health-fill" id="health-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Training Data Tab -->
+            <div id="training-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Datasets</h3>
+                        <div class="dataset-list" id="dataset-list"></div>
+                        <div class="actions">
+                            <button id="new-dataset" class="btn btn-primary">New Dataset</button>
+                            <button id="delete-dataset" class="btn btn-danger">Delete Dataset</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Dataset Details</h3>
+                        <div id="dataset-info"></div>
+                        <div class="actions">
+                            <button id="add-file" class="btn btn-secondary">Add File</button>
+                            <button id="remove-file" class="btn btn-danger">Remove File</button>
+                        </div>
+                        <div id="file-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Testing Tab -->
+            <div id="testing-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Test Configuration</h3>
+                        <form id="test-config">
+                            <div class="form-group">
+                                <label>Test Type:</label>
+                                <select id="test-type">
+                                    <option value="api">API Connectivity</option>
+                                    <option value="module">Module Functionality</option>
+                                    <option value="system">System Automation</option>
+                                    <option value="performance">Performance Test</option>
+                                    <option value="load">Load Test</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Module:</label>
+                                <select id="test-module">
+                                    <option value="vision">Vision Module</option>
+                                    <option value="audio">Audio Module</option>
+                                    <option value="system">System Module</option>
+                                    <option value="web">Web Module</option>
+                                    <option value="math">Math Module</option>
+                                </select>
+                            </div>
+                        </form>
+                        <div class="actions">
+                            <button id="run-test" class="btn btn-primary">Run Test</button>
+                            <button id="clear-results" class="btn btn-secondary">Clear Results</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Test Results</h3>
+                        <div id="test-results" class="results-table"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Predict Tab -->
+            <div id="predict-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Model Selection</h3>
+                        <form id="predict-config">
+                            <div class="form-group">
+                                <label>Model Type:</label>
+                                <select id="predict-model-type">
+                                    <option value="">Select Model...</option>
+                                    <option value="vision">Vision Models</option>
+                                    <option value="audio">Audio Models</option>
+                                    <option value="text">Text Models</option>
+                                    <option value="multimodal">Multimodal Models</option>
+                                    <option value="neural">Neural Networks</option>
+                                    <option value="math">Math Models</option>
+                                    <option value="web">Web Models</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Specific Model:</label>
+                                <select id="predict-specific-model">
+                                    <option value="">Select Specific Model...</option>
+                                </select>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3>Input Data</h3>
+                        <div class="form-group">
+                            <label>Input Type:</label>
+                            <select id="predict-input-type">
+                                <option value="text">Text</option>
+                                <option value="image">Image</option>
+                                <option value="audio">Audio</option>
+                                <option value="file">File</option>
+                                <option value="url">URL</option>
+                            </select>
+                        </div>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" id="contains-header"> --contains-header</label>
+                            <label><input type="checkbox" id="contains-text"> --contains-text</label>
+                        </div>
+                        <textarea id="predict-input" placeholder="Enter input data here..." rows="6"></textarea>
+                        <div class="file-input">
+                            <input type="text" id="predict-file-path" placeholder="File path or URL..." readonly>
+                            <button id="browse-file" class="btn btn-secondary">Browse...</button>
+                        </div>
+                        <div class="actions">
+                            <button id="run-prediction" class="btn btn-primary">Run Prediction</button>
+                            <button id="clear-prediction" class="btn btn-secondary">Clear Results</button>
+                        </div>
+                        <div class="progress-bar" id="predict-progress" style="display: none;">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Prediction Results</h3>
+                        <div id="prediction-results" class="results-area"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Load Model Tab -->
+            <div id="load-model-tab" class="tab-panel">
+                <div class="card">
+                    <h3>Load Model</h3>
+                    <form id="load-model-config">
+                        <div class="form-group">
+                            <label>Model Identifier:</label>
+                            <input type="text" id="model-identifier" placeholder="Enter dataset ID or model name...">
+                        </div>
+                        <div class="form-group">
+                            <label>Model Type:</label>
+                            <select id="model-type">
+                                <option value="">Auto-detect</option>
+                                <option value="vision">Vision</option>
+                                <option value="audio">Audio</option>
+                                <option value="text">Text</option>
+                                <option value="multimodal">Multimodal</option>
+                                <option value="neural_network">Neural Network</option>
+                                <option value="math">Math</option>
+                                <option value="web">Web</option>
+                            </select>
+                        </div>
+                    </form>
+                    <div class="actions">
+                        <button id="load-model" class="btn btn-primary">Load Model</button>
+                        <button id="clear-load-results" class="btn btn-secondary">Clear Results</button>
+                    </div>
+                    <div class="progress-bar" id="load-progress" style="display: none;">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <div id="load-results" class="results-area"></div>
+                </div>
+            </div>
+
+            <!-- Docker Sandbox Tab -->
+            <div id="sandbox-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Docker Status</h3>
+                        <div id="sandbox-status">Docker: Not Running</div>
+                        <p>Docker provides container-based isolation with process and filesystem sandboxing</p>
+                    </div>
+
+                    <div class="card">
+                        <h3>Docker Configuration</h3>
+                        <form id="sandbox-config">
+                            <div class="form-group">
+                                <label>Container Name:</label>
+                                <input type="text" id="container-name" value="coreai3d_container">
+                            </div>
+                            <div class="form-group">
+                                <label>Startup Command:</label>
+                                <input type="text" id="startup-command" value="echo 'Docker container started'">
+                            </div>
+                            <div class="form-group">
+                                <label>Networking:</label>
+                                <select id="networking">
+                                    <option value="enable">Enable</option>
+                                    <option value="disable">Disable</option>
+                                </select>
+                            </div>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" id="drop-rights" checked> Run as Non-Root User</label>
+                            </div>
+                        </form>
+                        <div class="actions">
+                            <button id="start-sandbox" class="btn btn-success">Start Container</button>
+                            <button id="stop-sandbox" class="btn btn-danger">Stop Container</button>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Docker Logs</h3>
+                        <div id="sandbox-logs" class="logs-area"></div>
+                        <div class="actions">
+                            <button id="clear-sandbox-logs" class="btn btn-secondary">Clear Logs</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debugging Tab -->
+            <div id="debugging-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>System Information</h3>
+                        <div id="system-info" class="info-area"></div>
+                        <div class="actions">
+                            <button id="refresh-system-info" class="btn btn-secondary">Refresh Info</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Process Monitor</h3>
+                        <div id="process-table" class="table-area"></div>
+                        <div class="actions">
+                            <button id="refresh-processes" class="btn btn-secondary">Refresh Processes</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Debug Controls</h3>
+                        <div class="actions">
+                            <button id="api-debug" class="btn btn-primary">API Debug</button>
+                            <button id="system-debug" class="btn btn-primary">System Debug</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Linux Sandbox Tab -->
+            <div id="linux-sandbox-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Linux Sandbox Status</h3>
+                        <div id="linux-sandbox-status">Linux Sandbox: Not Running</div>
+                        <div class="form-group">
+                            <label>Container:</label>
+                            <select id="linux-container">
+                                <option value="ubuntu-sandbox">ubuntu-sandbox</option>
+                                <option value="centos-sandbox">centos-sandbox</option>
+                                <option value="alpine-sandbox">alpine-sandbox</option>
+                            </select>
+                            <button id="refresh-containers" class="btn btn-secondary">Refresh</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Command Execution</h3>
+                        <input type="text" id="linux-command" placeholder="Enter Linux command to execute...">
+                        <div class="actions">
+                            <button id="execute-linux-command" class="btn btn-primary">Execute Command</button>
+                            <button id="start-linux-container" class="btn btn-success">Start Container</button>
+                            <button id="stop-linux-container" class="btn btn-danger">Stop Container</button>
+                        </div>
+                        <div class="progress-bar" id="linux-progress" style="display: none;">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Training Scenarios</h3>
+                        <div class="form-group">
+                            <label>Training Scenario:</label>
+                            <select id="training-scenario">
+                                <option value="file-ops">File System Operations</option>
+                                <option value="process-mgmt">Process Management</option>
+                                <option value="network-ops">Network Operations</option>
+                                <option value="package-mgmt">Package Management</option>
+                                <option value="text-processing">Text Processing</option>
+                                <option value="permissions">Permissions and Security</option>
+                                <option value="monitoring">System Monitoring</option>
+                                <option value="scripting">Scripting and Automation</option>
+                                <option value="hacking-white">White Hat Hacking</option>
+                                <option value="hacking-gray">Gray Hat Hacking</option>
+                                <option value="hacking-black">Black Hat Hacking</option>
+                            </select>
+                        </div>
+                        <div class="actions">
+                            <button id="run-linux-training" class="btn btn-primary">Run Training</button>
+                            <button id="generate-report" class="btn btn-secondary">Generate Report</button>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Command Output</h3>
+                        <div id="linux-output" class="logs-area"></div>
+                        <div class="actions">
+                            <button id="clear-linux-output" class="btn btn-secondary">Clear Output</button>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Training Results</h3>
+                        <div id="training-results" class="results-area"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Downloads Tab -->
+            <div id="downloads-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Model Search</h3>
+                        <div class="search-controls">
+                            <input type="text" id="model-search" placeholder="Search models...">
+                            <select id="model-type-filter">
+                                <option value="">All Types</option>
+                                <option value="Vision">Vision</option>
+                                <option value="Audio">Audio</option>
+                                <option value="Text">Text</option>
+                                <option value="Multimodal">Multimodal</option>
+                                <option value="Neural">Neural</option>
+                                <option value="Math">Math</option>
+                                <option value="Web">Web</option>
+                            </select>
+                            <button id="search-models" class="btn btn-secondary">Search</button>
+                            <button id="refresh-models" class="btn btn-secondary">Refresh</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Available Models</h3>
+                        <div id="model-table" class="table-area"></div>
+                        <div class="actions">
+                            <button id="download-selected" class="btn btn-primary">Download Selected</button>
+                            <button id="cancel-download" class="btn btn-danger">Cancel Download</button>
+                            <div class="download-options">
+                                <label>Source:</label>
+                                <select id="download-source">
+                                    <option value="auto">Auto</option>
+                                    <option value="kaggle">Kaggle</option>
+                                    <option value="huggingface">HuggingFace</option>
+                                    <option value="local">Local</option>
+                                </select>
+                            </div>
+                            <button id="download-fasttext" class="btn btn-secondary">Download FastText Embeddings</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Download Progress</h3>
+                        <div class="progress-bar" id="download-progress" style="display: none;">
+                            <div class="progress-fill"></div>
+                        </div>
+                        <div id="download-status">Ready</div>
+                        <div id="download-log" class="logs-area"></div>
+                        <div class="actions">
+                            <button id="clear-download-log" class="btn btn-secondary">Clear Log</button>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Model Information</h3>
+                        <div id="model-info" class="info-area"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Code Generation Tab -->
+            <div id="code-gen-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Code Generation Settings</h3>
+                        <form id="code-gen-config">
+                            <div class="form-group">
+                                <label>Language:</label>
+                                <select id="code-language">
+                                    <option value="python">Python</option>
+                                    <option value="javascript">JavaScript</option>
+                                    <option value="typescript">TypeScript</option>
+                                    <option value="java">Java</option>
+                                    <option value="cpp">C++</option>
+                                    <option value="csharp">C#</option>
+                                    <option value="go">Go</option>
+                                    <option value="rust">Rust</option>
+                                    <option value="php">PHP</option>
+                                    <option value="ruby">Ruby</option>
+                                    <option value="swift">Swift</option>
+                                    <option value="kotlin">Kotlin</option>
+                                    <option value="r">R</option>
+                                    <option value="matlab">MATLAB</option>
+                                    <option value="sql">SQL</option>
+                                    <option value="html">HTML/CSS</option>
+                                    <option value="shell">Shell/Bash</option>
+                                    <option value="powershell">PowerShell</option>
+                                    <option value="docker">Docker</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Code Type:</label>
+                                <select id="code-type">
+                                    <option value="function">Function</option>
+                                    <option value="class">Class</option>
+                                    <option value="algorithm">Algorithm</option>
+                                    <option value="data-structure">Data Structure</option>
+                                    <option value="api-client">API Client</option>
+                                    <option value="web-app">Web Application</option>
+                                    <option value="cli-tool">Command Line Tool</option>
+                                    <option value="unit-test">Unit Test</option>
+                                    <option value="database-script">Database Script</option>
+                                    <option value="config-file">Configuration File</option>
+                                    <option value="documentation">Documentation</option>
+                                    <option value="complete-project">Complete Project</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Complexity:</label>
+                                <select id="code-complexity">
+                                    <option value="beginner">Beginner</option>
+                                    <option value="intermediate">Intermediate</option>
+                                    <option value="advanced">Advanced</option>
+                                    <option value="expert">Expert</option>
+                                </select>
+                            </div>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" id="include-comments" checked> Include Comments</label>
+                                <label><input type="checkbox" id="include-examples"> Include Examples</label>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3>Description</h3>
+                        <textarea id="code-description" placeholder="Describe what you want to generate..." rows="6"></textarea>
+                        <div class="actions">
+                            <button id="generate-code" class="btn btn-primary">Generate Code</button>
+                            <button id="copy-code" class="btn btn-secondary" disabled>Copy to Clipboard</button>
+                            <button id="save-code" class="btn btn-secondary" disabled>Save to File</button>
+                            <button id="clear-code" class="btn btn-secondary">Clear</button>
+                        </div>
+                        <div class="progress-bar" id="code-gen-progress" style="display: none;">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Template Information</h3>
+                        <div id="template-info" class="info-area"></div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Generated Code</h3>
+                        <div id="generated-code" class="code-area"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Tab -->
+            <div id="chat-tab" class="tab-panel">
+                <div class="card full-width">
+                    <h3>AI Chat</h3>
+                    <div id="chat-messages" class="chat-area"></div>
+                    <div class="chat-input">
+                        <input type="text" id="chat-input" placeholder="Type your message..." />
+                        <button id="send-message" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Neural Network Tab -->
+            <div id="neural-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Neural Network Topology</h3>
+                        <div id="topology-display" class="info-area"></div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Neural Network Activity</h3>
+                        <div id="activity-display" class="info-area"></div>
+                        <canvas id="neural-canvas" width="400" height="300" style="border: 1px solid #ccc;"></canvas>
+                    </div>
+
+                    <div class="card">
+                        <h3>Controls</h3>
+                        <div class="actions">
+                            <button id="refresh-neural" class="btn btn-primary">Refresh Data</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="settings-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>API Configuration</h3>
+                        <form id="api-config">
+                            <div class="form-group">
+                                <label>API URL:</label>
+                                <input type="text" id="api-url" value="http://localhost:8080/api/v1">
+                            </div>
+                            <div class="form-group">
+                                <label>WebSocket URL:</label>
+                                <input type="text" id="ws-url" value="ws://localhost:8081">
+                            </div>
+                            <div class="form-group">
+                                <label>API Key:</label>
+                                <input type="password" id="api-key" value="2956a13167">
+                            </div>
+                        </form>
+                        <div class="actions">
+                            <button id="save-settings" class="btn btn-primary">Save Settings</button>
+                            <button id="test-api-connection" class="btn btn-secondary">Test Connection</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Training Configuration</h3>
+                        <form id="training-config">
+                            <div class="form-group">
+                                <label>Data Directory:</label>
+                                <input type="text" id="data-dir" value="training_data">
+                            </div>
+                            <div class="form-group">
+                                <label>Sandbox Timeout (seconds):</label>
+                                <input type="number" id="sandbox-timeout" value="300">
+                            </div>
+                            <div class="form-group">
+                                <label>Log Level:</label>
+                                <select id="log-level">
+                                    <option value="DEBUG">DEBUG</option>
+                                    <option value="INFO">INFO</option>
+                                    <option value="WARNING" selected>WARNING</option>
+                                    <option value="ERROR">ERROR</option>
+                                </select>
+                            </div>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" id="enable-diagnostics" checked> Enable Diagnostics</label>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

@@ -1222,17 +1222,8 @@ json APIServer::getErrorLogs(const std::string& sessionId, int limit) {
 
 // Utility functions
 std::string APIServer::generateUniqueId() {
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static std::uniform_int_distribution<> dis(0, 15);
-    static std::uniform_int_distribution<> dis2(8, 11);
-
-    std::stringstream ss;
-    int len = dis2(gen);
-    for (int i = 0; i < len; ++i) {
-        ss << std::hex << dis(gen);
-    }
-    return ss.str();
+    static std::atomic<int> counter{0};
+    return "session_" + std::to_string(++counter);
 }
 
 std::string APIServer::getTimestampString() {

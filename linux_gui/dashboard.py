@@ -62,7 +62,7 @@ from PyQt6.QtGui import (
 )
 
 # CoreAI3D imports
-from coreai3d_client import CoreAI3DClient
+from coreai3d_client import CoreAI3DClient, APIResponse
 from automation_helper import AutomationHelper
 
 # Create logs directory before configuring logging
@@ -691,11 +691,10 @@ class CoreAI3DDashboard(QMainWindow):
         self.load_datasets()
         self.update_system_metrics()
 
-        # Initialize client immediately with proper config
+        # Defer client initialization until event loop is running
         self.client_initialized = False
         # Set the API key from user input
         self.config.api_key = "2956a13167"
-        self.initialize_client()
 
         logger.info("CoreAI3D Dashboard initialized")
 
@@ -755,6 +754,36 @@ class CoreAI3DDashboard(QMainWindow):
 
         logger.info(f"API key validation complete: length={len(api_key)}, configured={bool(api_key)}")
         return api_key
+
+    async def _initialize_client_async(self):
+        """Async method to initialize the CoreAI3D client"""
+        try:
+            logger.info("Initializing CoreAI3D client...")
+
+            # Create client instance
+            self.client = CoreAI3DClient(
+                api_url=self.config.api_url,
+                ws_url=self.config.ws_url,
+                api_key=self.config.api_key
+            )
+
+            # Register chat response handler
+            self.chat_response_handler = self._handle_chat_response
+            self.client.register_chat_handler(self.chat_response_handler)
+
+            # Create debugger
+            self.debugger = CodeDebugger(self.client)
+
+            # Register error handler
+            self.client.register_error_handler(self._handle_chat_error)
+
+            logger.info("CoreAI3D client initialized successfully")
+            self.client_initialized = True
+
+        except Exception as e:
+            logger.error(f"Failed to initialize client: {str(e)}")
+            self.client_initialized = False
+            raise
 
     def _save_config(self):
         """Save configuration to settings"""
@@ -1565,7 +1594,8 @@ class CoreAI3DDashboard(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to refresh containers: {str(e)}")
 
-    def execute_linux_command(self):
+    @qasync.asyncSlot()
+    async def execute_linux_command(self):
         """Execute Linux command in sandbox"""
         if not self.client_initialized:
             if not self.initialize_client():
@@ -1584,9 +1614,9 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_training_progress.setVisible(True)
             self.linux_training_progress.setRange(0, 0)
 
-            # Schedule async command execution using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._execute_linux_command_async(container, command))
-            task.add_done_callback(self._handle_linux_command_result)
+            # Execute command directly with qasync
+            result = await self._execute_linux_command_async(container, command)
+            self._handle_linux_command_result_direct(result)
 
         except Exception as e:
             self.linux_training_progress.setVisible(False)
@@ -1604,10 +1634,9 @@ class CoreAI3DDashboard(QMainWindow):
             })
             return result
 
-    def _handle_linux_command_result(self, task):
-        """Handle Linux command execution result"""
+    def _handle_linux_command_result_direct(self, result):
+        """Handle Linux command execution result directly"""
         try:
-            result = task.result()
             self.linux_training_progress.setVisible(False)
             if result.success:
                 self.linux_output.appendPlainText(f"$ {result.data.get('command', '')}")
@@ -1623,7 +1652,8 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_output.appendPlainText(f"Error: {str(e)}")
             self.status_bar.showMessage("Command execution error")
 
-    def start_linux_container(self):
+    @qasync.asyncSlot()
+    async def start_linux_container(self):
         """Start Linux container"""
         if not self.client_initialized:
             if not self.initialize_client():
@@ -1633,9 +1663,9 @@ class CoreAI3DDashboard(QMainWindow):
         container = self.container_combo.currentText()
 
         try:
-            # Schedule async container start using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._start_linux_container_async(container))
-            task.add_done_callback(self._handle_start_container_result)
+            # Start container directly with qasync
+            result = await self._start_linux_container_async(container)
+            self._handle_start_container_result_direct(result)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
@@ -1646,10 +1676,9 @@ class CoreAI3DDashboard(QMainWindow):
             result = await self.client.post('/linux/start', {'container': container})
             return result
 
-    def _handle_start_container_result(self, task):
-        """Handle container start result"""
+    def _handle_start_container_result_direct(self, result):
+        """Handle container start result directly"""
         try:
-            result = task.result()
             if result.success:
                 self.linux_sandbox_status_label.setText(f"Linux Sandbox: {result.data.get('container', '')} started")
                 self.status_bar.showMessage(f"Container {result.data.get('container', '')} started successfully")
@@ -1658,7 +1687,8 @@ class CoreAI3DDashboard(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
 
-    def stop_linux_container(self):
+    @qasync.asyncSlot()
+    async def stop_linux_container(self):
         """Stop Linux container"""
         if not self.client_initialized:
             if not self.initialize_client():
@@ -1668,9 +1698,9 @@ class CoreAI3DDashboard(QMainWindow):
         container = self.container_combo.currentText()
 
         try:
-            # Schedule async container stop using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._stop_linux_container_async(container))
-            task.add_done_callback(self._handle_stop_container_result)
+            # Stop container directly with qasync
+            result = await self._stop_linux_container_async(container)
+            self._handle_stop_container_result_direct(result)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to stop container: {str(e)}")
@@ -1681,10 +1711,9 @@ class CoreAI3DDashboard(QMainWindow):
             result = await self.client.post('/linux/stop', {'container': container})
             return result
 
-    def _handle_stop_container_result(self, task):
-        """Handle container stop result"""
+    def _handle_stop_container_result_direct(self, result):
+        """Handle container stop result directly"""
         try:
-            result = task.result()
             if result.success:
                 self.linux_sandbox_status_label.setText("Linux Sandbox: Container stopped")
                 self.status_bar.showMessage(f"Container {result.data.get('container', '')} stopped successfully")
@@ -1697,7 +1726,8 @@ class CoreAI3DDashboard(QMainWindow):
         """Clear Linux command output"""
         self.linux_output.clear()
 
-    def run_linux_training(self):
+    @qasync.asyncSlot()
+    async def run_linux_training(self):
         """Run Linux training scenario"""
         if not self.client_initialized:
             if not self.initialize_client():
@@ -1712,9 +1742,9 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_training_progress.setVisible(True)
             self.linux_training_progress.setRange(0, 0)
 
-            # Schedule async training using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._run_linux_training_async(container, scenario))
-            task.add_done_callback(self._handle_linux_training_result)
+            # Run training directly with qasync
+            result = await self._run_linux_training_async(container, scenario)
+            self._handle_linux_training_result_direct(result)
 
         except Exception as e:
             self.linux_training_progress.setVisible(False)
@@ -1732,10 +1762,9 @@ class CoreAI3DDashboard(QMainWindow):
             })
             return result
 
-    def _handle_linux_training_result(self, task):
-        """Handle Linux training result"""
+    def _handle_linux_training_result_direct(self, result):
+        """Handle Linux training result directly"""
         try:
-            result = task.result()
             self.linux_training_progress.setVisible(False)
             if result.success:
                 self.training_results.setPlainText(result.data.get('report', 'Training completed'))
@@ -1748,7 +1777,8 @@ class CoreAI3DDashboard(QMainWindow):
             self.training_results.setPlainText(f"Training error: {str(e)}")
             self.status_bar.showMessage("Training error")
 
-    def generate_training_report(self):
+    @qasync.asyncSlot()
+    async def generate_training_report(self):
         """Generate training report"""
         if not self.client:
             if not self.initialize_client():
@@ -1758,9 +1788,9 @@ class CoreAI3DDashboard(QMainWindow):
         container = self.container_combo.currentText()
 
         try:
-            # Schedule async report generation using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._generate_training_report_async(container))
-            task.add_done_callback(self._handle_training_report_result)
+            # Generate report directly with qasync
+            result = await self._generate_training_report_async(container)
+            self._handle_training_report_result_direct(result)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to generate report: {str(e)}")
@@ -1886,7 +1916,8 @@ class CoreAI3DDashboard(QMainWindow):
 
         layout.addWidget(template_group)
 
-    def generate_code(self):
+    @qasync.asyncSlot()
+    async def generate_code(self):
         """Generate code based on user input"""
         if not self.client:
             if not self.initialize_client():
@@ -1908,14 +1939,14 @@ class CoreAI3DDashboard(QMainWindow):
         self.generate_btn.setEnabled(False)
 
         try:
-            # Schedule async code generation using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._generate_code_async(language, code_type, complexity, description))
-            task.add_done_callback(self._handle_code_generation_result)
+            # Generate code directly with qasync
+            result = await self._generate_code_async(language, code_type, complexity, description)
+            self._handle_code_generation_result_direct(result)
 
         except Exception as e:
             self.generation_progress.setVisible(False)
             self.generate_btn.setEnabled(True)
-            QMessageBox.warning(self, "Error", f"Failed to start code generation: {str(e)}")
+            QMessageBox.warning(self, "Error", f"Failed to generate code: {str(e)}")
 
     async def _generate_code_async(self, language: str, code_type: str, complexity: str, description: str):
         """Async part of code generation"""
@@ -1927,6 +1958,30 @@ class CoreAI3DDashboard(QMainWindow):
         """Handle code generation result"""
         try:
             result = task.result()
+            # Hide progress
+            self.generation_progress.setVisible(False)
+            self.generate_btn.setEnabled(True)
+
+            if result.success:
+                self.generated_code.setPlainText(result.data.get('code', ''))
+                self.template_info.setPlainText(result.data.get('template_info', ''))
+
+                # Update UI
+                self.copy_btn.setEnabled(True)
+                self.save_btn.setEnabled(True)
+
+                self.status_bar.showMessage("Code generated successfully")
+            else:
+                QMessageBox.warning(self, "Generation Failed", result.data.get('error', 'Unknown error'))
+                self.status_bar.showMessage("Code generation failed")
+        except Exception as e:
+            self.generation_progress.setVisible(False)
+            self.generate_btn.setEnabled(True)
+            QMessageBox.warning(self, "Error", f"Failed to generate code: {str(e)}")
+
+    def _handle_code_generation_result_direct(self, result):
+        """Handle code generation result directly"""
+        try:
             # Hide progress
             self.generation_progress.setVisible(False)
             self.generate_btn.setEnabled(True)
@@ -2980,7 +3035,23 @@ if __name__ == "__main__":
         self.health_timer.start(30000)
 
     def initialize_client(self):
-        """Initialize CoreAI3D client"""
+        """Initialize CoreAI3D client - schedules async initialization"""
+        try:
+            logger.info("Scheduling client initialization...")
+            # Schedule the async initialization properly within the qasync event loop
+            asyncio.create_task(self._initialize_client_async())
+            return True
+        except RuntimeError:
+            # No running event loop yet, defer until event loop is available
+            logger.warning("No running event loop, deferring client initialization")
+            # This will be called again by the QTimer.singleShot in main()
+            return False
+        except Exception as e:
+            logger.error(f"Failed to schedule client initialization: {str(e)}")
+            return False
+
+    async def _initialize_client_async(self):
+        """Async client initialization"""
         try:
             logger.info("Starting client initialization...")
             logger.info(f"API URL: {self.config.api_url}")
@@ -2990,7 +3061,7 @@ if __name__ == "__main__":
             # Allow initialization even without API key for offline mode
             if not self.config.api_url:
                 logger.warning("API URL not configured - client will work in offline mode")
-                self.config.api_url = "http://0.0.0.0:8080/api/v1"  # Set default
+                self.config.api_url = "http://localhost:8080/api/v1"  # Set default
 
             if not self.config.api_key:
                 logger.warning("API key not configured - using empty key (may cause authentication failures)")
@@ -3030,17 +3101,16 @@ if __name__ == "__main__":
             logger.info("CoreAI3D client initialized successfully")
 
             self.client_initialized = True
-            return True
 
         except ImportError as e:
             logger.error(f"Import error during client initialization: {str(e)}")
             logger.error("Make sure coreai3d_client.py is in the same directory or PYTHONPATH")
-            return False
+            raise  # Re-raise to let caller handle
         except Exception as e:
             logger.error(f"Failed to initialize client: {str(e)}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
+            raise  # Re-raise to let caller handle
 
     # Event handlers
     def on_dataset_selected(self, item: QListWidgetItem):
@@ -3088,152 +3158,33 @@ if __name__ == "__main__":
         self.status_bar.showMessage(f"Added {filename} to {dataset_name}")
 
     # UI action methods
-    @qasync.asyncSlot()
-    async def test_connection(self):
-        """Test API connection with enhanced error handling and debugging"""
-        async with self.client_lock:
-            try:
-                # Show progress indicator
-                self.status_bar.showMessage("Testing connection...")
-                logger.info("Starting connection test")
+    def test_connection(self, gui_mode=True):
+        """Test API connection with enhanced error handling and debugging
 
-                # Initialize client if not already done
-                if not self.client_initialized:
-                    logger.info("Client not initialized, attempting initialization...")
-                    if not self.initialize_client():
-                        logger.error("Client initialization failed")
-                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
-                        return
+        Args:
+            gui_mode: If True, show GUI dialogs. If False, return result dict.
+        """
+        # Schedule the async connection test in the event loop
+        try:
+            asyncio.create_task(self._test_connection_async())
+        except RuntimeError:
+            # No running event loop, defer until event loop is available
+            logger.warning("No running event loop for connection test, deferring")
+            QTimer.singleShot(100, lambda: self.test_connection(gui_mode))
 
-                # Verify client is properly initialized after initialization attempt
-                if self.client is None:
-                    logger.error("Client is None after initialization attempt")
-                    QMessageBox.critical(
-                        self, "Connection Error",
-                        "✗ Client initialization failed!\n\n"
-                        "The client object is None after initialization.\n"
-                        "This indicates a critical initialization error.\n\n"
-                        "Please check:\n"
-                        "• API URL configuration\n"
-                        "• API key validity\n"
-                        "• Network connectivity\n"
-                        "• Application logs for detailed error information"
-                    )
-                    return
-
-                # Log connection details for debugging
-                logger.info(f"Testing connection to API server at {self.config.api_url}")
-                logger.info(f"WebSocket URL: {self.config.ws_url}")
-                logger.info(f"API key configured: {bool(self.config.api_key)}")
-                logger.info(f"Connection timeout: {self.config.connection_timeout}s")
-                logger.info(f"Max connections: {self.config.max_connections}")
-
-                # The client will connect automatically when making requests
-
-                # Test connection directly using the client with enhanced null safety
-                logger.info("Testing connection to API server...")
-                result = None
-                try:
-                    # Enhanced null check for Pylance static analysis and runtime safety
-                    if self.client is None:
-                        raise RuntimeError("Client object is None - initialization failed")
-    
-                    # Additional validation that client has required methods
-                    if not hasattr(self.client, 'health_check'):
-                        raise AttributeError("Client object missing health_check method")
-    
-                    # Log detailed connection attempt information
-                    logger.info("Attempting health check call...")
-                    logger.info(f"Client type: {type(self.client).__name__}")
-                    logger.info(f"Client has health_check method: {hasattr(self.client, 'health_check')}")
-    
-                    result = await self.client.health_check()
-                    logger.info(f"Health check result: success={result.success}")
-                    if result.data:
-                        logger.info(f"Health check data: {result.data}")
-    
-                except AttributeError as e:
-                    logger.error(f"Client method access error: {str(e)}")
-                    result = type('Result', (), {'success': False, 'data': {'error': str(e)}})()
-                    QMessageBox.critical(
-                        self, "Connection Error",
-                        f"✗ Client method access error!\n\n"
-                        f"Error: {str(e)}\n\n"
-                        "The client object does not have the expected methods.\n"
-                        "This may indicate an incompatible client version."
-                    )
-                    return
-                except Exception as e:
-                    logger.error(f"Health check call failed: {str(e)}")
-                    logger.error(f"Exception type: {type(e).__name__}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    result = type('Result', (), {'success': False, 'data': {'error': str(e)}})()
-                    # Continue to result processing below
-
-                self.status_bar.showMessage("Connection test completed")
-
-                if result.success:
-                    logger.info("Connection test successful")
-                    QMessageBox.information(
-                        self, "Connection Test Successful",
-                        "✓ API connection successful!\n\n"
-                        "The CoreAI3D server is responding correctly.\n"
-                        "All systems are operational."
-                    )
-                else:
-                    error_details = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
-                    logger.warning(f"Connection test failed: {error_details}")
-
-                    # Enhanced error reporting with debugging options
-                    debug_info = self._generate_connection_debug_info(error_details)
-
-                    msg_box = QMessageBox()
-                    msg_box.setIcon(QMessageBox.Icon.Warning)
-                    msg_box.setWindowTitle("Connection Test Failed")
-                    msg_box.setText("✗ API connection failed!")
-                    msg_box.setDetailedText(debug_info)
-
-                    # Add manual debugging buttons
-                    manual_debug_btn = msg_box.addButton("Manual Debug", QMessageBox.ButtonRole.ActionRole)
-                    retry_btn = msg_box.addButton("Retry Test", QMessageBox.ButtonRole.ActionRole)
-                    cancel_btn = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-
-                    msg_box.setDefaultButton(cancel_btn)
-                    msg_box.exec()
-
-                    clicked_button = msg_box.clickedButton()
-                    if clicked_button == manual_debug_btn:
-                        self._run_manual_connection_debug()
-                    elif clicked_button == retry_btn:
-                        # Schedule retry after a short delay
-                        QTimer.singleShot(1000, lambda: asyncio.ensure_future(self.test_connection()))
-
-            except RuntimeError as e:
-                # Handle case where no event loop is running
-                logger.error(f"Event loop error during connection test: {str(e)}")
-                self.status_bar.showMessage("Connection test error")
-                QMessageBox.critical(
-                    self, "Connection Error",
-                    f"✗ No event loop available for connection test!\n\n"
-                    f"Error: {str(e)}\n\n"
-                    "This may indicate the qasync event loop is not properly initialized.\n"
-                    "Please restart the application and try again."
-                )            
-            except Exception as e:
-                logger.error(f"Unexpected error during connection test: {str(e)}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
-                self.status_bar.showMessage("Connection test error")
-                QMessageBox.critical(
-                    self, "Connection Error",
-                    f"✗ Unexpected error during connection test!\n\n"
-                    f"Error: {str(e)}\n\n"
-                    "Please check the application logs for more details."
-                )
+            
+    def _schedule_retry_test_connection(self):
+        """Schedule retry of connection test using qasync-compatible approach"""
+        try:
+            # Create the task and store it in a variable
+            task = asyncio.create_task(self._test_connection_async())
+            # Add the callback that handles the result
+            task.add_done_callback(self._handle_connection_test_result)
+        except RuntimeError:
+            logger.error("No running event loop to schedule retry connection test")
         
         
-    def _generate_connection_debug_info(self, error_details: str) -> str:
+    def _generate_connection_debug_info(self, error_details: str, result=None) -> str:
         """Generate detailed connection debugging information"""
         debug_lines = []
         debug_lines.append("=== CONNECTION DEBUG INFORMATION ===")
@@ -3241,6 +3192,17 @@ if __name__ == "__main__":
         debug_lines.append("Error Details:")
         debug_lines.append(f"  {error_details}")
         debug_lines.append("")
+
+        # Add response details if available
+        if result:
+            debug_lines.append("API Response Details:")
+            debug_lines.append(f"  Success: {getattr(result, 'success', 'Unknown')}")
+            debug_lines.append(f"  Status Code: {getattr(result, 'status_code', 'Unknown')}")
+            debug_lines.append(f"  Message: {getattr(result, 'message', 'Unknown')}")
+            if hasattr(result, 'data') and result.data:
+                debug_lines.append(f"  Data: {result.data}")
+            debug_lines.append("")
+
         debug_lines.append("Configuration:")
         debug_lines.append(f"  API URL: {self.config.api_url}")
         debug_lines.append(f"  WebSocket URL: {self.config.ws_url}")
@@ -3578,38 +3540,41 @@ if __name__ == "__main__":
             return
 
         try:
-            # Only perform health check if client is initialized
+            # Only perform health check if client is initialized and has HTTP session
             if not self.client_initialized:
                 return
 
-            # Schedule async health check without blocking UI
-            asyncio.ensure_future(self._perform_health_check())
+            # Check if HTTP session is available before scheduling health check
+            if not hasattr(self.client, 'session') or self.client.session is None:
+                logger.debug("HTTP session not available, skipping health check")
+                return
+
+            # Schedule async health check without blocking UI using qasync-compatible approach
+            QTimer.singleShot(0, self._schedule_health_check)
 
         except Exception as e:
             logger.error(f"Health check scheduling error: {str(e)}")
 
+    def _schedule_health_check(self):
+        """Schedule health check using qasync-compatible approach"""
+        try:
+            asyncio.create_task(self._perform_health_check())
+        except Exception as e:
+            logger.error(f"Failed to schedule health check: {str(e)}")
+
     async def _perform_health_check(self):
         """Perform the actual async health check"""
         try:
+            # Double-check HTTP session availability before proceeding
+            if not hasattr(self.client, 'session') or self.client.session is None:
+                logger.debug("HTTP session not available during health check, skipping")
+                return
+
             async with self.client_lock:
                 result = await self.client.health_check()
                 if not result.success:
                     self.status_bar.showMessage("System health check failed")
                     logger.warning("System health check failed")
-
-        except Exception as e:
-            logger.error(f"Health check error: {str(e)}")
-            # Don't retry immediately to avoid spam
-            if "Event loop is closed" in str(e) or "Future attached to a different loop" in str(e):
-                logger.warning("Event loop issue detected, will retry health check later")
-
-    async def _perform_health_check(self):
-        """Perform the actual async health check"""
-        try:
-            result = await self.client.health_check()
-            if not result.success:
-                self.status_bar.showMessage("System health check failed")
-                logger.warning("System health check failed")
 
         except Exception as e:
             logger.error(f"Health check error: {str(e)}")
@@ -3820,7 +3785,7 @@ if __name__ == "__main__":
 
     @qasync.asyncSlot()
     async def run_test(self):
-        """Run selected test"""
+        """Run selected test with proper qasync async slot pattern"""
         if not self.client_initialized:
             if not self.initialize_client():
                 QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
@@ -3829,6 +3794,10 @@ if __name__ == "__main__":
         test_type = self.test_type_combo.currentText()
 
         try:
+            # Show progress indicator for test execution
+            self.status_bar.showMessage("Running test...")
+            QApplication.processEvents()  # Allow UI to update
+
             if test_type == "API Connectivity":
                 result = await self.debugger.run_api_test("health_check")
                 self.add_test_result(result)
@@ -3843,8 +3812,13 @@ if __name__ == "__main__":
             else:
                 QMessageBox.information(self, "Test", f"Test type '{test_type}' not implemented yet")
 
+            # Update status when test completes
+            self.status_bar.showMessage("Test completed")
+
         except Exception as e:
-            QMessageBox.warning(self, "Test Error", str(e))
+            logger.error(f"Test execution error: {str(e)}")
+            QMessageBox.warning(self, "Test Error", f"Test execution failed: {str(e)}")
+            self.status_bar.showMessage("Test failed")
 
     def add_test_result(self, result: TestResult):
         """Add test result to table"""
@@ -4094,12 +4068,11 @@ if __name__ == "__main__":
 
         # Add debug logging
         logger.info(f"Sending chat message: {message}")
-        logger.info(f"Client connected: {self.client.is_connected()}")
+        logger.info(f"Client connected: {self.client.is_connected() if self.client else False}")
 
         try:
-            # Schedule async chat message sending using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._send_chat_message_async(message))
-            task.add_done_callback(self._handle_chat_message_result)
+            # Send message directly with qasync
+            asyncio.create_task(self._send_chat_message_async(message))
 
         except Exception as e:
             logger.error(f"Exception in send_chat_message: {str(e)}")
@@ -4672,7 +4645,8 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Clear the download log"""
         self.download_log.clear()
 
-    def start_training(self):
+    @qasync.asyncSlot()
+    async def start_training(self):
         """Start training with current configuration"""
         if not self.client:
             if not self.initialize_client():
@@ -4689,9 +4663,9 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
             self.training_log.appendPlainText(json.dumps(self.learning_config, indent=2))
 
-            # Schedule async training using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._start_training_async())
-            task.add_done_callback(self._handle_training_result)
+            # Start training directly with qasync
+            result = await self._start_training_async()
+            self._handle_training_result_direct(result)
 
         except Exception as e:
             self.training_progress.setVisible(False)
@@ -4727,16 +4701,37 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
             QMessageBox.warning(self, "Training Error", str(e))
 
-    def stop_training(self):
+    def _handle_training_result_direct(self, result):
+        """Handle training result directly"""
+        try:
+            self.training_progress.setVisible(False)
+            self.training_progress.setValue(100)  # Ensure progress shows complete
+            if result.success:
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training completed successfully")
+                if result.data:
+                    self.training_log.appendPlainText(f"Training results: {json.dumps(result.data, indent=2)}")
+                QMessageBox.information(self, "Training Complete", "Training completed successfully")
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training failed: {error_msg}")
+                QMessageBox.warning(self, "Training Failed", error_msg)
+        except Exception as e:
+            self.training_progress.setVisible(False)
+            self.training_progress.setValue(0)  # Reset progress on error
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
+            QMessageBox.warning(self, "Training Error", str(e))
+
+    @qasync.asyncSlot()
+    async def stop_training(self):
         """Stop current training"""
         if not self.client:
             QMessageBox.warning(self, "Connection Error", "No active client connection")
             return
 
         try:
-            # Schedule async training stop using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._stop_training_async())
-            task.add_done_callback(self._handle_stop_training_result)
+            # Stop training directly with qasync
+            result = await self._stop_training_async()
+            self._handle_stop_training_result_direct(result)
 
         except Exception as e:
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
@@ -4764,6 +4759,21 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
             QMessageBox.warning(self, "Stop Error", str(e))
 
+    def _handle_stop_training_result_direct(self, result):
+        """Handle stop training result directly"""
+        try:
+            if result.success:
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training stopped successfully")
+                self.training_progress.setVisible(False)
+                QMessageBox.information(self, "Training Stopped", "Training stopped successfully")
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to stop training: {error_msg}")
+                QMessageBox.warning(self, "Stop Failed", error_msg)
+        except Exception as e:
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
+            QMessageBox.warning(self, "Stop Error", str(e))
+
     def clear_training_log(self):
         """Clear training log"""
         self.training_log.clear()
@@ -4777,7 +4787,8 @@ capabilities, training data, performance metrics, and usage instructions."""
         if file_path:
             self.predict_file_path_edit.setText(file_path)
 
-    def run_prediction(self):
+    @qasync.asyncSlot()
+    async def run_prediction(self):
         """Run prediction with selected model and input"""
         if not self.client:
             if not self.initialize_client():
@@ -4854,12 +4865,12 @@ capabilities, training data, performance metrics, and usage instructions."""
         self.predict_progress.setRange(0, 0)  # Indeterminate progress
 
         try:
-            # Schedule async prediction using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._run_prediction_async(
+            # Run prediction directly with qasync
+            result, parsed_csv_data_result = await self._run_prediction_async(
                 model_type, specific_model, input_type, input_data,
                 contains_header, contains_text, parsed_csv_data
-            ))
-            task.add_done_callback(self._handle_prediction_result)
+            )
+            self._handle_prediction_result_direct(result, parsed_csv_data_result)
 
         except Exception as e:
             self.predict_progress.setVisible(False)
@@ -4915,12 +4926,37 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.predict_results_text.setPlainText(f"Error: {str(e)}")
             self.status_bar.showMessage("Prediction error")
 
+    def _handle_prediction_result_direct(self, result, parsed_csv_data):
+        """Handle prediction result directly"""
+        try:
+            self.predict_progress.setVisible(False)
+            if result.success:
+                # Format and display results
+                formatted_result = self._format_prediction_result(result.data)
+
+                # If we parsed CSV data, include CSV parsing summary
+                if parsed_csv_data and 'error' not in parsed_csv_data:
+                    csv_summary = self._format_csv_summary(parsed_csv_data)
+                    formatted_result = f"CSV Data Summary:\n{csv_summary}\n\nPrediction Results:\n{formatted_result}"
+
+                self.predict_results_text.setPlainText(formatted_result)
+                self.status_bar.showMessage("Prediction completed successfully")
+            else:
+                error_msg = result.data.get('error', 'Unknown error')
+                self.predict_results_text.setPlainText(f"Prediction failed: {error_msg}")
+                self.status_bar.showMessage("Prediction failed")
+        except Exception as e:
+            self.predict_progress.setVisible(False)
+            self.predict_results_text.setPlainText(f"Error: {str(e)}")
+            self.status_bar.showMessage("Prediction error")
+
     def clear_prediction_results(self):
         """Clear prediction results"""
         self.predict_results_text.clear()
         self.predict_progress.setVisible(False)
 
-    def load_model(self):
+    @qasync.asyncSlot()
+    async def load_model(self):
         """Load a model using the specified identifier"""
         if not self.client:
             if not self.initialize_client():
@@ -4953,9 +4989,9 @@ capabilities, training data, performance metrics, and usage instructions."""
         self.load_progress.setRange(0, 0)  # Indeterminate progress
 
         try:
-            # Schedule async model loading using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._load_model_async(model_identifier, model_type))
-            task.add_done_callback(self._handle_load_model_result)
+            # Load model directly with qasync
+            result = await self._load_model_async(model_identifier, model_type)
+            self._handle_load_model_result_direct(result)
 
         except Exception as e:
             self.load_progress.setVisible(False)
@@ -4972,6 +5008,27 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Handle model loading result"""
         try:
             result = task.result()
+            self.load_progress.setVisible(False)
+            if result.success:
+                self.load_results_text.setPlainText(f"✓ Model loaded successfully!\n\n"
+                                                  f"Model: {result.data.get('model_identifier', '')}\n"
+                                                  f"Status: {result.data.get('status', 'Loaded')}\n"
+                                                  f"Details: {result.data.get('message', 'Model is ready for use')}")
+                self.status_bar.showMessage(f"Model '{result.data.get('model_identifier', '')}' loaded successfully")
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.load_results_text.setPlainText(f"✗ Failed to load model!\n\n"
+                                                  f"Model: {result.data.get('model_identifier', '')}\n"
+                                                  f"Error: {error_msg}")
+                self.status_bar.showMessage(f"Failed to load model '{result.data.get('model_identifier', '')}'")
+        except Exception as e:
+            self.load_progress.setVisible(False)
+            self.load_results_text.setPlainText(f"✗ Load operation failed!\n\nError: {str(e)}")
+            self.status_bar.showMessage("Model loading error")
+
+    def _handle_load_model_result_direct(self, result):
+        """Handle model loading result directly"""
+        try:
             self.load_progress.setVisible(False)
             if result.success:
                 self.load_results_text.setPlainText(f"✓ Model loaded successfully!\n\n"
@@ -5401,7 +5458,8 @@ capabilities, training data, performance metrics, and usage instructions."""
         except Exception as e:
             logger.error(f"Error in download error handler: {str(e)}")
 
-    def refresh_neural_data(self):
+    @qasync.asyncSlot()
+    async def refresh_neural_data(self):
         """Refresh neural network data"""
         if not self.client:
             if not self.initialize_client():
@@ -5409,9 +5467,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 return
 
         try:
-            # Schedule async neural data refresh using asyncio.ensure_future() for qasync compatibility
-            task = asyncio.ensure_future(self._refresh_neural_data_async())
-            task.add_done_callback(self._handle_neural_data_result)
+            # Refresh neural data directly with qasync
+            topology_result, activity_result = await self._refresh_neural_data_async()
+            self._handle_neural_data_result_direct(topology_result, activity_result)
 
         except Exception as e:
             error_msg_full = f"Error refreshing neural data: {str(e)}"
@@ -5436,6 +5494,56 @@ capabilities, training data, performance metrics, and usage instructions."""
         try:
             topology_result, activity_result = task.result()
 
+            # Handle topology
+            if topology_result.success:
+                topology_data = topology_result.data
+                if isinstance(topology_data, dict) and topology_data.get('status') == 'success':
+                    # Format topology data nicely
+                    formatted_topology = self._format_topology_data(topology_data)
+                    self.topology_text.setPlainText(formatted_topology)
+                else:
+                    topology = json.dumps(topology_data, indent=2)
+                    self.topology_text.setPlainText(topology)
+            else:
+                error_msg = topology_result.data.get('error', 'Unknown error') if isinstance(topology_result.data, dict) else 'Unknown error'
+                self.topology_text.setPlainText(f"Error: {error_msg}")
+
+            # Handle activity
+            if activity_result.success:
+                activity_data = activity_result.data
+                if isinstance(activity_data, dict) and activity_data.get('status') == 'active':
+                    # Format activity data nicely
+                    formatted_activity = self._format_activity_data(activity_data)
+                    if MATPLOTLIB_AVAILABLE:
+                        self.update_neural_plot(activity_data)
+                    else:
+                        self.activity_text.setPlainText(formatted_activity)
+                else:
+                    if MATPLOTLIB_AVAILABLE:
+                        self.update_neural_plot(activity_data)
+                    else:
+                        activity = json.dumps(activity_data, indent=2)
+                        self.activity_text.setPlainText(activity)
+            else:
+                error_msg = activity_result.data.get('error', 'Unknown error') if isinstance(activity_result.data, dict) else 'Unknown error'
+                if MATPLOTLIB_AVAILABLE:
+                    self.activity_canvas.figure.clear()
+                    self.activity_canvas.draw()
+                else:
+                    self.activity_text.setPlainText(f"Error: {error_msg}")
+
+        except Exception as e:
+            error_msg_full = f"Error refreshing neural data: {str(e)}"
+            self.topology_text.setPlainText(error_msg_full)
+            if MATPLOTLIB_AVAILABLE:
+                self.activity_canvas.figure.clear()
+                self.activity_canvas.draw()
+            else:
+                self.activity_text.setPlainText(error_msg_full)
+
+    def _handle_neural_data_result_direct(self, topology_result, activity_result):
+        """Handle neural data refresh result directly"""
+        try:
             # Handle topology
             if topology_result.success:
                 topology_data = topology_result.data
@@ -5627,6 +5735,11 @@ capabilities, training data, performance metrics, and usage instructions."""
         try:
             logger.info("Starting application shutdown sequence")
 
+            # Stop health check timer to prevent new tasks during shutdown
+            if self.health_timer.isActive():
+                self.health_timer.stop()
+                logger.debug("Health check timer stopped during shutdown")
+
             # Stop sandbox if running
             if self.sandbox_manager.is_running:
                 logger.info("Stopping sandbox manager")
@@ -5643,8 +5756,8 @@ capabilities, training data, performance metrics, and usage instructions."""
                             await self.client.close()
 
                         # Use qasync-compatible approach for closing client
-                        # Schedule the close operation using asyncio.ensure_future() for qasync compatibility
-                        asyncio.ensure_future(close_client())
+                        # Schedule the close operation using asyncio.create_task() for qasync compatibility
+                        asyncio.create_task(close_client())
                 except Exception as e:
                     logger.error(f"Error closing client: {str(e)}")
 
@@ -5661,51 +5774,52 @@ capabilities, training data, performance metrics, and usage instructions."""
 def main():
     """Main application entry point"""
     try:
-        # Parse command line arguments
         import argparse
         parser = argparse.ArgumentParser(description='CoreAI3D Linux GUI Dashboard')
-        parser.add_argument('-v', '--verbose', action='store_true',
-                           help='Enable debug messages')
+        parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug messages')
         args = parser.parse_args()
 
-        # Set logging level based on verbose flag
         if args.verbose:
             logging.getLogger().setLevel(logging.DEBUG)
-            # Also set specific loggers to DEBUG for more detailed output
             logging.getLogger('coreai3d_client').setLevel(logging.DEBUG)
             logging.getLogger('automation_helper').setLevel(logging.DEBUG)
             logger.info("Debug messages enabled via -v flag")
         else:
-            # For release builds, ensure only WARNING and above are shown
             logging.getLogger().setLevel(logging.WARNING)
-            logger.info("Running in release mode - debug messages disabled")
 
-        # Create logs directory
-        os.makedirs('logs', exist_ok=True)
-
-        # Create application
         app = QApplication(sys.argv)
-
-        # Set application properties
         app.setApplicationName("CoreAI3D Linux Dashboard")
         app.setApplicationVersion("1.3.0")
         app.setOrganizationName("CoreAI3D")
 
-        # Create and show dashboard
         dashboard = CoreAI3DDashboard()
         dashboard.show()
 
-        # Run the Qt event loop with qasync support for async operations
-        with qasync.QEventLoop(app) as loop:
-            asyncio.set_event_loop(loop)
-            # Ensure qasync event loop is properly integrated
-            # Note: High DPI scaling attributes are not available in current qasync/PyQt6 version
-            sys.exit(app.exec())
+        # Create unified Qt/asyncio event loop
+        loop = qasync.QEventLoop(app)
+        asyncio.set_event_loop(loop)
+
+        # Run the event loop and schedule client initialization
+        with loop:
+            # Schedule client initialization to run in the event loop using qasync
+            def init_client():
+                try:
+                    logger.info("Running async client initialization...")
+                    # Schedule the coroutine in the existing event loop
+                    asyncio.create_task(dashboard._initialize_client_async())
+                    logger.info("Client initialization scheduled successfully")
+                except Exception as e:
+                    logger.error(f"Client initialization scheduling failed: {str(e)}")
+                    logger.warning("Client initialization failed - manual retry required")
+
+            # Use QTimer to schedule after the event loop is fully running
+            QTimer.singleShot(100, init_client)
+            sys.exit(loop.run_forever())
 
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
         QMessageBox.critical(None, "Application Error", f"Failed to start application: {str(e)}")
         sys.exit(1)
-
+        
 if __name__ == "__main__":
     main()
