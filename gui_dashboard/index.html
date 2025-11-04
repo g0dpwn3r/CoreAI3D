@@ -19,7 +19,8 @@
 
         <nav class="tabs">
             <button class="tab-button active" data-tab="dashboard">Dashboard</button>
-            <button class="tab-button" data-tab="training">Training Data</button>
+            <button class="tab-button" data-tab="training-data">Training Data</button>
+            <button class="tab-button" data-tab="training">Training</button>
             <button class="tab-button" data-tab="testing">Testing</button>
             <button class="tab-button" data-tab="predict">Predict</button>
             <button class="tab-button" data-tab="load-model">Load Model</button>
@@ -89,7 +90,7 @@
             </div>
 
             <!-- Training Data Tab -->
-            <div id="training-tab" class="tab-panel">
+            <div id="training-data-tab" class="tab-panel">
                 <div class="grid">
                     <div class="card">
                         <h3>Datasets</h3>
@@ -108,6 +109,106 @@
                             <button id="remove-file" class="btn btn-danger">Remove File</button>
                         </div>
                         <div id="file-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Training Tab -->
+            <div id="training-tab" class="tab-panel">
+                <div class="grid">
+                    <div class="card">
+                        <h3>Training Configuration</h3>
+                        <form id="training-config-form">
+                            <div class="form-group">
+                                <label>Model Type:</label>
+                                <select id="training-model-type">
+                                    <option value="vision">Vision Model</option>
+                                    <option value="audio">Audio Model</option>
+                                    <option value="text">Text Model</option>
+                                    <option value="multimodal">Multimodal Model</option>
+                                    <option value="neural">Neural Network</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Dataset:</label>
+                                <select id="training-dataset">
+                                    <option value="">Select Dataset...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Epochs:</label>
+                                <input type="number" id="training-epochs" value="10" min="1" max="1000">
+                            </div>
+                            <div class="form-group">
+                                <label>Batch Size:</label>
+                                <input type="number" id="training-batch-size" value="32" min="1" max="1024">
+                            </div>
+                            <div class="form-group">
+                                <label>Learning Rate:</label>
+                                <input type="number" id="training-learning-rate" value="0.001" step="0.0001" min="0.0001" max="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Optimizer:</label>
+                                <select id="training-optimizer">
+                                    <option value="adam">Adam</option>
+                                    <option value="sgd">SGD</option>
+                                    <option value="rmsprop">RMSProp</option>
+                                    <option value="adagrad">AdaGrad</option>
+                                </select>
+                            </div>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" id="training-data-augmentation" checked> Data Augmentation</label>
+                                <label><input type="checkbox" id="training-early-stopping" checked> Early Stopping</label>
+                                <label><input type="checkbox" id="training-save-checkpoints" checked> Save Checkpoints</label>
+                            </div>
+                        </form>
+                        <div class="actions">
+                            <button id="start-training" class="btn btn-success">Start Training</button>
+                            <button id="stop-training" class="btn btn-danger" disabled>Stop Training</button>
+                            <button id="pause-training" class="btn btn-warning" disabled>Pause Training</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Training Progress</h3>
+                        <div class="training-status">
+                            <div class="status-indicator" id="training-status">Ready</div>
+                            <div class="progress-bar" id="training-progress-bar" style="display: none;">
+                                <div class="progress-fill" id="training-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="training-progress-text">0%</div>
+                        </div>
+                        <div class="training-metrics">
+                            <div class="metric">
+                                <label>Current Epoch:</label>
+                                <span id="current-epoch">0</span>
+                            </div>
+                            <div class="metric">
+                                <label>Total Epochs:</label>
+                                <span id="total-epochs">0</span>
+                            </div>
+                            <div class="metric">
+                                <label>Loss:</label>
+                                <span id="training-loss">0.000</span>
+                            </div>
+                            <div class="metric">
+                                <label>Accuracy:</label>
+                                <span id="training-accuracy">0.00%</span>
+                            </div>
+                            <div class="metric">
+                                <label>ETA:</label>
+                                <span id="training-eta">--:--:--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <h3>Training Logs</h3>
+                        <div id="training-logs" class="logs-area"></div>
+                        <div class="actions">
+                            <button id="clear-training-logs" class="btn btn-secondary">Clear Logs</button>
+                            <button id="export-training-logs" class="btn btn-secondary">Export Logs</button>
+                        </div>
                     </div>
                 </div>
             </div>

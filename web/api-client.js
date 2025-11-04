@@ -7,68 +7,121 @@ class CoreAI3DClient {
     constructor(config = {}) {
         this.config = {
             baseURL: config.baseURL || 'http://0.0.0.0:8080/api/v1',
+            fallbackURLs: config.fallbackURLs || ['http://localhost:8080/api/v1', 'http://127.0.0.1:8080/api/v1'],
             wsURL: config.wsURL || 'ws://0.0.0.0:8081/ws',
+            fallbackWSURLs: config.fallbackWSURLs || ['ws://localhost:8081/ws', 'ws://127.0.0.1:8081/ws'],
             apiKey: config.apiKey || '',
             sessionId: config.sessionId || '',
             timeout: config.timeout || 30000,
             retries: config.retries || 3,
             retryDelay: config.retryDelay || 1000,
+            enableOfflineMode: config.enableOfflineMode || true,
+            cacheExpiry: config.cacheExpiry || 300000, // 5 minutes
             ...config
         };
 
         this.ws = null;
         this.isConnected = false;
+        this.connectionStatus = 'disconnected'; // 'connected', 'connecting', 'disconnected', 'error'
         this.messageHandlers = new Map();
         this.requestQueue = [];
         this.isProcessingQueue = false;
+        this.cache = new Map();
+        this.connectionListeners = new Set();
+        this.offlineMode = false;
+        this.lastSuccessfulURL = this.config.baseURL;
+        this.lastSuccessfulWSURL = this.config.wsURL;
     }
 
-    // HTTP API Methods
+    // HTTP API Methods with enhanced error handling and fallbacks
     async request(endpoint, method = 'GET', data = null, options = {}) {
-        const url = `${this.config.baseURL}${endpoint}`;
-        const requestOptions = {
-            method,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.config.apiKey}`,
-                'X-Session-ID': this.config.sessionId,
-                ...options.headers
-            },
-            timeout: this.config.timeout
-        };
+        const urls = [this.lastSuccessfulURL, ...this.config.fallbackURLs];
+        let lastError;
 
-        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-            requestOptions.body = JSON.stringify(data);
+        // Check cache first if offline mode is enabled
+        if (this.offlineMode && method === 'GET') {
+            const cached = this.getCachedResponse(endpoint);
+            if (cached) {
+                console.log(`Serving cached response for ${endpoint}`);
+                return cached;
+            }
         }
 
-        let lastError;
-        for (let attempt = 0; attempt <= this.config.retries; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        for (const baseURL of urls) {
+            const url = `${baseURL}${endpoint}`;
+            const requestOptions = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.config.apiKey}`,
+                    'X-Session-ID': this.config.sessionId,
+                    ...options.headers
+                },
+                timeout: this.config.timeout
+            };
 
-                const response = await fetch(url, {
-                    ...requestOptions,
-                    signal: controller.signal
-                });
+            if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+                requestOptions.body = JSON.stringify(data);
+            }
 
-                clearTimeout(timeoutId);
+            for (let attempt = 0; attempt <= this.config.retries; attempt++) {
+                try {
+                    this.updateConnectionStatus('connecting');
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
+                    const response = await fetch(url, {
+                        ...requestOptions,
+                        signal: controller.signal
+                    });
 
-                const result = await response.json();
-                return result;
-            } catch (error) {
-                lastError = error;
-                if (attempt < this.config.retries) {
-                    await this.delay(this.config.retryDelay * Math.pow(2, attempt));
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        const errorText = await response.text().catch(() => response.statusText);
+                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    }
+
+                    const result = await response.json();
+                    this.lastSuccessfulURL = baseURL;
+                    this.updateConnectionStatus('connected');
+                    this.setOfflineMode(false);
+
+                    // Cache successful GET responses
+                    if (method === 'GET' && this.config.enableOfflineMode) {
+                        this.cacheResponse(endpoint, result);
+                    }
+
+                    return result;
+                } catch (error) {
+                    lastError = error;
+                    this.updateConnectionStatus('error');
+
+                    if (error.name === 'AbortError') {
+                        lastError = new Error(`Request timeout after ${this.config.timeout}ms`);
+                    }
+
+                    if (attempt < this.config.retries) {
+                        const delay = this.config.retryDelay * Math.pow(2, attempt);
+                        console.log(`Retrying ${endpoint} in ${delay}ms (attempt ${attempt + 1}/${this.config.retries + 1})`);
+                        await this.delay(delay);
+                    }
                 }
             }
         }
 
-        throw lastError;
+        // If all URLs failed and offline mode is enabled, try cache
+        if (this.config.enableOfflineMode && method === 'GET') {
+            const cached = this.getCachedResponse(endpoint);
+            if (cached) {
+                console.warn(`All servers unavailable, serving cached response for ${endpoint}`);
+                this.setOfflineMode(true);
+                return cached;
+            }
+        }
+
+        this.updateConnectionStatus('disconnected');
+        throw this.enhanceError(lastError, endpoint);
     }
 
     // Convenience methods for different HTTP verbs
@@ -111,40 +164,71 @@ class CoreAI3DClient {
         return this.post('/batch', { requests });
     }
 
-    // WebSocket connection
+    // WebSocket connection with fallback support
     connectWebSocket() {
         return new Promise((resolve, reject) => {
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.updateConnectionStatus('connected');
                 resolve();
                 return;
             }
 
-            this.ws = new WebSocket(this.config.wsURL);
+            this.updateConnectionStatus('connecting');
+            const urls = [this.lastSuccessfulWSURL, ...this.config.fallbackWSURLs];
 
-            this.ws.onopen = () => {
-                this.isConnected = true;
-                console.log('WebSocket connected');
-                resolve();
-            };
-
-            this.ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    this.handleWebSocketMessage(data);
-                } catch (error) {
-                    console.error('Error parsing WebSocket message:', error);
+            const tryConnect = (urlIndex) => {
+                if (urlIndex >= urls.length) {
+                    this.updateConnectionStatus('disconnected');
+                    reject(new Error('All WebSocket URLs failed to connect'));
+                    return;
                 }
+
+                const url = urls[urlIndex];
+                console.log(`Attempting WebSocket connection to ${url}`);
+
+                this.ws = new WebSocket(url);
+
+                this.ws.onopen = () => {
+                    this.isConnected = true;
+                    this.lastSuccessfulWSURL = url;
+                    this.updateConnectionStatus('connected');
+                    console.log(`WebSocket connected to ${url}`);
+                    resolve();
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('Error parsing WebSocket message:', error);
+                    }
+                };
+
+                this.ws.onclose = (event) => {
+                    this.isConnected = false;
+                    this.updateConnectionStatus('disconnected');
+                    console.log(`WebSocket disconnected from ${url}:`, event.reason);
+
+                    // Auto-reconnect if not intentionally closed
+                    if (event.code !== 1000) {
+                        setTimeout(() => {
+                            console.log('Attempting to reconnect WebSocket...');
+                            this.connectWebSocket().catch(err => console.error('Reconnection failed:', err));
+                        }, 5000);
+                    }
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error(`WebSocket error on ${url}:`, error);
+                    this.updateConnectionStatus('error');
+                    // Try next URL
+                    this.ws.close();
+                    tryConnect(urlIndex + 1);
+                };
             };
 
-            this.ws.onclose = () => {
-                this.isConnected = false;
-                console.log('WebSocket disconnected');
-            };
-
-            this.ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                reject(error);
-            };
+            tryConnect(0);
         });
     }
 
@@ -427,6 +511,124 @@ class CoreAI3DClient {
             await this.delete(`/sessions/${this.config.sessionId}`);
             this.config.sessionId = '';
         }
+    }
+
+    // Connection status monitoring
+    updateConnectionStatus(status) {
+        this.connectionStatus = status;
+        this.connectionListeners.forEach(listener => {
+            try {
+                listener(status);
+            } catch (error) {
+                console.error('Error in connection listener:', error);
+            }
+        });
+    }
+
+    onConnectionStatusChange(listener) {
+        this.connectionListeners.add(listener);
+        // Immediately call with current status
+        listener(this.connectionStatus);
+        return () => this.connectionListeners.delete(listener);
+    }
+
+    getConnectionStatus() {
+        return {
+            status: this.connectionStatus,
+            isConnected: this.isConnected,
+            offlineMode: this.offlineMode,
+            lastSuccessfulURL: this.lastSuccessfulURL,
+            lastSuccessfulWSURL: this.lastSuccessfulWSURL
+        };
+    }
+
+    // Offline mode management
+    setOfflineMode(enabled) {
+        this.offlineMode = enabled;
+        if (enabled) {
+            console.warn('Entering offline mode - using cached responses where available');
+        } else {
+            console.log('Exiting offline mode - attempting to reconnect');
+        }
+    }
+
+    // Caching methods
+    cacheResponse(endpoint, data) {
+        this.cache.set(endpoint, {
+            data,
+            timestamp: Date.now()
+        });
+    }
+
+    getCachedResponse(endpoint) {
+        const cached = this.cache.get(endpoint);
+        if (!cached) return null;
+
+        if (Date.now() - cached.timestamp > this.config.cacheExpiry) {
+            this.cache.delete(endpoint);
+            return null;
+        }
+
+        return cached.data;
+    }
+
+    clearCache() {
+        this.cache.clear();
+        console.log('Response cache cleared');
+    }
+
+    // Enhanced error handling
+    enhanceError(error, endpoint) {
+        const enhancedError = new Error();
+
+        if (error.message.includes('fetch')) {
+            enhancedError.message = `Network connection failed. Please check your internet connection and server status.`;
+            enhancedError.code = 'NETWORK_ERROR';
+            enhancedError.suggestions = [
+                'Check if the CoreAI3D server is running',
+                'Verify the server URL in configuration',
+                'Check firewall and network settings',
+                'Try refreshing the page'
+            ];
+        } else if (error.message.includes('timeout')) {
+            enhancedError.message = `Request timed out. The server may be overloaded or unresponsive.`;
+            enhancedError.code = 'TIMEOUT_ERROR';
+            enhancedError.suggestions = [
+                'Try again in a few moments',
+                'Check server performance',
+                'Consider using offline mode if available'
+            ];
+        } else if (error.message.includes('HTTP 5')) {
+            enhancedError.message = `Server error occurred. Please try again later.`;
+            enhancedError.code = 'SERVER_ERROR';
+            enhancedError.suggestions = [
+                'Wait a few minutes and try again',
+                'Check server logs for issues',
+                'Contact system administrator'
+            ];
+        } else if (error.message.includes('HTTP 4')) {
+            enhancedError.message = `Request error. Please check your input and try again.`;
+            enhancedError.code = 'CLIENT_ERROR';
+            enhancedError.suggestions = [
+                'Verify the request parameters',
+                'Check file paths and permissions',
+                'Ensure required fields are provided'
+            ];
+        } else {
+            enhancedError.message = error.message;
+            enhancedError.code = 'UNKNOWN_ERROR';
+            enhancedError.suggestions = [
+                'Try refreshing the page',
+                'Clear browser cache',
+                'Contact support if the problem persists'
+            ];
+        }
+
+        enhancedError.endpoint = endpoint;
+        enhancedError.originalError = error;
+        enhancedError.timestamp = new Date().toISOString();
+
+        return enhancedError;
     }
 
     // Configuration

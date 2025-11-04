@@ -573,6 +573,86 @@ header h1 {
     animation: pulse 1.5s infinite;
 }
 
+/* Training specific styles */
+.training-status {
+    margin-bottom: 20px;
+}
+
+.status-indicator {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 14px;
+    text-align: center;
+    min-width: 100px;
+}
+
+.status-indicator.ready {
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.status-indicator.training {
+    background-color: var(--accent-color);
+    color: white;
+    animation: pulse 2s infinite;
+}
+
+.status-indicator.paused {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.status-indicator.completed {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.status-indicator.stopped {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.status-indicator.error {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.training-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.training-metrics .metric {
+    background: var(--bg-secondary);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.training-metrics .metric label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 5px;
+}
+
+.training-metrics .metric span {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
+.progress-text {
+    text-align: center;
+    margin-top: 5px;
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
 /* Success/Error States */
 .success {
     color: #155724;

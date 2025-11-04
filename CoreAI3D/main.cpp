@@ -395,8 +395,11 @@ int main(int argc, char* argv[]) {
                 embeddingDimension = 300; // Fallback
             }
 
+            // Set dbHost to "offline" if offline mode is enabled
+            std::string effectiveDbHost = isOfflineMode ? "offline" : dbHost;
+
             // Create Language processor with database parameters
-            Language langProcessor(embeddingFile, embeddingDimension, dbHost, dbPort_val,
+            Language langProcessor(embeddingFile, embeddingDimension, effectiveDbHost, dbPort_val,
                                  dbUser, dbPassword, dbSchema, 0, language,
                                  inputSize_val, outputSize_val, layers_val, neurons_val, 1);
 
@@ -407,7 +410,7 @@ int main(int argc, char* argv[]) {
                 << " for language: " << language << std::endl;
             langProcessor.setCurrentLanguage(language);
 
-            // Start chat with database persistence
+            // Start chat with database persistence (or offline mode)
             langProcessor.chat();
         }
         else if (startPredict)

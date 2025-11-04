@@ -31,11 +31,78 @@ const App = () => {
     const [message, setMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
+    // State for connection status and error handling
+    const [connectionStatus, setConnectionStatus] = useState('disconnected');
+    const [isOffline, setIsOffline] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
+    const [lastError, setLastError] = useState(null);
+    const [showErrorDetails, setShowErrorDetails] = useState(false);
+
     // Helper function for UI messages
     const showMessage = (msg, type = 'info') => {
         setMessage({ text: msg, type });
         setTimeout(() => setMessage(''), 5000); // Clear message after 5 seconds
     };
+
+    // Enhanced error handling with user feedback
+    const handleApiError = (error, endpoint) => {
+        console.error(`API Error for ${endpoint}:`, error);
+
+        setLastError({
+            message: error.message,
+            code: error.code,
+            suggestions: error.suggestions || [],
+            endpoint,
+            timestamp: error.timestamp || new Date().toISOString()
+        });
+
+        let errorType = 'error';
+        let displayMessage = error.message;
+
+        if (error.code === 'NETWORK_ERROR') {
+            setConnectionStatus('disconnected');
+            setIsOffline(true);
+            errorType = 'warning';
+        } else if (error.code === 'TIMEOUT_ERROR') {
+            errorType = 'warning';
+            displayMessage += ' (Request timed out)';
+        } else if (error.code === 'SERVER_ERROR') {
+            setConnectionStatus('error');
+            errorType = 'error';
+        }
+
+        showMessage(displayMessage, errorType);
+        setRetryCount(prev => prev + 1);
+    };
+
+    // Connection status monitoring
+    useEffect(() => {
+        // This would be set up when the client is initialized
+        // For now, we'll simulate connection monitoring
+        const checkConnection = async () => {
+            try {
+                // Attempt a simple health check
+                const response = await fetch('http://localhost:8080/health', {
+                    method: 'GET',
+                    timeout: 5000
+                });
+                if (response.ok) {
+                    setConnectionStatus('connected');
+                    setIsOffline(false);
+                } else {
+                    setConnectionStatus('error');
+                }
+            } catch (error) {
+                setConnectionStatus('disconnected');
+                setIsOffline(true);
+            }
+        };
+
+        checkConnection();
+        const interval = setInterval(checkConnection, 30000); // Check every 30 seconds
+
+        return () => clearInterval(interval);
+    }, []);
 
     // Generic handler for form field changes
     const handleChange = (setter) => (e) => {
@@ -52,8 +119,8 @@ const App = () => {
         setter(e.target.checked);
     };
 
-    // Real API calls to C++ backend using Training class
-    const apiCall = async (endpoint, params = {}) => {
+    // Enhanced API calls with improved error handling and retry options
+    const apiCall = async (endpoint, params = {}, retryAttempt = 0) => {
         setIsLoading(true);
         showMessage(`Executing ${endpoint}...`, 'info');
 
@@ -73,24 +140,60 @@ const App = () => {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const errorText = await response.text().catch(() => response.statusText);
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
 
             const result = await response.json();
 
             if (result.success) {
                 showMessage(`${endpoint} completed successfully!`, 'success');
+                setConnectionStatus('connected');
+                setIsOffline(false);
+                setRetryCount(0);
+                setLastError(null);
             } else {
-                showMessage(`Error: ${result.error || 'Unknown error'}`, 'error');
+                const error = new Error(result.error || 'Unknown error');
+                error.code = 'API_ERROR';
+                throw error;
             }
 
             return result;
         } catch (error) {
             console.error(`API call failed:`, error);
-            showMessage(`Failed to execute ${endpoint}: ${error.message}`, 'error');
+            handleApiError(error, endpoint);
+
+            // Auto-retry for certain errors
+            if (retryAttempt < 2 && (error.message.includes('timeout') || error.message.includes('network'))) {
+                const delay = Math.pow(2, retryAttempt) * 1000; // Exponential backoff
+                showMessage(`Retrying ${endpoint} in ${delay/1000}s...`, 'warning');
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return apiCall(endpoint, params, retryAttempt + 1);
+            }
+
             return { success: false, error: error.message };
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    // Manual retry function
+    const retryLastAction = async () => {
+        if (lastError) {
+            showMessage('Retrying last action...', 'info');
+            // This would need to be implemented based on the last successful action
+            // For now, just attempt a health check
+            try {
+                const response = await fetch('http://localhost:8080/health');
+                if (response.ok) {
+                    setConnectionStatus('connected');
+                    setIsOffline(false);
+                    showMessage('Connection restored!', 'success');
+                    setLastError(null);
+                }
+            } catch (error) {
+                showMessage('Retry failed. Please check server status.', 'error');
+            }
         }
     };
 
@@ -110,6 +213,37 @@ const App = () => {
                     CoreAI3D Configuration
                 </h1>
 
+                {/* Connection Status Indicator */}
+                <div className="flex items-center justify-between p-4 bg-gray-700 rounded-lg shadow-md mb-4">
+                    <div className="flex items-center space-x-3">
+                        <div className={`w-3 h-3 rounded-full ${
+                            connectionStatus === 'connected' ? 'bg-green-500' :
+                            connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                            connectionStatus === 'error' ? 'bg-red-500' : 'bg-gray-500'
+                        }`}></div>
+                        <span className="text-gray-300 font-medium">
+                            Status: {connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1)}
+                            {isOffline && ' (Offline Mode)'}
+                        </span>
+                        {retryCount > 0 && (
+                            <span className="text-yellow-400 text-sm">
+                                (Retry #{retryCount})
+                            </span>
+                        )}
+                    </div>
+                    {(connectionStatus === 'disconnected' || connectionStatus === 'error') && (
+                        <button
+                            onClick={retryLastAction}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition duration-200 flex items-center space-x-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            <span>Retry</span>
+                        </button>
+                    )}
+                </div>
+
                 {isLoading && (
                     <div className="flex items-center justify-center p-4 bg-blue-600 rounded-lg shadow-md animate-pulse">
                         <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -120,8 +254,45 @@ const App = () => {
                     </div>
                 )}
                 {message.text && !isLoading && (
-                    <div className={`p-4 rounded-lg shadow-md text-center ${message.type === 'info' ? 'bg-blue-600' : 'bg-green-600'}`}>
+                    <div className={`p-4 rounded-lg shadow-md text-center ${
+                        message.type === 'error' ? 'bg-red-600' :
+                        message.type === 'warning' ? 'bg-yellow-600' :
+                        message.type === 'success' ? 'bg-green-600' : 'bg-blue-600'
+                    }`}>
                         <span className="text-white text-lg font-medium">{message.text}</span>
+                    </div>
+                )}
+
+                {/* Error Details Panel */}
+                {lastError && (
+                    <div className="bg-red-900 border border-red-700 rounded-lg p-4 mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-red-300 font-semibold">Error Details</h3>
+                            <button
+                                onClick={() => setShowErrorDetails(!showErrorDetails)}
+                                className="text-red-400 hover:text-red-300"
+                            >
+                                {showErrorDetails ? 'Hide' : 'Show'} Details
+                            </button>
+                        </div>
+                        <p className="text-red-200 mb-2">{lastError.message}</p>
+                        {showErrorDetails && (
+                            <div className="text-sm text-red-300">
+                                <p><strong>Code:</strong> {lastError.code}</p>
+                                <p><strong>Endpoint:</strong> {lastError.endpoint}</p>
+                                <p><strong>Time:</strong> {lastError.timestamp}</p>
+                                {lastError.suggestions && lastError.suggestions.length > 0 && (
+                                    <div className="mt-2">
+                                        <strong>Suggestions:</strong>
+                                        <ul className="list-disc list-inside mt-1">
+                                            {lastError.suggestions.map((suggestion, index) => (
+                                                <li key={index}>{suggestion}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
 

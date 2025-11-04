@@ -147,6 +147,41 @@ ipcMain.handle('stop-training', async () => {
   }
 });
 
+ipcMain.handle('pause-training', async () => {
+  try {
+    if (!client) return { success: false, error: 'Client not initialized' };
+    const response = await client.axios.post('/training/pause');
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('resume-training', async () => {
+  try {
+    if (!client) return { success: false, error: 'Client not initialized' };
+    const response = await client.axios.post('/training/resume');
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('export-training-logs', async (event, logs) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `training_logs_${timestamp}.txt`;
+    const filePath = path.join(require('os').homedir(), 'Desktop', filename);
+
+    fs.writeFileSync(filePath, logs);
+    return { success: true, path: filePath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 
 ipcMain.handle('load-model', async (event, identifier, type) => {
   try {

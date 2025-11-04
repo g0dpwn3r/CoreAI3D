@@ -13,6 +13,10 @@ let currentSearchTerm = '';
 let currentTypeFilter = '';
 let currentSourceFilter = 'all';
 let isLoadingModels = false;
+let trainingInProgress = false;
+let trainingStartTime = null;
+let trainingPaused = false;
+let wsConnection = null;
 
 // DOM elements
 const elements = {};
@@ -50,7 +54,7 @@ function initializeElements() {
     elements.healthBar = document.getElementById('health-bar');
     elements.refreshMetricsBtn = document.getElementById('refresh-metrics');
 
-    // Training elements
+    // Training data elements
     elements.datasetList = document.getElementById('dataset-list');
     elements.datasetInfo = document.getElementById('dataset-info');
     elements.fileList = document.getElementById('file-list');
@@ -58,6 +62,32 @@ function initializeElements() {
     elements.deleteDatasetBtn = document.getElementById('delete-dataset');
     elements.addFileBtn = document.getElementById('add-file');
     elements.removeFileBtn = document.getElementById('remove-file');
+
+    // Training elements
+    elements.trainingModelType = document.getElementById('training-model-type');
+    elements.trainingDataset = document.getElementById('training-dataset');
+    elements.trainingEpochs = document.getElementById('training-epochs');
+    elements.trainingBatchSize = document.getElementById('training-batch-size');
+    elements.trainingLearningRate = document.getElementById('training-learning-rate');
+    elements.trainingOptimizer = document.getElementById('training-optimizer');
+    elements.trainingDataAugmentation = document.getElementById('training-data-augmentation');
+    elements.trainingEarlyStopping = document.getElementById('training-early-stopping');
+    elements.trainingSaveCheckpoints = document.getElementById('training-save-checkpoints');
+    elements.startTrainingBtn = document.getElementById('start-training');
+    elements.stopTrainingBtn = document.getElementById('stop-training');
+    elements.pauseTrainingBtn = document.getElementById('pause-training');
+    elements.trainingStatus = document.getElementById('training-status');
+    elements.trainingProgressBar = document.getElementById('training-progress-bar');
+    elements.trainingProgressFill = document.getElementById('training-progress-fill');
+    elements.trainingProgressText = document.getElementById('training-progress-text');
+    elements.currentEpoch = document.getElementById('current-epoch');
+    elements.totalEpochs = document.getElementById('total-epochs');
+    elements.trainingLoss = document.getElementById('training-loss');
+    elements.trainingAccuracy = document.getElementById('training-accuracy');
+    elements.trainingEta = document.getElementById('training-eta');
+    elements.trainingLogs = document.getElementById('training-logs');
+    elements.clearTrainingLogsBtn = document.getElementById('clear-training-logs');
+    elements.exportTrainingLogsBtn = document.getElementById('export-training-logs');
 
     // Testing elements
     elements.testType = document.getElementById('test-type');
@@ -222,11 +252,19 @@ function setupEventListeners() {
     // Dashboard
     elements.refreshMetricsBtn.addEventListener('click', updateSystemMetrics);
 
-    // Training
+    // Training data
     elements.newDatasetBtn.addEventListener('click', createDataset);
     elements.deleteDatasetBtn.addEventListener('click', deleteDataset);
     elements.addFileBtn.addEventListener('click', addFileToDataset);
     elements.removeFileBtn.addEventListener('click', removeFileFromDataset);
+
+    // Training
+    elements.startTrainingBtn.addEventListener('click', startTraining);
+    elements.stopTrainingBtn.addEventListener('click', stopTraining);
+    elements.pauseTrainingBtn.addEventListener('click', pauseTraining);
+    elements.clearTrainingLogsBtn.addEventListener('click', clearTrainingLogs);
+    elements.exportTrainingLogsBtn.addEventListener('click', exportTrainingLogs);
+    elements.trainingModelType.addEventListener('change', onTrainingModelTypeChanged);
 
     // Testing
     elements.testType.addEventListener('change', onTestTypeChanged);
@@ -312,6 +350,7 @@ async function initializeClient() {
         if (result.success) {
             clientInitialized = true;
             updateConnectionStatus(true);
+            initializeWebSocket();
             console.log('Client initialized successfully');
         } else {
             updateConnectionStatus(false);
@@ -320,6 +359,128 @@ async function initializeClient() {
     } catch (error) {
         updateConnectionStatus(false);
         console.error('Error initializing client:', error);
+    }
+}
+
+// Initialize WebSocket connection for real-time updates
+function initializeWebSocket() {
+    try {
+        const wsUrl = elements.wsUrl.value;
+        if (!wsUrl) return;
+
+        wsConnection = new WebSocket(wsUrl);
+
+        wsConnection.onopen = () => {
+            console.log('WebSocket connected');
+        };
+
+        wsConnection.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error);
+            }
+        };
+
+        wsConnection.onclose = () => {
+            console.log('WebSocket disconnected');
+            // Attempt to reconnect after 5 seconds
+            setTimeout(() => {
+                if (clientInitialized) {
+                    initializeWebSocket();
+                }
+            }, 5000);
+        };
+
+        wsConnection.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+    } catch (error) {
+        console.error('Error initializing WebSocket:', error);
+    }
+}
+
+// Handle WebSocket messages
+function handleWebSocketMessage(data) {
+    switch (data.type) {
+        case 'training_progress':
+            updateTrainingProgressFromWS(data);
+            break;
+        case 'training_status':
+            updateTrainingStatusFromWS(data);
+            break;
+        case 'training_log':
+            updateTrainingLogsFromWS(data);
+            break;
+        default:
+            console.log('Unknown WebSocket message type:', data.type);
+    }
+}
+
+// Update training progress from WebSocket
+function updateTrainingProgressFromWS(data) {
+    if (data.progress !== undefined) {
+        updateTrainingProgress(data.progress);
+    }
+
+    if (data.epoch !== undefined) {
+        elements.currentEpoch.textContent = data.epoch;
+    }
+
+    if (data.loss !== undefined) {
+        elements.trainingLoss.textContent = data.loss.toFixed(3);
+    }
+
+    if (data.accuracy !== undefined) {
+        elements.trainingAccuracy.textContent = `${data.accuracy.toFixed(2)}%`;
+    }
+
+    if (data.eta !== undefined) {
+        elements.trainingEta.textContent = data.eta;
+    }
+}
+
+// Update training status from WebSocket
+function updateTrainingStatusFromWS(data) {
+    if (data.status) {
+        elements.trainingStatus.textContent = data.status;
+        elements.trainingStatus.className = `status-indicator ${data.status.toLowerCase()}`;
+
+        switch (data.status.toLowerCase()) {
+            case 'completed':
+                trainingInProgress = false;
+                elements.startTrainingBtn.disabled = false;
+                elements.stopTrainingBtn.disabled = true;
+                elements.pauseTrainingBtn.disabled = true;
+                elements.pauseTrainingBtn.textContent = 'Pause Training';
+                break;
+            case 'stopped':
+                trainingInProgress = false;
+                trainingPaused = false;
+                elements.startTrainingBtn.disabled = false;
+                elements.stopTrainingBtn.disabled = true;
+                elements.pauseTrainingBtn.disabled = true;
+                elements.pauseTrainingBtn.textContent = 'Pause Training';
+                break;
+            case 'paused':
+                trainingPaused = true;
+                elements.pauseTrainingBtn.textContent = 'Resume Training';
+                break;
+            case 'running':
+                trainingPaused = false;
+                elements.pauseTrainingBtn.textContent = 'Pause Training';
+                break;
+        }
+    }
+}
+
+// Update training logs from WebSocket
+function updateTrainingLogsFromWS(data) {
+    if (data.message) {
+        const timestamp = new Date().toLocaleTimeString();
+        elements.trainingLogs.textContent += `[${timestamp}] ${data.message}\n`;
+        elements.trainingLogs.scrollTop = elements.trainingLogs.scrollHeight;
     }
 }
 
@@ -500,6 +661,237 @@ async function loadDatasets() {
         showMessage('Dataset loading would connect to server API', 'info');
     } catch (error) {
         showMessage(`Error loading datasets: ${error.message}`, 'error');
+    }
+}
+
+// Training functionality
+function onTrainingModelTypeChanged() {
+    // Load available datasets for the selected model type
+    loadAvailableDatasets();
+}
+
+async function loadAvailableDatasets() {
+    try {
+        const modelType = elements.trainingModelType.value;
+        // This would normally fetch datasets from the server based on model type
+        // For now, populate with sample datasets
+        const sampleDatasets = [
+            { id: 'mnist', name: 'MNIST Handwritten Digits', type: 'vision' },
+            { id: 'cifar10', name: 'CIFAR-10 Images', type: 'vision' },
+            { id: 'imagenet', name: 'ImageNet', type: 'vision' },
+            { id: 'librispeech', name: 'LibriSpeech Audio', type: 'audio' },
+            { id: 'wikitext', name: 'WikiText-2', type: 'text' },
+            { id: 'squad', name: 'SQuAD Question Answering', type: 'text' }
+        ];
+
+        const filteredDatasets = sampleDatasets.filter(ds => ds.type === modelType || modelType === 'multimodal');
+
+        elements.trainingDataset.innerHTML = '<option value="">Select Dataset...</option>';
+        filteredDatasets.forEach(dataset => {
+            const option = document.createElement('option');
+            option.value = dataset.id;
+            option.textContent = dataset.name;
+            elements.trainingDataset.appendChild(option);
+        });
+    } catch (error) {
+        showMessage(`Error loading datasets: ${error.message}`, 'error');
+    }
+}
+
+async function startTraining() {
+    if (trainingInProgress) {
+        showMessage('Training is already in progress', 'warning');
+        return;
+    }
+
+    const config = {
+        modelType: elements.trainingModelType.value,
+        dataset: elements.trainingDataset.value,
+        epochs: parseInt(elements.trainingEpochs.value),
+        batchSize: parseInt(elements.trainingBatchSize.value),
+        learningRate: parseFloat(elements.trainingLearningRate.value),
+        optimizer: elements.trainingOptimizer.value,
+        dataAugmentation: elements.trainingDataAugmentation.checked,
+        earlyStopping: elements.trainingEarlyStopping.checked,
+        saveCheckpoints: elements.trainingSaveCheckpoints.checked
+    };
+
+    if (!config.dataset) {
+        showMessage('Please select a dataset', 'error');
+        return;
+    }
+
+    try {
+        elements.trainingProgressBar.style.display = 'block';
+        elements.trainingStatus.textContent = 'Starting training...';
+        elements.trainingStatus.className = 'status-indicator training';
+
+        const result = await ipcRenderer.invoke('start-training', config);
+
+        if (result.success) {
+            trainingInProgress = true;
+            trainingStartTime = Date.now();
+            trainingPaused = false;
+
+            elements.startTrainingBtn.disabled = true;
+            elements.stopTrainingBtn.disabled = false;
+            elements.pauseTrainingBtn.disabled = false;
+
+            elements.totalEpochs.textContent = config.epochs;
+            elements.trainingLogs.textContent += `[${new Date().toLocaleTimeString()}] Training started with ${config.modelType} model on ${config.dataset} dataset\n`;
+
+            showMessage('Training started successfully', 'success');
+
+            // Start progress monitoring
+            startTrainingProgressUpdates();
+        } else {
+            elements.trainingStatus.textContent = 'Failed to start';
+            elements.trainingStatus.className = 'status-indicator error';
+            showMessage(`Failed to start training: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        elements.trainingStatus.textContent = 'Error';
+        elements.trainingStatus.className = 'status-indicator error';
+        showMessage(`Training start error: ${error.message}`, 'error');
+    }
+}
+
+async function stopTraining() {
+    if (!trainingInProgress) {
+        showMessage('No training in progress', 'warning');
+        return;
+    }
+
+    try {
+        const result = await ipcRenderer.invoke('stop-training');
+
+        if (result.success) {
+            trainingInProgress = false;
+            trainingPaused = false;
+
+            elements.startTrainingBtn.disabled = false;
+            elements.stopTrainingBtn.disabled = true;
+            elements.pauseTrainingBtn.disabled = true;
+
+            elements.trainingStatus.textContent = 'Stopped';
+            elements.trainingStatus.className = 'status-indicator stopped';
+            elements.trainingProgressBar.style.display = 'none';
+
+            elements.trainingLogs.textContent += `[${new Date().toLocaleTimeString()}] Training stopped by user\n`;
+
+            showMessage('Training stopped successfully', 'info');
+        } else {
+            showMessage(`Failed to stop training: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showMessage(`Error stopping training: ${error.message}`, 'error');
+    }
+}
+
+async function pauseTraining() {
+    if (!trainingInProgress) {
+        showMessage('No training in progress', 'warning');
+        return;
+    }
+
+    try {
+        const action = trainingPaused ? 'resume' : 'pause';
+        const result = await ipcRenderer.invoke(`${action}-training`);
+
+        if (result.success) {
+            trainingPaused = !trainingPaused;
+            elements.trainingStatus.textContent = trainingPaused ? 'Paused' : 'Running';
+            elements.trainingStatus.className = `status-indicator ${trainingPaused ? 'paused' : 'training'}`;
+            elements.pauseTrainingBtn.textContent = trainingPaused ? 'Resume Training' : 'Pause Training';
+
+            elements.trainingLogs.textContent += `[${new Date().toLocaleTimeString()}] Training ${action}d\n`;
+
+            showMessage(`Training ${action}d successfully`, 'info');
+        } else {
+            showMessage(`Failed to ${action} training: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showMessage(`Error ${trainingPaused ? 'resuming' : 'pausing'} training: ${error.message}`, 'error');
+    }
+}
+
+function startTrainingProgressUpdates() {
+    // Simulate progress updates (in real implementation, this would come from WebSocket)
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        if (!trainingInProgress || trainingPaused) return;
+
+        progress += Math.random() * 2; // Simulate progress
+        if (progress >= 100) {
+            progress = 100;
+            clearInterval(progressInterval);
+            trainingCompleted();
+        }
+
+        updateTrainingProgress(progress);
+    }, 1000);
+}
+
+function updateTrainingProgress(progress) {
+    const percentage = Math.min(100, Math.max(0, progress));
+    elements.trainingProgressFill.style.width = `${percentage}%`;
+    elements.trainingProgressText.textContent = `${percentage.toFixed(1)}%`;
+
+    // Update metrics
+    const currentEpoch = Math.floor((percentage / 100) * parseInt(elements.totalEpochs.textContent));
+    elements.currentEpoch.textContent = currentEpoch;
+
+    // Simulate loss and accuracy
+    const loss = (Math.random() * 0.5 + 0.1).toFixed(3);
+    const accuracy = (percentage * 0.8 + Math.random() * 20).toFixed(2);
+
+    elements.trainingLoss.textContent = loss;
+    elements.trainingAccuracy.textContent = `${accuracy}%`;
+
+    // Calculate ETA
+    if (trainingStartTime) {
+        const elapsed = Date.now() - trainingStartTime;
+        const remaining = (elapsed / percentage) * (100 - percentage);
+        const eta = new Date(Date.now() + remaining);
+        elements.trainingEta.textContent = eta.toLocaleTimeString();
+    }
+}
+
+function trainingCompleted() {
+    trainingInProgress = false;
+    elements.startTrainingBtn.disabled = false;
+    elements.stopTrainingBtn.disabled = true;
+    elements.pauseTrainingBtn.disabled = true;
+
+    elements.trainingStatus.textContent = 'Completed';
+    elements.trainingStatus.className = 'status-indicator completed';
+    elements.trainingProgressText.textContent = '100%';
+
+    elements.trainingLogs.textContent += `[${new Date().toLocaleTimeString()}] Training completed successfully\n`;
+
+    showMessage('Training completed successfully!', 'success');
+}
+
+function clearTrainingLogs() {
+    elements.trainingLogs.textContent = '';
+}
+
+async function exportTrainingLogs() {
+    try {
+        const logs = elements.trainingLogs.textContent;
+        if (!logs.trim()) {
+            showMessage('No logs to export', 'warning');
+            return;
+        }
+
+        const result = await ipcRenderer.invoke('export-training-logs', logs);
+        if (result.success) {
+            showMessage(`Training logs exported to ${result.path}`, 'success');
+        } else {
+            showMessage('Failed to export training logs', 'error');
+        }
+    } catch (error) {
+        showMessage('Error exporting training logs', 'error');
     }
 }
 

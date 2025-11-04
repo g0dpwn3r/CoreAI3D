@@ -9,38 +9,69 @@ Database::Database(const std::string& host, unsigned int port,
 {
 #ifdef USE_MYSQL
     try {
+        std::cout << "DEBUG: Starting database initialization..." << std::endl;
+        std::cout << "DEBUG: Connection parameters - Host: " << host << ", Port: " << port
+                  << ", User: " << user << ", Schema: " << schemaName << std::endl;
+
         // Convert SSLMode enum to mysqlx::SSLMode
         mysqlx::SSLMode mysqlSslMode;
         switch (sslMode) {
             case SSLMode::DISABLED:
                 mysqlSslMode = mysqlx::SSLMode::DISABLED;
+                std::cout << "DEBUG: SSL mode set to DISABLED" << std::endl;
                 break;
             case SSLMode::REQUIRED:
                 mysqlSslMode = mysqlx::SSLMode::REQUIRED;
+                std::cout << "DEBUG: SSL mode set to REQUIRED" << std::endl;
                 break;
             case SSLMode::VERIFY_CA:
                 mysqlSslMode = mysqlx::SSLMode::VERIFY_CA;
+                std::cout << "DEBUG: SSL mode set to VERIFY_CA" << std::endl;
                 break;
             case SSLMode::VERIFY_IDENTITY:
                 mysqlSslMode = mysqlx::SSLMode::VERIFY_IDENTITY;
+                std::cout << "DEBUG: SSL mode set to VERIFY_IDENTITY" << std::endl;
                 break;
             default:
                 mysqlSslMode = mysqlx::SSLMode::DISABLED;
+                std::cout << "DEBUG: SSL mode defaulted to DISABLED" << std::endl;
                 break;
         }
 
         // First, connect without schema to create it if it doesn't exist
-        mysqlx::Session tempSession(host, port, user, password);
-        tempSession.sql("CREATE DATABASE IF NOT EXISTS " + schemaName).execute();
-        tempSession.close();
+        std::cout << "DEBUG: Attempting temporary connection to create database..." << std::endl;
+        try {
+            mysqlx::Session tempSession(host, port, user, password);
+            std::cout << "DEBUG: Temporary session created successfully" << std::endl;
+
+            std::string createDbQuery = "CREATE DATABASE IF NOT EXISTS " + schemaName;
+            std::cout << "DEBUG: Executing query: " << createDbQuery << std::endl;
+            tempSession.sql(createDbQuery).execute();
+            std::cout << "DEBUG: Database creation query executed successfully" << std::endl;
+
+            tempSession.close();
+            std::cout << "DEBUG: Temporary session closed" << std::endl;
+        } catch (const std::exception& tempEx) {
+            std::cerr << "DEBUG: Temporary session creation failed: " << tempEx.what() << std::endl;
+            throw std::runtime_error("Failed to create temporary database session: " + std::string(tempEx.what()));
+        }
 
         // Now establish connection to the specific schema
-        session = new mysqlx::Session(host, port, user, password, schemaName);
-        std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
+        std::cout << "DEBUG: Attempting main connection to schema..." << std::endl;
+        try {
+            session = new mysqlx::Session(host, port, user, password, schemaName);
+            std::cout << "DEBUG: Main session created successfully" << std::endl;
+            std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
+        } catch (const std::exception& sessionEx) {
+            std::cerr << "DEBUG: Main session creation failed: " << sessionEx.what() << std::endl;
+            throw std::runtime_error("Failed to create main database session: " + std::string(sessionEx.what()));
+        }
 
         // Create tables if they don't exist and createTables is true
         if (createTables) {
+            std::cout << "DEBUG: Creating database tables..." << std::endl;
             this->createTables();
+            std::cout << "DEBUG: Database tables created successfully" << std::endl;
         }
     } catch (const std::exception& ex) {
         std::cerr << "Database initialization error: " << ex.what() << std::endl;

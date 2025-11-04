@@ -5,12 +5,25 @@ Language::Language(std::string& embedingFile, int& embeddingDim, std::string& db
     : embedingFile(embedingFile), embeddingDim(embeddingDim), dbHost(dbHost), dbPort(dbPort), dbUser(dbUser), dbPassword(dbPassword), dbSchema(dbSchema),
     sslDummy(sslDummy), currentLang(lang), inputSize(inputSize), outputSize(outputSize), layers(layers), neurons(neurons), sessionId(sessionId)
 {
-    // Initialize database connection
-    database = std::make_unique<Database>(dbHost, static_cast<unsigned int>(dbPort), dbUser, dbPassword, dbSchema, SSLMode::DISABLED, true);
-
     // Initialize trainer with database connection
     trainer = std::make_unique<Training>(true, false); // offline mode, non-verbose
     core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, -1.0f, 1.0f);
+
+    // Initialize database connection only if not in offline mode
+    if (!dbHost.empty() && dbHost != "offline") {
+        try {
+            std::cout << "DEBUG: Initializing database connection in Language constructor..." << std::endl;
+            database = std::make_unique<Database>(dbHost, static_cast<unsigned int>(dbPort), dbUser, dbPassword, dbSchema, SSLMode::DISABLED, true);
+            std::cout << "DEBUG: Database connection initialized successfully in Language constructor" << std::endl;
+        } catch (const std::exception& ex) {
+            std::cerr << "DEBUG: Database initialization failed in Language constructor: " << ex.what() << std::endl;
+            // Don't throw - allow Language to work in offline mode
+            database = nullptr;
+        }
+    } else {
+        std::cout << "DEBUG: Running in offline mode - skipping database initialization" << std::endl;
+        database = nullptr;
+    }
 }
 CoreAI*
 Language::getCore()
@@ -130,9 +143,20 @@ std::string Language::answer(std::vector<float>& textEmbedding) {
 int Language::chat() {
     std::string inputText;
 
-    // Load existing chat history and model state at startup
-    std::vector<std::pair<std::string, std::string>> chatHistory = database->loadChatHistory(sessionId);
-    nlohmann::json modelState = database->loadLatestModelState(sessionId);
+    // Load existing chat history and model state at startup (only if database is available)
+    std::vector<std::pair<std::string, std::string>> chatHistory;
+    nlohmann::json modelState;
+    if (database) {
+        try {
+            chatHistory = database->loadChatHistory(sessionId);
+            modelState = database->loadLatestModelState(sessionId);
+        } catch (const std::exception& ex) {
+            std::cerr << "DEBUG: Failed to load chat history/model state from database: " << ex.what() << std::endl;
+            // Continue with empty history/state
+        }
+    } else {
+        std::cout << "DEBUG: Database not available - starting chat with empty history" << std::endl;
+    }
 
     // Load model state if available
     if (!modelState.empty() && core) {
@@ -186,34 +210,40 @@ int Language::chat() {
         }
         if (inputText == "exit")
         {
-            // Save chat history and model state before exiting
-            for (const auto& turn : chatHistory) {
-                database->saveChatMessage(sessionId, turn.first, turn.second);
-            }
+            // Save chat history and model state before exiting (only if database is available)
+            if (database) {
+                try {
+                    for (const auto& turn : chatHistory) {
+                        database->saveChatMessage(sessionId, turn.first, turn.second);
+                    }
 
-            // Save model state to database
-            nlohmann::json jsonData;
-            jsonData["model_state"] = {
-                {"weights_hidden_input", core->getWeightsHiddenInput()},
-                {"weights_output_hidden", core->getWeightsOutputHidden()},
-                {"hidden_output", core->getHiddenOutputData()},
-                {"hidden_error", core->getHiddenErrorData()},
-                {"input_size", inputSize},
-                {"output_size", outputSize},
-                {"layers", layers},
-                {"neurons", neurons},
-                {"embedding_dim", embeddingDim}
-            };
-            jsonData["language_state"] = {
-                {"current_lang", currentLang},
-                {"embeddings_count", embeddingsByLang.size()}
-            };
-            jsonData["embeddings"] = nlohmann::json::object();
-            for (const auto& pair : embeddingsByLang) {
-                jsonData["embeddings"][pair.first] = pair.second;
-            }
+                    // Save model state to database
+                    nlohmann::json jsonData;
+                    jsonData["model_state"] = {
+                        {"weights_hidden_input", core->getWeightsHiddenInput()},
+                        {"weights_output_hidden", core->getWeightsOutputHidden()},
+                        {"hidden_output", core->getHiddenOutputData()},
+                        {"hidden_error", core->getHiddenErrorData()},
+                        {"input_size", inputSize},
+                        {"output_size", outputSize},
+                        {"layers", layers},
+                        {"neurons", neurons},
+                        {"embedding_dim", embeddingDim}
+                    };
+                    jsonData["language_state"] = {
+                        {"current_lang", currentLang},
+                        {"embeddings_count", embeddingsByLang.size()}
+                    };
+                    jsonData["embeddings"] = nlohmann::json::object();
+                    for (const auto& pair : embeddingsByLang) {
+                        jsonData["embeddings"][pair.first] = pair.second;
+                    }
 
-            database->saveModelState(sessionId, jsonData);
+                    database->saveModelState(sessionId, jsonData);
+                } catch (const std::exception& ex) {
+                    std::cerr << "DEBUG: Failed to save final chat history/model state to database: " << ex.what() << std::endl;
+                }
+            }
             break;
         }
         currentLang = detectLanguage(inputText);
@@ -303,38 +333,48 @@ int Language::chat() {
         chatHistory.emplace_back("User", inputText);
         chatHistory.emplace_back("AI", aiResponse);
 
-        // Save chat messages to database after each exchange
-        database->saveChatMessage(sessionId, "User", inputText);
-        database->saveChatMessage(sessionId, "AI", aiResponse);
+        // Save chat messages to database after each exchange (only if database is available)
+        if (database) {
+            try {
+                database->saveChatMessage(sessionId, "User", inputText);
+                database->saveChatMessage(sessionId, "AI", aiResponse);
+            } catch (const std::exception& ex) {
+                std::cerr << "DEBUG: Failed to save chat messages to database: " << ex.what() << std::endl;
+            }
+        }
 
         // Perform simple online training with the new data
         // For now, we'll just update the model state periodically
         static int trainingCounter = 0;
-        if (++trainingCounter % 5 == 0) { // Save every 5 messages
-            nlohmann::json jsonData;
-            jsonData["model_state"] = {
-                {"weights_hidden_input", core->getWeightsHiddenInput()},
-                {"weights_output_hidden", core->getWeightsOutputHidden()},
-                {"hidden_output", core->getHiddenOutputData()},
-                {"hidden_error", core->getHiddenErrorData()},
-                {"input_size", inputSize},
-                {"output_size", outputSize},
-                {"layers", layers},
-                {"neurons", neurons},
-                {"embedding_dim", embeddingDim}
-            };
-            jsonData["language_state"] = {
-                {"current_lang", currentLang},
-                {"embeddings_count", embeddingsByLang.size()}
-            };
-            jsonData["embeddings"] = nlohmann::json::object();
-            for (const auto& pair : embeddingsByLang) {
-                jsonData["embeddings"][pair.first] = pair.second;
-            }
+        if (++trainingCounter % 5 == 0 && database) { // Save every 5 messages, only if database available
+            try {
+                nlohmann::json jsonData;
+                jsonData["model_state"] = {
+                    {"weights_hidden_input", core->getWeightsHiddenInput()},
+                    {"weights_output_hidden", core->getWeightsOutputHidden()},
+                    {"hidden_output", core->getHiddenOutputData()},
+                    {"hidden_error", core->getHiddenErrorData()},
+                    {"input_size", inputSize},
+                    {"output_size", outputSize},
+                    {"layers", layers},
+                    {"neurons", neurons},
+                    {"embedding_dim", embeddingDim}
+                };
+                jsonData["language_state"] = {
+                    {"current_lang", currentLang},
+                    {"embeddings_count", embeddingsByLang.size()}
+                };
+                jsonData["embeddings"] = nlohmann::json::object();
+                for (const auto& pair : embeddingsByLang) {
+                    jsonData["embeddings"][pair.first] = pair.second;
+                }
 
-            database->saveModelState(sessionId, jsonData);
-            if (trainer && trainer->verbose) {
-                std::cout << "Model state saved to database." << std::endl;
+                database->saveModelState(sessionId, jsonData);
+                if (trainer && trainer->verbose) {
+                    std::cout << "Model state saved to database." << std::endl;
+                }
+            } catch (const std::exception& ex) {
+                std::cerr << "DEBUG: Failed to save model state to database: " << ex.what() << std::endl;
             }
         }
 
