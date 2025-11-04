@@ -625,6 +625,107 @@ class CodeDebugger(QObject):
 
             return test_result
 
+    async def run_system_automation_test(self, task_type: str, parameters: Dict[str, Any]) -> TestResult:
+        """Run system automation test"""
+        start_time = time.time()
+
+        try:
+            result = await self.client.automate_task(task_type, parameters)
+            success = result.success
+
+            if success:
+                message = f"System automation task '{task_type}' completed successfully"
+            else:
+                message = f"System automation task '{task_type}' failed"
+
+            duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"automation_{task_type}_{int(time.time())}",
+                test_type="system_automation",
+                success=success,
+                duration=duration,
+                message=message,
+                data=result.data if success else {}
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
+        except Exception as e:
+            duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"automation_{task_type}_{int(time.time())}",
+                test_type="system_automation",
+                success=False,
+                duration=duration,
+                message=str(e)
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
+    async def run_performance_test(self, test_config: Dict[str, Any]) -> TestResult:
+        """Run performance benchmarking test"""
+        start_time = time.time()
+
+        try:
+            # Extract test configuration
+            test_type = test_config.get('test_type', 'cpu')
+            duration = test_config.get('duration', 10)
+            iterations = test_config.get('iterations', 1000)
+            concurrency = test_config.get('concurrency', 1)
+
+            # Call performance test API
+            result = await self.client.run_performance_test({
+                'testType': test_type,
+                'duration': duration,
+                'iterations': iterations,
+                'concurrency': concurrency
+            })
+
+            success = result.success
+
+            if success:
+                # Calculate performance metrics
+                metrics = result.data.get('metrics', {})
+                message = f"Performance test completed: {test_type.upper()} - {metrics.get('operations_per_second', 0):.2f} ops/sec"
+            else:
+                message = f"Performance test failed: {test_type}"
+
+            total_duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"performance_{test_type}_{int(time.time())}",
+                test_type="performance",
+                success=success,
+                duration=total_duration,
+                message=message,
+                data=result.data if success else {}
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
+        except Exception as e:
+            duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"performance_{test_config.get('test_type', 'unknown')}_{int(time.time())}",
+                test_type="performance",
+                success=False,
+                duration=duration,
+                message=str(e)
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
 
 
 
@@ -1001,6 +1102,7 @@ class CoreAI3DDashboard(QMainWindow):
             "Performance Test",
             "Load Test"
         ])
+        self.test_type_combo.currentTextChanged.connect(self.on_test_type_changed)
         config_layout.addRow("Test Type:", self.test_type_combo)
 
         self.test_module_combo = QComboBox()
@@ -1014,6 +1116,65 @@ class CoreAI3DDashboard(QMainWindow):
         config_layout.addRow("Module:", self.test_module_combo)
 
         layout.addWidget(config_group)
+
+        # System Automation specific configuration
+        self.automation_config_group = QGroupBox("System Automation Configuration")
+        automation_layout = QFormLayout(self.automation_config_group)
+
+        self.automation_task_combo = QComboBox()
+        self.automation_task_combo.addItems([
+            "file_backup",
+            "system_cleanup",
+            "log_rotation",
+            "service_restart",
+            "disk_space_check",
+            "network_test",
+            "process_monitor",
+            "custom_script"
+        ])
+        automation_layout.addRow("Task Type:", self.automation_task_combo)
+
+        self.automation_params_text = QTextEdit()
+        self.automation_params_text.setPlaceholderText('Enter task parameters as JSON...\n\nExamples:\n{"source_path": "/home/user", "destination_path": "/backup"}\n{"service_name": "nginx"}\n{"script_path": "/path/to/script.sh"}')
+        self.automation_params_text.setMaximumHeight(100)
+        automation_layout.addRow("Parameters:", self.automation_params_text)
+
+        layout.addWidget(self.automation_config_group)
+        self.automation_config_group.setVisible(False)  # Hidden by default
+
+        # Performance Test specific configuration
+        self.performance_config_group = QGroupBox("Performance Test Configuration")
+        performance_layout = QFormLayout(self.performance_config_group)
+
+        self.performance_test_type_combo = QComboBox()
+        self.performance_test_type_combo.addItems([
+            "cpu",
+            "memory",
+            "disk",
+            "network",
+            "computation"
+        ])
+        performance_layout.addRow("Test Type:", self.performance_test_type_combo)
+
+        self.performance_duration_spin = QSpinBox()
+        self.performance_duration_spin.setRange(1, 300)
+        self.performance_duration_spin.setValue(10)
+        self.performance_duration_spin.setSuffix(" seconds")
+        performance_layout.addRow("Duration:", self.performance_duration_spin)
+
+        self.performance_iterations_spin = QSpinBox()
+        self.performance_iterations_spin.setRange(100, 1000000)
+        self.performance_iterations_spin.setValue(1000)
+        self.performance_iterations_spin.setSingleStep(100)
+        performance_layout.addRow("Iterations:", self.performance_iterations_spin)
+
+        self.performance_concurrency_spin = QSpinBox()
+        self.performance_concurrency_spin.setRange(1, 100)
+        self.performance_concurrency_spin.setValue(1)
+        performance_layout.addRow("Concurrency:", self.performance_concurrency_spin)
+
+        layout.addWidget(self.performance_config_group)
+        self.performance_config_group.setVisible(False)  # Hidden by default
 
         # Test controls
         controls_layout = QHBoxLayout()
@@ -5273,6 +5434,21 @@ capabilities, training data, performance metrics, and usage instructions."""
 
         except Exception as e:
             return f"{key}: [Error formatting array: {str(e)}] ({len(array)} items)"
+
+    def on_test_type_changed(self):
+        """Handle test type selection change"""
+        test_type = self.test_type_combo.currentText()
+
+        # Show/hide automation config group based on test type
+        if test_type == "System Automation":
+            self.automation_config_group.setVisible(True)
+            self.performance_config_group.setVisible(False)
+        elif test_type == "Performance Test":
+            self.automation_config_group.setVisible(False)
+            self.performance_config_group.setVisible(True)
+        else:
+            self.automation_config_group.setVisible(False)
+            self.performance_config_group.setVisible(False)
 
     def on_predict_model_type_changed(self):
         """Handle model type selection change"""

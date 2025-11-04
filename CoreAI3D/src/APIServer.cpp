@@ -331,6 +331,9 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "sessions") {
             return handleSessionsAPI(action, requestData, method);
         }
+        else if (module == "performance") {
+            return handlePerformanceAPI(action, requestData);
+        }
         else if (module == "status") {
             return getAPIStatus();
         }
@@ -459,6 +462,275 @@ json APIServer::handleMathAPI(const std::string& action, const json& parameters)
     catch (const std::exception& e) {
         return createErrorResponse("Math API error: " + std::string(e.what()), 500);
     }
+}
+
+json APIServer::handlePerformanceAPI(const std::string& action, const json& parameters) {
+    try {
+        if (action == "test") {
+            // Extract performance test parameters
+            std::string testType = parameters.value("testType", "cpu");
+            int duration = parameters.value("duration", 10);
+            int iterations = parameters.value("iterations", 1000);
+            int concurrency = parameters.value("concurrency", 1);
+
+            // Validate parameters
+            if (duration <= 0 || duration > 300) {
+                return createErrorResponse("Duration must be between 1 and 300 seconds", 400);
+            }
+            if (iterations <= 0 || iterations > 10000000) {
+                return createErrorResponse("Iterations must be between 1 and 10,000,000", 400);
+            }
+            if (concurrency <= 0 || concurrency > 100) {
+                return createErrorResponse("Concurrency must be between 1 and 100", 400);
+            }
+
+            // Run performance test
+            return runPerformanceTest("", testType, duration, iterations, concurrency);
+        }
+        else {
+            return createErrorResponse("Unknown performance action: " + action, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Performance API error: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::runPerformanceTest(const std::string& sessionId, const std::string& testType, int duration, int iterations, int concurrency) {
+    try {
+        // Initialize performance metrics
+        auto startTime = std::chrono::high_resolution_clock::now();
+        double totalOperations = 0;
+        double totalTime = 0;
+        std::vector<double> operationTimes;
+
+        if (testType == "cpu") {
+            // CPU performance test - matrix multiplication benchmark
+            totalOperations = runCPUTest(duration, iterations, concurrency, operationTimes);
+        }
+        else if (testType == "memory") {
+            // Memory performance test - allocation/deallocation benchmark
+            totalOperations = runMemoryTest(duration, iterations, concurrency, operationTimes);
+        }
+        else if (testType == "disk") {
+            // Disk I/O performance test
+            totalOperations = runDiskTest(duration, iterations, concurrency, operationTimes);
+        }
+        else if (testType == "network") {
+            // Network performance test (simulated)
+            totalOperations = runNetworkTest(duration, iterations, concurrency, operationTimes);
+        }
+        else {
+            return createErrorResponse("Unknown test type: " + testType, 400);
+        }
+
+        auto endTime = std::chrono::high_resolution_clock::now();
+        totalTime = std::chrono::duration<double>(endTime - startTime).count();
+
+        // Calculate performance metrics
+        double operationsPerSecond = totalOperations / totalTime;
+        double averageOperationTime = (operationTimes.size() > 0) ?
+            std::accumulate(operationTimes.begin(), operationTimes.end(), 0.0) / operationTimes.size() : 0.0;
+
+        // Calculate percentiles
+        std::sort(operationTimes.begin(), operationTimes.end());
+        double p50 = operationTimes.size() > 0 ? operationTimes[operationTimes.size() * 0.5] : 0.0;
+        double p95 = operationTimes.size() > 0 ? operationTimes[operationTimes.size() * 0.95] : 0.0;
+        double p99 = operationTimes.size() > 0 ? operationTimes[operationTimes.size() * 0.99] : 0.0;
+
+        json result = {
+            {"test_type", testType},
+            {"duration_seconds", totalTime},
+            {"total_operations", totalOperations},
+            {"operations_per_second", operationsPerSecond},
+            {"average_operation_time_ms", averageOperationTime * 1000},
+            {"p50_operation_time_ms", p50 * 1000},
+            {"p95_operation_time_ms", p95 * 1000},
+            {"p99_operation_time_ms", p99 * 1000},
+            {"concurrency", concurrency},
+            {"iterations", iterations},
+            {"status", "completed"},
+            {"timestamp", getTimestampString()}
+        };
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Performance test failed: " + std::string(e.what()), 500);
+    }
+}
+
+double APIServer::runCPUTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes) {
+    double totalOperations = 0;
+
+    // Simple matrix multiplication benchmark
+    auto matrixMultiply = [](const std::vector<std::vector<double>>& A,
+                           const std::vector<std::vector<double>>& B) -> std::vector<std::vector<double>> {
+        size_t n = A.size();
+        size_t m = B[0].size();
+        size_t p = A[0].size();
+
+        std::vector<std::vector<double>> C(n, std::vector<double>(m, 0.0));
+
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j < m; ++j) {
+                for (size_t k = 0; k < p; ++k) {
+                    C[i][j] += A[i][k] * B[k][j];
+                }
+            }
+        }
+        return C;
+    };
+
+    // Create test matrices
+    std::vector<std::vector<double>> A(10, std::vector<double>(10, 1.0));
+    std::vector<std::vector<double>> B(10, std::vector<double>(10, 2.0));
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto endTime = startTime + std::chrono::seconds(duration);
+
+    while (std::chrono::high_resolution_clock::now() < endTime && totalOperations < iterations) {
+        auto opStart = std::chrono::high_resolution_clock::now();
+
+        // Perform matrix multiplication
+        auto C = matrixMultiply(A, B);
+
+        auto opEnd = std::chrono::high_resolution_clock::now();
+        double opTime = std::chrono::duration<double>(opEnd - opStart).count();
+
+        operationTimes.push_back(opTime);
+        totalOperations += 1.0;
+
+        // Prevent overflow
+        if (operationTimes.size() > 10000) {
+            operationTimes.erase(operationTimes.begin());
+        }
+    }
+
+    return totalOperations;
+}
+
+double APIServer::runMemoryTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes) {
+    double totalOperations = 0;
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto endTime = startTime + std::chrono::seconds(duration);
+
+    std::vector<std::unique_ptr<std::vector<double>>> allocations;
+
+    while (std::chrono::high_resolution_clock::now() < endTime && totalOperations < iterations) {
+        auto opStart = std::chrono::high_resolution_clock::now();
+
+        // Allocate memory
+        size_t allocSize = 1000 + (rand() % 9000); // 1KB to 10KB
+        allocations.push_back(std::make_unique<std::vector<double>>(allocSize, 1.0));
+
+        // Simulate some work
+        for (size_t i = 0; i < std::min(allocSize, size_t(100)); ++i) {
+            (*allocations.back())[i] = (*allocations.back())[i] * 2.0;
+        }
+
+        // Deallocate some memory periodically
+        if (allocations.size() > 100) {
+            allocations.erase(allocations.begin() + rand() % allocations.size());
+        }
+
+        auto opEnd = std::chrono::high_resolution_clock::now();
+        double opTime = std::chrono::duration<double>(opEnd - opStart).count();
+
+        operationTimes.push_back(opTime);
+        totalOperations += 1.0;
+
+        // Prevent overflow
+        if (operationTimes.size() > 10000) {
+            operationTimes.erase(operationTimes.begin());
+        }
+    }
+
+    return totalOperations;
+}
+
+double APIServer::runDiskTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes) {
+    double totalOperations = 0;
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto endTime = startTime + std::chrono::seconds(duration);
+
+    while (std::chrono::high_resolution_clock::now() < endTime && totalOperations < iterations) {
+        auto opStart = std::chrono::high_resolution_clock::now();
+
+        // Simulate disk I/O with file operations
+        std::string tempFile = "temp_perf_test_" + std::to_string(rand()) + ".tmp";
+
+        try {
+            // Write to file
+            std::ofstream outFile(tempFile, std::ios::binary);
+            std::vector<char> data(1024, 'A'); // 1KB of data
+            outFile.write(data.data(), data.size());
+            outFile.close();
+
+            // Read from file
+            std::ifstream inFile(tempFile, std::ios::binary);
+            std::vector<char> readData(1024);
+            inFile.read(readData.data(), readData.size());
+            inFile.close();
+
+            // Clean up
+            std::remove(tempFile.c_str());
+        }
+        catch (const std::exception&) {
+            // Ignore file operation errors for performance testing
+        }
+
+        auto opEnd = std::chrono::high_resolution_clock::now();
+        double opTime = std::chrono::duration<double>(opEnd - opStart).count();
+
+        operationTimes.push_back(opTime);
+        totalOperations += 1.0;
+
+        // Prevent overflow
+        if (operationTimes.size() > 10000) {
+            operationTimes.erase(operationTimes.begin());
+        }
+    }
+
+    return totalOperations;
+}
+
+double APIServer::runNetworkTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes) {
+    double totalOperations = 0;
+
+    // For network testing, we'll simulate network operations with delays
+    // In a real implementation, this would make actual network calls
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    auto endTime = startTime + std::chrono::seconds(duration);
+
+    while (std::chrono::high_resolution_clock::now() < endTime && totalOperations < iterations) {
+        auto opStart = std::chrono::high_resolution_clock::now();
+
+        // Simulate network latency with a small delay
+        std::this_thread::sleep_for(std::chrono::milliseconds(1 + (rand() % 10)));
+
+        // Simulate some data processing
+        std::vector<char> simulatedData(512, 'N');
+        for (size_t i = 0; i < simulatedData.size(); ++i) {
+            simulatedData[i] = static_cast<char>((simulatedData[i] + i) % 256);
+        }
+
+        auto opEnd = std::chrono::high_resolution_clock::now();
+        double opTime = std::chrono::duration<double>(opEnd - opStart).count();
+
+        operationTimes.push_back(opTime);
+        totalOperations += 1.0;
+
+        // Prevent overflow
+        if (operationTimes.size() > 10000) {
+            operationTimes.erase(operationTimes.begin());
+        }
+    }
+
+    return totalOperations;
 }
 
 json APIServer::handleOrchestratorAPI(const std::string& action, const json& parameters) {

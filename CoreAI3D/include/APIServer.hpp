@@ -83,6 +83,7 @@ protected:
     virtual json handleChatAPI(const std::string& action, const json& parameters, const std::string& method);
     virtual json handlePredictAPI(const std::string& action, const json& parameters, const std::string& method);
     virtual json handleTrainAPI(const std::string& action, const json& parameters, const std::string& method);
+    virtual json handlePerformanceAPI(const std::string& action, const json& parameters);
 
     // HTTP request handling
     virtual void handleRequest(http::request<http::string_body>&& req, tcp::socket socket);
@@ -231,6 +232,15 @@ public:
     json getAllModulesStatus();
     json getAPIEndpoints();
     json getAPIVersion();
+
+    // Performance API endpoints
+    json runPerformanceTest(const std::string& sessionId, const std::string& testType, int duration, int iterations, int concurrency);
+
+    // Performance test implementations
+    double runCPUTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes);
+    double runMemoryTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes);
+    double runDiskTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes);
+    double runNetworkTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes);
 
     // Logging and monitoring
     json getRequestLogs(const std::string& sessionId, int limit = 100);

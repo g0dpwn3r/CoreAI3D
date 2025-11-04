@@ -757,6 +757,11 @@ class CoreAI3DClient:
         }
         return await self.post('/prediction/run', data)
 
+    # Performance Testing API
+    async def run_performance_test(self, config: Dict[str, Any]) -> APIResponse:
+        """Run performance benchmarking test"""
+        return await self.post('/performance/test', config)
+
     # Training API
     async def start_training(self, config: Dict[str, Any]) -> APIResponse:
         """Start neural network training with specified configuration"""
