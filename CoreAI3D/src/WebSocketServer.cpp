@@ -11,7 +11,7 @@ const int DEFAULT_NUM_THREADS = 4;
 
 // WebSocketSession implementation
 WebSocketSession::WebSocketSession(tcp::socket socket, const std::string& sessionId)
-    : ws_(std::move(socket)), sessionId_(sessionId), isActive_(true), isStreaming_(false) {
+    : ws_(std::move(socket)), sessionId_(sessionId), server_(nullptr), isActive_(true), isStreaming_(false) {
     // Generate client ID
     clientId_ = WebSocketServer::generateClientId();
 }
@@ -278,14 +278,39 @@ void WebSocketSession::processChatMessage(const json& chatData) {
         std::string message = chatData["message"];
         std::string messageType = chatData.value("messageType", "text");
 
-        // Create response
-        json response = {
-            {"type", "chat_response"},
-            {"message", "Echo: " + message},
-            {"timestamp", getTimestampString()}
+        // Route to AI processing instead of simple echo
+        // This will be handled by the orchestrator or language module
+        json aiRequest = {
+            {"type", "ai_chat_request"},
+            {"message", message},
+            {"messageType", messageType},
+            {"sessionId", sessionId_},
+            {"clientId", clientId_}
         };
 
-        sendMessage(response);
+        // Send to orchestrator for processing
+        if (server_ && server_->orchestrator_) {
+            json aiResponse = server_->orchestrator_->processChatMessage(aiRequest);
+
+            // Create response with AI-generated content
+            json response = {
+                {"type", "chat_response"},
+                {"message", aiResponse.value("response", "AI: " + message)},
+                {"timestamp", getTimestampString()},
+                {"ai_processed", true}
+            };
+
+            sendMessage(response);
+        } else {
+            // Fallback if no orchestrator available
+            json response = {
+                {"type", "chat_response"},
+                {"message", "AI: " + message},
+                {"timestamp", getTimestampString()},
+                {"ai_processed", false}
+            };
+            sendMessage(response);
+        }
     }
     catch (const std::exception& e) {
         sendError("Error processing chat message", 500);
@@ -533,6 +558,7 @@ void WebSocketServer::onAccept(beast::error_code ec, tcp::socket socket) {
         // Create a new session
         std::string sessionId = generateSessionId();
         auto session = std::make_shared<WebSocketSession>(std::move(socket), sessionId);
+        session->server_ = this;
 
         {
             std::lock_guard<std::mutex> lock(sessionMutex_);

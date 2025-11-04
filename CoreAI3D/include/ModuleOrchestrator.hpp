@@ -215,6 +215,9 @@ public:
     bool executeComplexTask(const std::string& taskId);
     std::vector<std::string> breakDownComplexTask(const std::string& taskDescription);
 
+    // Chat message processing
+    json processChatMessage(const json& chatData);
+
     // Learning and adaptation
     bool learnFromTaskResults(const std::vector<OrchestrationTask>& completedTasks);
     bool optimizeModuleAssignment(const std::string& taskType);

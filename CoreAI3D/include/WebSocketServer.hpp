@@ -43,6 +43,7 @@ private:
 
 public:
     WebSocketSession(tcp::socket socket, const std::string& sessionId);
+    class WebSocketServer* server_;
     ~WebSocketSession();
 
     void run();
@@ -79,6 +80,7 @@ private:
 
 class WebSocketServer {
 private:
+public:
     std::unique_ptr<ModuleOrchestrator> orchestrator_;
     std::string serverName_;
     bool isInitialized_;

@@ -6,6 +6,13 @@ let clientInitialized = false;
 let systemMetricsInterval;
 let selectedModelId = null;
 let availableModels = [];
+let currentPage = 1;
+let currentPageSize = 20;
+let hasMorePages = false;
+let currentSearchTerm = '';
+let currentTypeFilter = '';
+let currentSourceFilter = 'all';
+let isLoadingModels = false;
 
 // DOM elements
 const elements = {};
@@ -58,6 +65,11 @@ function initializeElements() {
     elements.runTestBtn = document.getElementById('run-test');
     elements.clearResultsBtn = document.getElementById('clear-results');
     elements.testResults = document.getElementById('test-results');
+    elements.loadTestConfig = document.getElementById('load-test-config');
+    elements.regularTestConfig = document.getElementById('regular-test-config');
+    elements.concurrentUsers = document.getElementById('concurrent-users');
+    elements.testDuration = document.getElementById('test-duration');
+    elements.loadTestEndpoint = document.getElementById('load-test-endpoint');
 
     // Prediction elements
     elements.predictModelType = document.getElementById('predict-model-type');
@@ -130,6 +142,7 @@ function initializeElements() {
     // Downloads elements
     elements.modelSearch = document.getElementById('model-search');
     elements.modelTypeFilter = document.getElementById('model-type-filter');
+    elements.modelSourceFilter = document.getElementById('model-source-filter');
     elements.searchModelsBtn = document.getElementById('search-models');
     elements.refreshModelsBtn = document.getElementById('refresh-models');
     elements.modelTable = document.getElementById('model-table');
@@ -142,6 +155,11 @@ function initializeElements() {
     elements.downloadLog = document.getElementById('download-log');
     elements.clearDownloadLogBtn = document.getElementById('clear-download-log');
     elements.modelInfo = document.getElementById('model-info');
+    elements.paginationControls = document.getElementById('pagination-controls');
+    elements.prevPageBtn = document.getElementById('prev-page');
+    elements.nextPageBtn = document.getElementById('next-page');
+    elements.pageInfo = document.getElementById('page-info');
+    elements.pageSize = document.getElementById('page-size');
 
     // Code generation elements
     elements.codeLanguage = document.getElementById('code-language');
@@ -211,6 +229,7 @@ function setupEventListeners() {
     elements.removeFileBtn.addEventListener('click', removeFileFromDataset);
 
     // Testing
+    elements.testType.addEventListener('change', onTestTypeChanged);
     elements.runTestBtn.addEventListener('click', runTest);
     elements.clearResultsBtn.addEventListener('click', clearTestResults);
 
@@ -256,6 +275,9 @@ function setupEventListeners() {
     elements.cancelDownloadBtn.addEventListener('click', cancelModelDownload);
     elements.downloadFasttextBtn.addEventListener('click', downloadFasttextEmbeddings);
     elements.clearDownloadLogBtn.addEventListener('click', clearDownloadLog);
+    elements.prevPageBtn.addEventListener('click', () => changePage(-1));
+    elements.nextPageBtn.addEventListener('click', () => changePage(1));
+    elements.pageSize.addEventListener('change', onPageSizeChanged);
 
     // Code generation
     elements.generateCodeBtn.addEventListener('click', generateCode);
@@ -482,7 +504,28 @@ async function loadDatasets() {
 }
 
 // Testing functionality
+function onTestTypeChanged() {
+    const testType = elements.testType.value;
+    if (testType === 'load') {
+        elements.loadTestConfig.style.display = 'block';
+        elements.regularTestConfig.style.display = 'none';
+    } else {
+        elements.loadTestConfig.style.display = 'none';
+        elements.regularTestConfig.style.display = 'block';
+    }
+}
+
 async function runTest() {
+    const testType = elements.testType.value;
+
+    if (testType === 'load') {
+        await runLoadTest();
+    } else {
+        await runRegularTest();
+    }
+}
+
+async function runRegularTest() {
     const testType = elements.testType.value;
     const testModule = elements.testModule.value;
 
@@ -513,6 +556,50 @@ async function runTest() {
         row.insertCell(3).textContent = 'N/A';
         row.insertCell(4).textContent = error.message;
         showMessage(`Test error: ${error.message}`, 'error');
+    }
+}
+
+async function runLoadTest() {
+    const concurrentUsers = parseInt(elements.concurrentUsers.value);
+    const duration = parseInt(elements.testDuration.value);
+    const endpoint = elements.loadTestEndpoint.value;
+
+    try {
+        const result = await ipcRenderer.invoke('run-load-test', concurrentUsers, duration, endpoint);
+        if (result.success) {
+            const row = elements.testResults.insertRow();
+            row.insertCell(0).textContent = result.data.test_id || `load_${Date.now()}`;
+            row.insertCell(1).textContent = 'Load Test';
+            row.insertCell(2).textContent = '✓ Success';
+            row.insertCell(3).textContent = `${result.data.duration_seconds.toFixed(2)}s`;
+            row.insertCell(4).textContent = `Users: ${result.data.concurrency}, Ops/sec: ${result.data.operations_per_second.toFixed(2)}`;
+
+            // Add detailed results row
+            const detailRow = elements.testResults.insertRow();
+            detailRow.insertCell(0).textContent = '';
+            detailRow.insertCell(1).textContent = 'Details';
+            detailRow.insertCell(2).textContent = '';
+            detailRow.insertCell(3).textContent = '';
+            detailRow.insertCell(4).textContent = `Total Ops: ${result.data.total_operations}, Avg Latency: ${result.data.average_operation_time_ms.toFixed(2)}ms`;
+
+            showMessage(`Load test completed: ${result.data.operations_per_second.toFixed(2)} ops/sec`, 'success');
+        } else {
+            const row = elements.testResults.insertRow();
+            row.insertCell(0).textContent = `load_${Date.now()}`;
+            row.insertCell(1).textContent = 'Load Test';
+            row.insertCell(2).textContent = '✗ Failed';
+            row.insertCell(3).textContent = 'N/A';
+            row.insertCell(4).textContent = result.error || 'Load test failed';
+            showMessage(`Load test failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        const row = elements.testResults.insertRow();
+        row.insertCell(0).textContent = `load_${Date.now()}`;
+        row.insertCell(1).textContent = 'Load Test';
+        row.insertCell(2).textContent = '✗ Error';
+        row.insertCell(3).textContent = 'N/A';
+        row.insertCell(4).textContent = error.message;
+        showMessage(`Load test error: ${error.message}`, 'error');
     }
 }
 
@@ -824,11 +911,15 @@ async function runApiDebug() {
     try {
         const result = await ipcRenderer.invoke('run-api-debug');
         if (result.success) {
+            // Display debug information in the system info area
+            elements.systemInfo.textContent = JSON.stringify(result.data, null, 2);
             showMessage('API debug completed successfully', 'success');
         } else {
+            elements.systemInfo.textContent = `Error: ${result.error}`;
             showMessage(`API debug failed: ${result.error}`, 'error');
         }
     } catch (error) {
+        elements.systemInfo.textContent = `Error: ${error.message}`;
         showMessage(`API debug error: ${error.message}`, 'error');
     }
 }
@@ -837,11 +928,15 @@ async function runSystemDebug() {
     try {
         const result = await ipcRenderer.invoke('run-system-debug');
         if (result.success) {
+            // Display debug information in the system info area
+            elements.systemInfo.textContent = JSON.stringify(result.data, null, 2);
             showMessage('System debug completed successfully', 'success');
         } else {
+            elements.systemInfo.textContent = `Error: ${result.error}`;
             showMessage(`System debug failed: ${result.error}`, 'error');
         }
     } catch (error) {
+        elements.systemInfo.textContent = `Error: ${error.message}`;
         showMessage(`System debug error: ${error.message}`, 'error');
     }
 }
@@ -980,34 +1075,90 @@ async function refreshContainers() {
 
 // Downloads functionality
 async function searchModels() {
-    const searchTerm = elements.modelSearch.value;
-    const typeFilter = elements.modelTypeFilter.value;
+    if (isLoadingModels) return;
 
-    try {
-        const result = await ipcRenderer.invoke('search-models', { searchTerm, typeFilter });
-        if (result.success) {
-            displayModels(result.models);
-            showMessage(`Found ${result.models.length} models`, 'success');
-        } else {
-            showMessage(`Search failed: ${result.error}`, 'error');
-        }
-    } catch (error) {
-        showMessage(`Search error: ${error.message}`, 'error');
-    }
+    currentSearchTerm = elements.modelSearch.value;
+    currentTypeFilter = elements.modelTypeFilter.value;
+    currentSourceFilter = elements.modelSourceFilter.value;
+    currentPage = 1;
+
+    await loadModels(true);
 }
 
 async function refreshModels() {
+    if (isLoadingModels) return;
+
+    currentPage = 1;
+    await loadModels(false);
+}
+
+async function loadModels(isSearch = false) {
+    if (isLoadingModels) return;
+
+    isLoadingModels = true;
+    elements.searchModelsBtn.disabled = true;
+    elements.refreshModelsBtn.disabled = true;
+    elements.searchModelsBtn.textContent = 'Loading...';
+    elements.refreshModelsBtn.textContent = 'Loading...';
+
     try {
-        const result = await ipcRenderer.invoke('refresh-models');
+        const params = {
+            searchTerm: currentSearchTerm,
+            typeFilter: currentTypeFilter,
+            source: currentSourceFilter,
+            page: currentPage,
+            pageSize: currentPageSize
+        };
+
+        const result = await ipcRenderer.invoke(isSearch ? 'search-models' : 'refresh-models', params);
+
         if (result.success) {
-            displayModels(result.models);
-            showMessage('Models refreshed successfully', 'success');
+            availableModels = result.models || [];
+            hasMorePages = result.hasMore || false;
+
+            displayModels(availableModels);
+            updatePaginationControls();
+
+            const action = isSearch ? 'search' : 'refresh';
+            showMessage(`${action} completed: ${availableModels.length} models found`, 'success');
         } else {
-            showMessage(`Refresh failed: ${result.error}`, 'error');
+            showMessage(`${isSearch ? 'Search' : 'Refresh'} failed: ${result.error}`, 'error');
         }
     } catch (error) {
-        showMessage(`Refresh error: ${error.message}`, 'error');
+        showMessage(`${isSearch ? 'Search' : 'Refresh'} error: ${error.message}`, 'error');
+    } finally {
+        isLoadingModels = false;
+        elements.searchModelsBtn.disabled = false;
+        elements.refreshModelsBtn.disabled = false;
+        elements.searchModelsBtn.textContent = 'Search';
+        elements.refreshModelsBtn.textContent = 'Refresh';
     }
+}
+
+function updatePaginationControls() {
+    if (availableModels.length > 0 || currentPage > 1) {
+        elements.paginationControls.style.display = 'block';
+        elements.pageInfo.textContent = `Page ${currentPage}`;
+        elements.prevPageBtn.disabled = currentPage <= 1;
+        elements.nextPageBtn.disabled = !hasMorePages;
+        elements.pageSize.value = currentPageSize.toString();
+    } else {
+        elements.paginationControls.style.display = 'none';
+    }
+}
+
+async function changePage(direction) {
+    const newPage = currentPage + direction;
+    if (newPage < 1) return;
+
+    currentPage = newPage;
+    await loadModels(currentSearchTerm !== '' || currentTypeFilter !== '' || currentSourceFilter !== 'all');
+}
+
+async function onPageSizeChanged() {
+    currentPageSize = parseInt(elements.pageSize.value);
+    currentPage = 1;
+    await loadModels(currentSearchTerm !== '' || currentTypeFilter !== '' || currentSourceFilter !== 'all');
 }
 
 function displayModels(models) {
@@ -1049,69 +1200,14 @@ function selectModel(modelId) {
 // Load available models from Kaggle and HuggingFace
 async function loadAvailableModels() {
     try {
-        // Load models from both sources
-        const kaggleModels = await loadKaggleModels();
-        const huggingfaceModels = await loadHuggingFaceModels();
-
-        availableModels = [...kaggleModels, ...huggingfaceModels];
-        displayModels(availableModels);
+        // Load initial models from both sources
+        await loadModels(false);
     } catch (error) {
         console.error('Error loading available models:', error);
         showMessage('Failed to load available models', 'error');
     }
 }
 
-async function loadKaggleModels() {
-    // Popular Kaggle models
-    return [
-        { id: 'kaggle-resnet50', name: 'ResNet-50', type: 'Vision', source: 'Kaggle', size: '98MB', downloads: '1.2M' },
-        { id: 'kaggle-efficientnet', name: 'EfficientNet-B0', type: 'Vision', source: 'Kaggle', size: '20MB', downloads: '800K' },
-        { id: 'kaggle-bert-base', name: 'BERT Base', type: 'Text', source: 'Kaggle', size: '420MB', downloads: '2.1M' },
-        { id: 'kaggle-gpt2', name: 'GPT-2 Small', type: 'Text', source: 'Kaggle', size: '117MB', downloads: '1.8M' },
-        { id: 'kaggle-whisper-tiny', name: 'Whisper Tiny', type: 'Audio', source: 'Kaggle', size: '39MB', downloads: '500K' },
-        { id: 'kaggle-yolov5', name: 'YOLOv5 Small', type: 'Vision', source: 'Kaggle', size: '14MB', downloads: '900K' },
-        { id: 'kaggle-t5-base', name: 'T5 Base', type: 'Text', source: 'Kaggle', size: '892MB', downloads: '1.5M' },
-        { id: 'kaggle-clip-vit', name: 'CLIP ViT-Base', type: 'Multimodal', source: 'Kaggle', size: '605MB', downloads: '750K' },
-        { id: 'kaggle-stable-diffusion', name: 'Stable Diffusion v1.5', type: 'Vision', source: 'Kaggle', size: '4.27GB', downloads: '3.2M' },
-        { id: 'kaggle-llama-7b', name: 'LLaMA 7B', type: 'Text', source: 'Kaggle', size: '13GB', downloads: '1.1M' },
-        { id: 'kaggle-falcon-7b', name: 'Falcon 7B', type: 'Text', source: 'Kaggle', size: '14GB', downloads: '650K' },
-        { id: 'kaggle-mistral-7b', name: 'Mistral 7B', type: 'Text', source: 'Kaggle', size: '14GB', downloads: '800K' },
-        { id: 'kaggle-vit-base', name: 'ViT Base', type: 'Vision', source: 'Kaggle', size: '346MB', downloads: '600K' },
-        { id: 'kaggle-roberta-large', name: 'RoBERTa Large', type: 'Text', source: 'Kaggle', size: '1.42GB', downloads: '950K' },
-        { id: 'kaggle-albert-base', name: 'ALBERT Base', type: 'Text', source: 'Kaggle', size: '47MB', downloads: '400K' },
-        { id: 'kaggle-electra-base', name: 'ELECTRA Base', type: 'Text', source: 'Kaggle', size: '436MB', downloads: '350K' },
-        { id: 'kaggle-xlnet-base', name: 'XLNet Base', type: 'Text', source: 'Kaggle', size: '467MB', downloads: '550K' },
-        { id: 'kaggle-tacotron2', name: 'Tacotron2', type: 'Audio', source: 'Kaggle', size: '113MB', downloads: '300K' },
-        { id: 'kaggle-wav2vec2-base', name: 'Wav2Vec2 Base', type: 'Audio', source: 'Kaggle', size: '380MB', downloads: '450K' },
-        { id: 'kaggle-deeplabv3', name: 'DeepLabV3', type: 'Vision', source: 'Kaggle', size: '244MB', downloads: '280K' }
-    ];
-}
-
-async function loadHuggingFaceModels() {
-    // Popular HuggingFace models
-    return [
-        { id: 'hf-gpt2', name: 'GPT-2', type: 'Text', source: 'HuggingFace', size: '665MB', downloads: '15M' },
-        { id: 'hf-bert-base-uncased', name: 'BERT Base Uncased', type: 'Text', source: 'HuggingFace', size: '420MB', downloads: '25M' },
-        { id: 'hf-t5-small', name: 'T5 Small', type: 'Text', source: 'HuggingFace', size: '242MB', downloads: '8M' },
-        { id: 'hf-whisper-base', name: 'Whisper Base', type: 'Audio', source: 'HuggingFace', size: '290MB', downloads: '12M' },
-        { id: 'hf-clip-vit-base', name: 'CLIP ViT-Base', type: 'Multimodal', source: 'HuggingFace', size: '605MB', downloads: '6M' },
-        { id: 'hf-stable-diffusion', name: 'Stable Diffusion', type: 'Vision', source: 'HuggingFace', size: '1.99GB', downloads: '18M' },
-        { id: 'hf-llama-2-7b', name: 'LLaMA 2 7B', type: 'Text', source: 'HuggingFace', size: '13GB', downloads: '5M' },
-        { id: 'hf-falcon-7b-instruct', name: 'Falcon 7B Instruct', type: 'Text', source: 'HuggingFace', size: '14GB', downloads: '2M' },
-        { id: 'hf-mistral-7b-v0.1', name: 'Mistral 7B', type: 'Text', source: 'HuggingFace', size: '14GB', downloads: '3M' },
-        { id: 'hf-vit-base-patch16-224', name: 'ViT Base', type: 'Vision', source: 'HuggingFace', size: '346MB', downloads: '4M' },
-        { id: 'hf-roberta-base', name: 'RoBERTa Base', type: 'Text', source: 'HuggingFace', size: '476MB', downloads: '7M' },
-        { id: 'hf-albert-base-v2', name: 'ALBERT Base v2', type: 'Text', source: 'HuggingFace', size: '47MB', downloads: '2M' },
-        { id: 'hf-electra-base-discriminator', name: 'ELECTRA Base', type: 'Text', source: 'HuggingFace', size: '436MB', downloads: '1.5M' },
-        { id: 'hf-xlnet-base-cased', name: 'XLNet Base', type: 'Text', source: 'HuggingFace', size: '467MB', downloads: '1M' },
-        { id: 'hf-tacotron2', name: 'Tacotron2', type: 'Audio', source: 'HuggingFace', size: '113MB', downloads: '800K' },
-        { id: 'hf-wav2vec2-base-960h', name: 'Wav2Vec2 Base', type: 'Audio', source: 'HuggingFace', size: '380MB', downloads: '3M' },
-        { id: 'hf-deeplabv3-resnet50', name: 'DeepLabV3 ResNet50', type: 'Vision', source: 'HuggingFace', size: '244MB', downloads: '1.2M' },
-        { id: 'hf-yolos-tiny', name: 'YOLOS Tiny', type: 'Vision', source: 'HuggingFace', size: '248MB', downloads: '300K' },
-        { id: 'hf-detr-resnet-50', name: 'DETR ResNet-50', type: 'Vision', source: 'HuggingFace', size: '159MB', downloads: '900K' },
-        { id: 'hf-segformer-b0-finetuned-ade-512-512', name: 'SegFormer B0', type: 'Vision', source: 'HuggingFace', size: '14MB', downloads: '150K' }
-    ];
-}
 
 async function downloadSelectedModel() {
     if (!selectedModelId) {

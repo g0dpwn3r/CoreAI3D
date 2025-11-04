@@ -17,6 +17,9 @@ const EnhancedAIInterface = () => {
     const [isConnected, setIsConnected] = useState(false);
     const [isTyping, setIsTyping] = useState(false);
 
+    // Tab state
+    const [activeTab, setActiveTab] = useState('chat');
+
     // File upload state
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isUploading, setIsUploading] = useState(false);
@@ -26,7 +29,8 @@ const EnhancedAIInterface = () => {
         vision: false,
         audio: false,
         system: false,
-        web: false
+        web: false,
+        predict: false
     });
 
     // Module status
@@ -35,7 +39,8 @@ const EnhancedAIInterface = () => {
         audio: { available: false, active: false },
         system: { available: false, active: false },
         web: { available: false, active: false },
-        math: { available: false, active: false }
+        math: { available: false, active: false },
+        predict: { available: false, active: false }
     });
 
     // WebSocket connection
@@ -335,6 +340,92 @@ const EnhancedAIInterface = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
+    // Prediction state
+    const [predictionData, setPredictionData] = useState({
+        inputFile: null,
+        outputFile: 'predictions.csv',
+        targetFile: null,
+        loadModelId: '',
+        datasetId: -1,
+        layers: 3,
+        neurons: 10,
+        minRange: 0.0,
+        maxRange: 1.0,
+        inputSize: 1,
+        outputSize: 1,
+        numSamples: 0,
+        learningRate: 0.01,
+        epochs: 10,
+        embeddingFile: 'embedding.txt',
+        language: 'en',
+        datasetName: 'online-1a',
+        hasHeader: true,
+        containsText: false,
+        delimiter: ','
+    });
+    const [predictionResults, setPredictionResults] = useState(null);
+    const [isPredicting, setIsPredicting] = useState(false);
+
+    // Prediction functions
+    const runPrediction = async () => {
+        if (!predictionData.inputFile) {
+            addMessage('Please select an input CSV file first', 'error');
+            return;
+        }
+
+        setIsPredicting(true);
+        try {
+            const formData = new FormData();
+            formData.append('input_file', predictionData.inputFile);
+            if (predictionData.targetFile) {
+                formData.append('target_file', predictionData.targetFile);
+            }
+
+            // Add all prediction parameters
+            Object.keys(predictionData).forEach(key => {
+                if (key !== 'inputFile' && key !== 'targetFile' && predictionData[key] !== null) {
+                    formData.append(key, predictionData[key].toString());
+                }
+            });
+
+            const response = await fetch(`${apiConfig.baseURL}/predict/run`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiConfig.apiKey}`,
+                    'X-Session-ID': apiConfig.sessionId
+                },
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.status === 'success') {
+                setPredictionResults(result);
+                addMessage(`Prediction completed successfully. RMSE: ${result.rmse}, MSE: ${result.mse}, Accuracy: ${result.accuracy}%`, 'ai');
+            } else {
+                addMessage(`Prediction failed: ${result.message || 'Unknown error'}`, 'error');
+            }
+        } catch (error) {
+            console.error('Prediction error:', error);
+            addMessage('Failed to run prediction. Please try again.', 'error');
+        } finally {
+            setIsPredicting(false);
+        }
+    };
+
+    const handlePredictionFileUpload = (event, fileType) => {
+        const file = event.target.files[0];
+        if (file && file.type === 'text/csv') {
+            setPredictionData(prev => ({
+                ...prev,
+                [fileType]: file
+            }));
+            addMessage(`${fileType} file uploaded: ${file.name}`, 'ai');
+        } else {
+            addMessage('Please select a valid CSV file', 'error');
+        }
+    };
+
     return (
         <div className="flex h-screen bg-gray-900 text-white">
             {/* Sidebar */}
@@ -372,7 +463,7 @@ const EnhancedAIInterface = () => {
                 {/* Active Streams */}
                 <div className="mb-4">
                     <h3 className="text-lg font-semibold mb-2">Active Streams</h3>
-                    {Object.entries(activeStreams).map(([stream, active]) => (
+                    {Object.entries(activeStreams).filter(([stream]) => stream !== 'predict').map(([stream, active]) => (
                         <div key={stream} className="flex items-center justify-between mb-1">
                             <span className="text-sm capitalize">{stream}</span>
                             <button
@@ -398,6 +489,31 @@ const EnhancedAIInterface = () => {
                         className="w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
                     />
                     {isUploading && <div className="text-sm text-blue-400 mt-1">Uploading...</div>}
+                </div>
+
+                {/* Prediction Files */}
+                <div className="mb-4">
+                    <h3 className="text-lg font-semibold mb-2">Prediction Files</h3>
+                    <div className="space-y-2">
+                        <div>
+                            <label className="block text-xs text-gray-400 mb-1">Input CSV</label>
+                            <input
+                                type="file"
+                                accept=".csv"
+                                onChange={(e) => handlePredictionFileUpload(e, 'inputFile')}
+                                className="w-full text-sm text-gray-300 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-gray-400 mb-1">Target CSV (Optional)</label>
+                            <input
+                                type="file"
+                                accept=".csv"
+                                onChange={(e) => handlePredictionFileUpload(e, 'targetFile')}
+                                className="w-full text-sm text-gray-300 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-yellow-600 file:text-white hover:file:bg-yellow-700"
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 {/* Quick Actions */}
@@ -426,67 +542,239 @@ const EnhancedAIInterface = () => {
                 </div>
             </div>
 
-            {/* Main Chat Area */}
+            {/* Main Content Area */}
             <div className="flex-1 flex flex-col">
-                {/* Header */}
+                {/* Header with Tabs */}
                 <div className="bg-gray-800 p-4 border-b border-gray-700">
-                    <h1 className="text-2xl font-bold text-blue-400">AI Assistant</h1>
+                    <div className="flex items-center justify-between mb-2">
+                        <h1 className="text-2xl font-bold text-blue-400">AI Assistant</h1>
+                        <div className="flex space-x-4">
+                            <button
+                                onClick={() => setActiveTab('chat')}
+                                className={`px-4 py-2 rounded ${activeTab === 'chat' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                            >
+                                Chat
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('predict')}
+                                className={`px-4 py-2 rounded ${activeTab === 'predict' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                            >
+                                Predict
+                            </button>
+                        </div>
+                    </div>
                     <p className="text-gray-400">Multi-modal AI with real-time processing</p>
                 </div>
 
-                {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {messages.map((message) => (
-                        <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                                message.sender === 'user'
-                                    ? 'bg-blue-600 text-white'
-                                    : message.sender === 'error'
-                                    ? 'bg-red-600 text-white'
-                                    : 'bg-gray-700 text-gray-100'
-                            }`}>
-                                <div className="text-sm">{message.content}</div>
-                                <div className="text-xs text-gray-400 mt-1">
-                                    {new Date(message.timestamp).toLocaleTimeString()}
+                {/* Tab Content */}
+                {activeTab === 'chat' ? (
+                    <>
+                        {/* Messages */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                            {messages.map((message) => (
+                                <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                                        message.sender === 'user'
+                                            ? 'bg-blue-600 text-white'
+                                            : message.sender === 'error'
+                                            ? 'bg-red-600 text-white'
+                                            : 'bg-gray-700 text-gray-100'
+                                    }`}>
+                                        <div className="text-sm">{message.content}</div>
+                                        <div className="text-xs text-gray-400 mt-1">
+                                            {new Date(message.timestamp).toLocaleTimeString()}
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
-                    ))}
-                    {isTyping && (
-                        <div className="flex justify-start">
-                            <div className="bg-gray-700 text-gray-100 px-4 py-2 rounded-lg">
-                                <div className="flex space-x-1">
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                            ))}
+                            {isTyping && (
+                                <div className="flex justify-start">
+                                    <div className="bg-gray-700 text-gray-100 px-4 py-2 rounded-lg">
+                                        <div className="flex space-x-1">
+                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
+                            <div ref={messagesEndRef} />
                         </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </div>
 
-                {/* Message Input */}
-                <div className="bg-gray-800 p-4 border-t border-gray-700">
-                    <div className="flex space-x-2">
-                        <input
-                            type="text"
-                            value={currentMessage}
-                            onChange={(e) => setCurrentMessage(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                            placeholder="Type your message..."
-                            className="flex-1 bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            disabled={!isConnected}
-                        />
-                        <button
-                            onClick={sendMessage}
-                            disabled={!isConnected || !currentMessage.trim()}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg"
-                        >
-                            Send
-                        </button>
+                        {/* Message Input */}
+                        <div className="bg-gray-800 p-4 border-t border-gray-700">
+                            <div className="flex space-x-2">
+                                <input
+                                    type="text"
+                                    value={currentMessage}
+                                    onChange={(e) => setCurrentMessage(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                                    placeholder="Type your message..."
+                                    className="flex-1 bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    disabled={!isConnected}
+                                />
+                                <button
+                                    onClick={sendMessage}
+                                    disabled={!isConnected || !currentMessage.trim()}
+                                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg"
+                                >
+                                    Send
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    /* Prediction Tab */
+                    <div className="flex-1 flex flex-col">
+                        {/* Prediction Form */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                            <div className="bg-gray-800 p-4 rounded-lg">
+                                <h3 className="text-lg font-semibold mb-4 text-blue-400">Prediction Configuration</h3>
+
+                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Layers</label>
+                                        <input
+                                            type="number"
+                                            value={predictionData.layers}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, layers: parseInt(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Neurons</label>
+                                        <input
+                                            type="number"
+                                            value={predictionData.neurons}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, neurons: parseInt(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Input Size</label>
+                                        <input
+                                            type="number"
+                                            value={predictionData.inputSize}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, inputSize: parseInt(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Output Size</label>
+                                        <input
+                                            type="number"
+                                            value={predictionData.outputSize}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, outputSize: parseInt(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Learning Rate</label>
+                                        <input
+                                            type="number"
+                                            step="0.001"
+                                            value={predictionData.learningRate}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, learningRate: parseFloat(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            min="0.001"
+                                            max="1.0"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Epochs</label>
+                                        <input
+                                            type="number"
+                                            value={predictionData.epochs}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, epochs: parseInt(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            min="1"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Min Range</label>
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            value={predictionData.minRange}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, minRange: parseFloat(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-gray-400 mb-1">Max Range</label>
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            value={predictionData.maxRange}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, maxRange: parseFloat(e.target.value) }))}
+                                            className="w-full bg-gray-700 text-white px-3 py-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center space-x-4 mb-4">
+                                    <label className="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={predictionData.hasHeader}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, hasHeader: e.target.checked }))}
+                                            className="mr-2"
+                                        />
+                                        <span className="text-sm text-gray-400">Has Header</span>
+                                    </label>
+                                    <label className="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={predictionData.containsText}
+                                            onChange={(e) => setPredictionData(prev => ({ ...prev, containsText: e.target.checked }))}
+                                            className="mr-2"
+                                        />
+                                        <span className="text-sm text-gray-400">Contains Text</span>
+                                    </label>
+                                </div>
+
+                                <button
+                                    onClick={runPrediction}
+                                    disabled={isPredicting || !predictionData.inputFile}
+                                    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white py-3 px-4 rounded-lg font-semibold"
+                                >
+                                    {isPredicting ? 'Running Prediction...' : 'Run Prediction'}
+                                </button>
+                            </div>
+
+                            {/* Prediction Results */}
+                            {predictionResults && (
+                                <div className="bg-gray-800 p-4 rounded-lg">
+                                    <h3 className="text-lg font-semibold mb-4 text-green-400">Prediction Results</h3>
+                                    <div className="grid grid-cols-3 gap-4 mb-4">
+                                        <div className="bg-gray-700 p-3 rounded">
+                                            <div className="text-sm text-gray-400">RMSE</div>
+                                            <div className="text-xl font-bold text-blue-400">{predictionResults.rmse?.toFixed(4)}</div>
+                                        </div>
+                                        <div className="bg-gray-700 p-3 rounded">
+                                            <div className="text-sm text-gray-400">MSE</div>
+                                            <div className="text-xl font-bold text-blue-400">{predictionResults.mse?.toFixed(4)}</div>
+                                        </div>
+                                        <div className="bg-gray-700 p-3 rounded">
+                                            <div className="text-sm text-gray-400">Accuracy</div>
+                                            <div className="text-xl font-bold text-green-400">{(predictionResults.accuracy * 100)?.toFixed(2)}%</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-sm text-gray-400">
+                                        Training Time: {predictionResults.training_time?.toFixed(2)} seconds
+                                    </div>
+                                    <div className="text-sm text-gray-400 mt-2">
+                                        Output saved to: {predictionResults.output_file}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
         </div>
     );

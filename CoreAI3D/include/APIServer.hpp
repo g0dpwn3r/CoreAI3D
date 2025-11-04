@@ -84,6 +84,8 @@ protected:
     virtual json handlePredictAPI(const std::string& action, const json& parameters, const std::string& method);
     virtual json handleTrainAPI(const std::string& action, const json& parameters, const std::string& method);
     virtual json handlePerformanceAPI(const std::string& action, const json& parameters);
+    virtual json handleAPIDebug(const json& parameters);
+    virtual json handleSystemDebug(const json& parameters);
 
     // HTTP request handling
     virtual void handleRequest(http::request<http::string_body>&& req, tcp::socket socket);
@@ -235,6 +237,7 @@ public:
 
     // Performance API endpoints
     json runPerformanceTest(const std::string& sessionId, const std::string& testType, int duration, int iterations, int concurrency);
+    json runLoadTest(const std::string& sessionId, int concurrentUsers, int duration, const std::string& endpoint);
 
     // Performance test implementations
     double runCPUTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes);

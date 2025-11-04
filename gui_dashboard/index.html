@@ -128,15 +128,37 @@
                                     <option value="load">Load Test</option>
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label>Module:</label>
-                                <select id="test-module">
-                                    <option value="vision">Vision Module</option>
-                                    <option value="audio">Audio Module</option>
-                                    <option value="system">System Module</option>
-                                    <option value="web">Web Module</option>
-                                    <option value="math">Math Module</option>
-                                </select>
+                            <div id="load-test-config" style="display: none;">
+                                <div class="form-group">
+                                    <label>Concurrent Users:</label>
+                                    <input type="number" id="concurrent-users" value="10" min="1" max="100">
+                                </div>
+                                <div class="form-group">
+                                    <label>Duration (seconds):</label>
+                                    <input type="number" id="test-duration" value="60" min="10" max="300">
+                                </div>
+                                <div class="form-group">
+                                    <label>Test Endpoint:</label>
+                                    <select id="load-test-endpoint">
+                                        <option value="/health">Health Check</option>
+                                        <option value="/system/metrics">System Metrics</option>
+                                        <option value="/performance/test">Performance Test</option>
+                                        <option value="/vision/classify">Vision API</option>
+                                        <option value="/predict">Prediction API</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="regular-test-config">
+                                <div class="form-group">
+                                    <label>Module:</label>
+                                    <select id="test-module">
+                                        <option value="vision">Vision Module</option>
+                                        <option value="audio">Audio Module</option>
+                                        <option value="system">System Module</option>
+                                        <option value="web">Web Module</option>
+                                        <option value="math">Math Module</option>
+                                    </select>
+                                </div>
                             </div>
                         </form>
                         <div class="actions">
@@ -449,8 +471,23 @@
                                 <option value="Math">Math</option>
                                 <option value="Web">Web</option>
                             </select>
+                            <select id="model-source-filter">
+                                <option value="all">All Sources</option>
+                                <option value="kaggle">Kaggle</option>
+                                <option value="huggingface">HuggingFace</option>
+                            </select>
                             <button id="search-models" class="btn btn-secondary">Search</button>
                             <button id="refresh-models" class="btn btn-secondary">Refresh</button>
+                        </div>
+                        <div class="pagination-controls" id="pagination-controls" style="display: none;">
+                            <button id="prev-page" class="btn btn-secondary btn-sm">Previous</button>
+                            <span id="page-info">Page 1</span>
+                            <button id="next-page" class="btn btn-secondary btn-sm">Next</button>
+                            <select id="page-size">
+                                <option value="20">20 per page</option>
+                                <option value="50">50 per page</option>
+                                <option value="100">100 per page</option>
+                            </select>
                         </div>
                     </div>
 

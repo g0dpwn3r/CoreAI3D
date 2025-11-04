@@ -25,26 +25,9 @@ if (typeof electron === 'string') {
   ({ app, BrowserWindow, ipcMain, dialog } = electron);
 }
 
-// Add fallback for whenReady if not available
-if (!app.whenReady) {
-  app.whenReady = () => new Promise(resolve => {
-    if (app.isReady()) {
-      resolve();
-    } else {
-      app.once('ready', resolve);
-    }
-  });
-}
-
 // Check if we have valid Electron objects
 if (!app || !BrowserWindow || !ipcMain) {
   console.error('Electron modules not properly loaded');
-  process.exit(1);
-}
-
-// Check if Electron is properly loaded
-if (!app) {
-  console.error('Electron app module not found. Make sure Electron is properly installed.');
   process.exit(1);
 }
 
@@ -82,15 +65,10 @@ function createWindow() {
 }
 
 // Handle app ready event
-if (app) {
-  app.whenReady().then(createWindow).catch(error => {
-    console.error('Failed to initialize app:', error);
-    process.exit(1);
-  });
-} else {
-  console.error('Electron app object is not available');
+app.whenReady().then(createWindow).catch(error => {
+  console.error('Failed to initialize app:', error);
   process.exit(1);
-}
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -291,6 +269,20 @@ ipcMain.handle('run-test', async (event, testType, testModule) => {
   }
 });
 
+ipcMain.handle('run-load-test', async (event, concurrentUsers, duration, endpoint) => {
+  try {
+    if (!client) return { success: false, error: 'Client not initialized' };
+    const response = await client.axios.post('/performance/load_test', {
+      concurrentUsers,
+      duration,
+      endpoint
+    });
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 // Prediction functionality
 ipcMain.handle('run-prediction', async (event, modelType, specificModel, inputType, inputData, containsHeader, containsText) => {
   try {
@@ -428,25 +420,217 @@ ipcMain.handle('refresh-containers', async () => {
 });
 
 // Downloads functionality
-ipcMain.handle('search-models', async (event, { searchTerm, typeFilter }) => {
+ipcMain.handle('search-models', async (event, { searchTerm, typeFilter, page = 1, source = 'all' }) => {
   try {
-    if (!client) return { success: false, error: 'Client not initialized' };
-    const response = await client.axios.get('/models/search', { params: { q: searchTerm, type: typeFilter } });
-    return { success: true, models: response.data };
+    const models = [];
+
+    // Search Kaggle models
+    if (source === 'all' || source === 'kaggle') {
+      const kaggleModels = await searchKaggleModels(searchTerm, typeFilter, page);
+      models.push(...kaggleModels);
+    }
+
+    // Search HuggingFace models
+    if (source === 'all' || source === 'huggingface') {
+      const hfModels = await searchHuggingFaceModels(searchTerm, typeFilter, page);
+      models.push(...hfModels);
+    }
+
+    return { success: true, models, hasMore: models.length >= 20 };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('refresh-models', async () => {
+ipcMain.handle('refresh-models', async (event, { page = 1, source = 'all' }) => {
   try {
-    if (!client) return { success: false, error: 'Client not initialized' };
-    const response = await client.axios.get('/models/refresh');
-    return { success: true, models: response.data };
+    const models = [];
+
+    // Get latest Kaggle models
+    if (source === 'all' || source === 'kaggle') {
+      const kaggleModels = await getKaggleModels(page);
+      models.push(...kaggleModels);
+    }
+
+    // Get latest HuggingFace models
+    if (source === 'all' || source === 'huggingface') {
+      const hfModels = await getHuggingFaceModels(page);
+      models.push(...hfModels);
+    }
+
+    return { success: true, models, hasMore: models.length >= 20 };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
+
+// Kaggle API integration
+async function searchKaggleModels(searchTerm, typeFilter, page = 1) {
+  try {
+    const searchQuery = searchTerm ? `search=${encodeURIComponent(searchTerm)}` : '';
+    const typeQuery = typeFilter && typeFilter !== 'all' ? `&type=${typeFilter}` : '';
+    const pageQuery = `&page=${page}`;
+
+    const url = `https://www.kaggle.com/api/v1/models/list?${searchQuery}${typeQuery}${pageQuery}&sortBy=hotness&group=public`;
+
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'CoreAI3D-Dashboard/1.0'
+      },
+      timeout: 10000
+    });
+
+    return response.data.map(model => ({
+      id: `kaggle-${model.id}`,
+      name: model.title || model.ref,
+      type: getModelType(model.tags || []),
+      source: 'Kaggle',
+      size: model.totalSize ? `${(model.totalSize / (1024 * 1024)).toFixed(1)}MB` : 'N/A',
+      downloads: model.totalDownloads || 0,
+      description: model.description || '',
+      url: `https://www.kaggle.com/${model.ref}`,
+      lastUpdated: model.lastUpdated || model.updated
+    }));
+  } catch (error) {
+    console.error('Kaggle API search error:', error.message);
+    return [];
+  }
+}
+
+async function getKaggleModels(page = 1) {
+  try {
+    const url = `https://www.kaggle.com/api/v1/models/list?page=${page}&sortBy=hotness&group=public`;
+
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'CoreAI3D-Dashboard/1.0'
+      },
+      timeout: 10000
+    });
+
+    return response.data.map(model => ({
+      id: `kaggle-${model.id}`,
+      name: model.title || model.ref,
+      type: getModelType(model.tags || []),
+      source: 'Kaggle',
+      size: model.totalSize ? `${(model.totalSize / (1024 * 1024)).toFixed(1)}MB` : 'N/A',
+      downloads: model.totalDownloads || 0,
+      description: model.description || '',
+      url: `https://www.kaggle.com/${model.ref}`,
+      lastUpdated: model.lastUpdated || model.updated
+    }));
+  } catch (error) {
+    console.error('Kaggle API error:', error.message);
+    return [];
+  }
+}
+
+// HuggingFace API integration
+async function searchHuggingFaceModels(searchTerm, typeFilter, page = 1) {
+  try {
+    const searchQuery = searchTerm ? `search=${encodeURIComponent(searchTerm)}` : '';
+    const typeQuery = typeFilter && typeFilter !== 'all' ? `&pipeline_tag=${typeFilter}` : '';
+    const pageQuery = `&limit=20&offset=${(page - 1) * 20}`;
+
+    const url = `https://huggingface.co/api/models?${searchQuery}${typeQuery}${pageQuery}&sort=downloads&direction=-1`;
+
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'CoreAI3D-Dashboard/1.0'
+      },
+      timeout: 10000
+    });
+
+    return response.data.map(model => ({
+      id: `hf-${model.id.replace('/', '-')}`,
+      name: model.id,
+      type: getHFModelType(model.pipeline_tag || model.tags || []),
+      source: 'HuggingFace',
+      size: 'N/A', // HF doesn't provide size in basic API
+      downloads: model.downloads || 0,
+      description: model.description || '',
+      url: `https://huggingface.co/${model.id}`,
+      lastModified: model.lastModified
+    }));
+  } catch (error) {
+    console.error('HuggingFace API search error:', error.message);
+    return [];
+  }
+}
+
+async function getHuggingFaceModels(page = 1) {
+  try {
+    const url = `https://huggingface.co/api/models?limit=20&offset=${(page - 1) * 20}&sort=downloads&direction=-1`;
+
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'CoreAI3D-Dashboard/1.0'
+      },
+      timeout: 10000
+    });
+
+    return response.data.map(model => ({
+      id: `hf-${model.id.replace('/', '-')}`,
+      name: model.id,
+      type: getHFModelType(model.pipeline_tag || model.tags || []),
+      source: 'HuggingFace',
+      size: 'N/A',
+      downloads: model.downloads || 0,
+      description: model.description || '',
+      url: `https://huggingface.co/${model.id}`,
+      lastModified: model.lastModified
+    }));
+  } catch (error) {
+    console.error('HuggingFace API error:', error.message);
+    return [];
+  }
+}
+
+// Helper functions
+function getModelType(tags) {
+  if (!Array.isArray(tags)) return 'Other';
+
+  const tagString = tags.join(' ').toLowerCase();
+
+  if (tagString.includes('vision') || tagString.includes('image') || tagString.includes('computer-vision')) return 'Vision';
+  if (tagString.includes('text') || tagString.includes('nlp') || tagString.includes('language')) return 'Text';
+  if (tagString.includes('audio') || tagString.includes('speech')) return 'Audio';
+  if (tagString.includes('multimodal') || tagString.includes('multi-modal')) return 'Multimodal';
+
+  return 'Other';
+}
+
+function getHFModelType(pipelineTag) {
+  if (!pipelineTag) return 'Other';
+
+  const tag = Array.isArray(pipelineTag) ? pipelineTag[0] : pipelineTag;
+
+  switch (tag) {
+    case 'text-classification':
+    case 'token-classification':
+    case 'question-answering':
+    case 'text-generation':
+    case 'text2text-generation':
+    case 'summarization':
+    case 'translation':
+    case 'conversational':
+      return 'Text';
+    case 'image-classification':
+    case 'object-detection':
+    case 'image-segmentation':
+    case 'image-to-image':
+      return 'Vision';
+    case 'text-to-speech':
+    case 'automatic-speech-recognition':
+    case 'audio-classification':
+      return 'Audio';
+    case 'image-text-to-text':
+    case 'visual-question-answering':
+      return 'Multimodal';
+    default:
+      return 'Other';
+  }
+}
 
 ipcMain.handle('download-model', async (event, modelId) => {
   try {

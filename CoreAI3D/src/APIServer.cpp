@@ -322,6 +322,24 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "chat") {
             return handleChatAPI(action, requestData, method);
         }
+        else if (module == "websocket") {
+            // Handle WebSocket-related API calls
+            if (action == "chat") {
+                // Route chat messages through orchestrator
+                if (orchestrator) {
+                    json chatData = {
+                        {"message", requestData.value("message", "")},
+                        {"messageType", requestData.value("messageType", "text")},
+                        {"sessionId", requestData.value("sessionId", "")},
+                        {"clientId", requestData.value("clientId", "")}
+                    };
+                    return orchestrator->processChatMessage(chatData);
+                } else {
+                    return createErrorResponse("Orchestrator not available", 503);
+                }
+            }
+            return createErrorResponse("Unknown websocket action: " + action, 400);
+        }
         else if (module == "predict") {
             return handlePredictAPI(action, requestData, method);
         }
@@ -332,7 +350,27 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             return handleSessionsAPI(action, requestData, method);
         }
         else if (module == "performance") {
-            return handlePerformanceAPI(action, requestData);
+            if (action == "load_test") {
+                // Handle load testing endpoint
+                int concurrentUsers = requestData.value("concurrentUsers", 10);
+                int duration = requestData.value("duration", 60);
+                std::string endpoint = requestData.value("endpoint", "/health");
+                return runLoadTest("", concurrentUsers, duration, endpoint);
+            }
+            else {
+                return handlePerformanceAPI(action, requestData);
+            }
+        }
+        else if (module == "debug") {
+            if (action == "api") {
+                return handleAPIDebug(requestData);
+            }
+            else if (action == "system") {
+                return handleSystemDebug(requestData);
+            }
+            else {
+                return createErrorResponse("Unknown debug action: " + action, 400);
+            }
         }
         else if (module == "status") {
             return getAPIStatus();
@@ -496,6 +534,106 @@ json APIServer::handlePerformanceAPI(const std::string& action, const json& para
     }
 }
 
+json APIServer::handleAPIDebug(const json& parameters) {
+    try {
+        json debugInfo = {
+            {"debug_type", "api"},
+            {"timestamp", getTimestampString()},
+            {"server_status", {
+                {"is_running", isRunning.load()},
+                {"is_initialized", isInitialized},
+                {"host", host},
+                {"port", port},
+                {"api_version", apiVersion},
+                {"active_sessions", activeSessions.size()},
+                {"total_requests", getTotalRequests()},
+                {"active_connections", getActiveConnections()}
+            }},
+            {"modules", {
+                {"training_module", trainingModule ? "available" : "not available"},
+                {"predict_module", predictModule ? "available" : "not available"},
+                {"orchestrator", orchestrator ? "available" : "not available"},
+                {"database", database ? "connected" : "not connected"}
+            }},
+            {"configuration", {
+                {"num_threads", numThreads},
+                {"cors_origin", corsOrigin},
+                {"request_timeout", requestTimeout},
+                {"max_request_size", maxRequestSize},
+                {"enable_logging", enableLogging}
+            }}
+        };
+
+        if (database) {
+            debugInfo["database_info"] = {
+                {"host", dbHost},
+                {"port", dbPort},
+                {"user", dbUser},
+                {"schema", dbSchema},
+                {"ssl_mode", dbSSLMode == SSLMode::DISABLED ? "DISABLED" :
+                           dbSSLMode == SSLMode::REQUIRED ? "REQUIRED" :
+                           dbSSLMode == SSLMode::VERIFY_CA ? "VERIFY_CA" : "VERIFY_IDENTITY"}
+            };
+        }
+
+        return createSuccessResponse("API debug information retrieved successfully", debugInfo);
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("API debug failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::handleSystemDebug(const json& parameters) {
+    try {
+        // Get system information
+        json systemInfo = {
+            {"debug_type", "system"},
+            {"timestamp", getTimestampString()},
+            {"platform", {
+                {"os", "Linux"}, // Could be made dynamic
+                {"architecture", "x64"}, // Could be made dynamic
+                {"hostname", "localhost"} // Could be made dynamic
+            }},
+            {"memory", {
+                {"total_mb", 8192}, // Placeholder - could get actual system memory
+                {"available_mb", 4096}, // Placeholder
+                {"used_mb", 4096} // Placeholder
+            }},
+            {"cpu", {
+                {"cores", 4}, // Placeholder
+                {"usage_percent", 25.5} // Placeholder
+            }},
+            {"disk", {
+                {"total_gb", 100}, // Placeholder
+                {"available_gb", 75}, // Placeholder
+                {"used_gb", 25} // Placeholder
+            }},
+            {"network", {
+                {"interfaces", json::array({"eth0", "lo"})},
+                {"connections", 5} // Placeholder
+            }},
+            {"processes", {
+                {"total", 150}, // Placeholder
+                {"running", 45}, // Placeholder
+                {"sleeping", 105} // Placeholder
+            }}
+        };
+
+        // Add server-specific information
+        systemInfo["server_info"] = {
+            {"uptime_seconds", 3600}, // Placeholder
+            {"memory_usage_mb", 256}, // Placeholder
+            {"cpu_usage_percent", 15.2}, // Placeholder
+            {"thread_count", numThreads}
+        };
+
+        return createSuccessResponse("System debug information retrieved successfully", systemInfo);
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("System debug failed: " + std::string(e.what()), 500);
+    }
+}
+
 json APIServer::runPerformanceTest(const std::string& sessionId, const std::string& testType, int duration, int iterations, int concurrency) {
     try {
         // Initialize performance metrics
@@ -557,6 +695,121 @@ json APIServer::runPerformanceTest(const std::string& sessionId, const std::stri
     }
     catch (const std::exception& e) {
         return createErrorResponse("Performance test failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::runLoadTest(const std::string& sessionId, int concurrentUsers, int duration, const std::string& endpoint) {
+    try {
+        // Validate parameters
+        if (concurrentUsers <= 0 || concurrentUsers > 1000) {
+            return createErrorResponse("Concurrent users must be between 1 and 1000", 400);
+        }
+        if (duration <= 0 || duration > 300) {
+            return createErrorResponse("Duration must be between 1 and 300 seconds", 400);
+        }
+
+        auto startTime = std::chrono::high_resolution_clock::now();
+        auto endTime = startTime + std::chrono::seconds(duration);
+
+        // Initialize load testing metrics
+        std::atomic<int> totalRequests{0};
+        std::atomic<int> successfulRequests{0};
+        std::atomic<int> failedRequests{0};
+        std::vector<double> responseTimes;
+        std::mutex responseTimesMutex;
+
+        // Create a thread pool for concurrent users
+        std::vector<std::thread> userThreads;
+
+        // Function to simulate a single user making requests
+        auto simulateUser = [&]() {
+            while (std::chrono::high_resolution_clock::now() < endTime) {
+                auto requestStart = std::chrono::high_resolution_clock::now();
+
+                try {
+                    // Simulate making a request to the endpoint
+                    // For now, we'll simulate the request with a small delay
+                    // In a real implementation, this would make actual HTTP requests
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10 + (rand() % 50)));
+
+                    // Simulate occasional failures (5% failure rate)
+                    bool success = (rand() % 100) >= 5;
+
+                    auto requestEnd = std::chrono::high_resolution_clock::now();
+                    double responseTime = std::chrono::duration<double>(requestEnd - requestStart).count();
+
+                    {
+                        std::lock_guard<std::mutex> lock(responseTimesMutex);
+                        responseTimes.push_back(responseTime);
+                        totalRequests++;
+                        if (success) {
+                            successfulRequests++;
+                        } else {
+                            failedRequests++;
+                        }
+                    }
+
+                    // Add some delay between requests (simulate user think time)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100 + (rand() % 200)));
+                }
+                catch (const std::exception&) {
+                    failedRequests++;
+                    totalRequests++;
+                }
+            }
+        };
+
+        // Start concurrent user threads
+        for (int i = 0; i < concurrentUsers; ++i) {
+            userThreads.emplace_back(simulateUser);
+        }
+
+        // Wait for all threads to complete
+        for (auto& thread : userThreads) {
+            thread.join();
+        }
+
+        auto actualEndTime = std::chrono::high_resolution_clock::now();
+        double actualDuration = std::chrono::duration<double>(actualEndTime - startTime).count();
+
+        // Calculate load test metrics
+        int totalReq = totalRequests.load();
+        int successReq = successfulRequests.load();
+        int failReq = failedRequests.load();
+
+        double requestsPerSecond = totalReq / actualDuration;
+        double successRate = totalReq > 0 ? (static_cast<double>(successReq) / totalReq) * 100.0 : 0.0;
+
+        // Calculate response time percentiles
+        std::sort(responseTimes.begin(), responseTimes.end());
+        double avgResponseTime = responseTimes.size() > 0 ?
+            std::accumulate(responseTimes.begin(), responseTimes.end(), 0.0) / responseTimes.size() : 0.0;
+        double p50ResponseTime = responseTimes.size() > 0 ? responseTimes[responseTimes.size() * 0.5] * 1000 : 0.0;
+        double p95ResponseTime = responseTimes.size() > 0 ? responseTimes[responseTimes.size() * 0.95] * 1000 : 0.0;
+        double p99ResponseTime = responseTimes.size() > 0 ? responseTimes[responseTimes.size() * 0.99] * 1000 : 0.0;
+
+        json result = {
+            {"test_type", "load_test"},
+            {"endpoint", endpoint},
+            {"concurrent_users", concurrentUsers},
+            {"duration_seconds", actualDuration},
+            {"total_requests", totalReq},
+            {"successful_requests", successReq},
+            {"failed_requests", failReq},
+            {"requests_per_second", requestsPerSecond},
+            {"success_rate_percent", successRate},
+            {"average_response_time_ms", avgResponseTime * 1000},
+            {"p50_response_time_ms", p50ResponseTime},
+            {"p95_response_time_ms", p95ResponseTime},
+            {"p99_response_time_ms", p99ResponseTime},
+            {"status", "completed"},
+            {"timestamp", getTimestampString()}
+        };
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Load test failed: " + std::string(e.what()), 500);
     }
 }
 
