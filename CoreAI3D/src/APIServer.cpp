@@ -1584,56 +1584,69 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
         else if (action == "load_dataset" && method == "POST") {
             // Handle dataset loading for multiple file formats
             std::string filename = parameters.value("filename", "");
+            std::string directory = parameters.value("directory", "");
+            std::vector<std::string> extensions = parameters.value("extensions", std::vector<std::string>{});
+            std::vector<std::string> fileList = parameters.value("files", std::vector<std::string>{});
             int outputSize = parameters.value("output_size", 1);
             bool hasHeader = parameters.value("has_header", true);
             bool containsText = parameters.value("contains_text", false);
             std::string datasetName = parameters.value("dataset_name", "api_dataset");
             float minRange = parameters.value("min_range", -1.0f);
             float maxRange = parameters.value("max_range", 1.0f);
-
-            if (filename.empty()) {
-                return createErrorResponse("Filename is required", 400);
-            }
+            int maxSeqLen = parameters.value("max_seq_len", 512);
+            int embeddingDim = parameters.value("embedding_dim", EMBEDDING_DIM);
 
             // Validate normalization parameters
             if (minRange >= maxRange) {
                 return createErrorResponse("min_range must be less than max_range", 400);
             }
 
-            // Get file extension to determine file type
-            std::string extension = getFileExtension(filename);
-            std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
-
             bool loaded = false;
+            std::string loadType = "single_file";
+            int totalFiles = 0;
 
-            // Route to appropriate loading method based on file extension
-            if (extension == "csv") {
-                loaded = trainingModule->loadCSV(filename, -1, outputSize, hasHeader, containsText, ',', datasetName);
+            // Determine loading strategy
+            if (!directory.empty()) {
+                // Load all files from directory with specified extensions
+                loadType = "directory";
+                if (extensions.empty()) {
+                    extensions = {"txt", "json", "xml", "pdf", "docx", "doc", "mp4", "avi", "mov", "mkv", "mp3", "wav", "flac", "aac", "jpg", "jpeg", "png", "bmp", "gif", "csv"};
+                }
+                loaded = trainingModule->loadDirectoryFiles(directory, extensions, maxSeqLen, embeddingDim);
+                totalFiles = extensions.size(); // Approximate
             }
-            else if (extension == "json") {
-                loaded = trainingModule->loadJSONFile(filename, "", 512, EMBEDDING_DIM);
+            else if (!fileList.empty()) {
+                // Load batch of specific files
+                loadType = "batch_files";
+                loaded = trainingModule->loadBatchFiles(fileList, maxSeqLen, embeddingDim);
+                totalFiles = fileList.size();
             }
-            else if (extension == "xml") {
-                loaded = trainingModule->loadXMLFile(filename, "", 512, EMBEDDING_DIM);
-            }
-            else if (extension == "pdf" || extension == "docx" || extension == "doc" || extension == "txt") {
-                loaded = trainingModule->loadDocumentFile(filename, 512, EMBEDDING_DIM);
-            }
-            else if (extension == "mp4" || extension == "avi" || extension == "mov" || extension == "mkv") {
-                loaded = trainingModule->loadFromVideoFile(filename, 512, EMBEDDING_DIM, 30);
-            }
-            else if (extension == "mp3" || extension == "wav" || extension == "flac" || extension == "aac") {
-                loaded = trainingModule->loadFromAudioFile(filename, 512, EMBEDDING_DIM);
-            }
-            else if (extension == "jpg" || extension == "jpeg" || extension == "png" || extension == "bmp" || extension == "gif") {
-                loaded = trainingModule->loadFromImageFile(filename, 512, EMBEDDING_DIM);
+            else if (!filename.empty()) {
+                // Load single file
+                loadType = "single_file";
+                std::string extension = getFileExtension(filename);
+                std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+                // Route to appropriate loading method based on file extension
+                if (extension == "csv") {
+                    loaded = trainingModule->loadCSV(filename, -1, outputSize, hasHeader, containsText, ',', datasetName);
+                }
+                else {
+                    // Use the general loadFile method for all other formats
+                    loaded = trainingModule->loadFile(filename, maxSeqLen, embeddingDim);
+                }
+                totalFiles = 1;
             }
             else {
-                return createErrorResponse("Unsupported file format: " + extension + ". Supported formats: csv, json, xml, pdf, docx, doc, txt, mp4, avi, mov, mkv, mp3, wav, flac, aac, jpg, jpeg, png, bmp, gif", 400);
+                return createErrorResponse("Either filename, directory, or files list must be provided", 400);
             }
 
             if (!loaded) {
-                return createErrorResponse("Failed to load dataset from file: " + filename, 500);
+                std::string errorMsg = "Failed to load dataset";
+                if (!filename.empty()) errorMsg += " from file: " + filename;
+                else if (!directory.empty()) errorMsg += " from directory: " + directory;
+                else errorMsg += " from batch files";
+                return createErrorResponse(errorMsg, 500);
             }
 
             // Perform data preprocessing with normalization
@@ -1646,17 +1659,48 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
 
             json response = {
                 {"status", "loaded"},
-                {"filename", filename},
-                {"file_type", extension},
+                {"load_type", loadType},
                 {"dataset_name", datasetName},
                 {"samples", trainingModule->numSamples},
                 {"input_size", trainingModule->inputSize},
                 {"output_size", trainingModule->outputSize},
                 {"min_range", minRange},
                 {"max_range", maxRange},
+                {"max_seq_len", maxSeqLen},
+                {"embedding_dim", embeddingDim},
                 {"message", "Dataset loaded and preprocessed successfully"},
                 {"timestamp", getTimestampString()}
             };
+
+            // Add file-specific information
+            if (!filename.empty()) {
+                response["filename"] = filename;
+                response["file_type"] = getFileExtension(filename);
+            }
+            else if (!directory.empty()) {
+                response["directory"] = directory;
+                response["extensions"] = extensions;
+            }
+            else if (!fileList.empty()) {
+                response["files_loaded"] = fileList.size();
+            }
+
+            return response;
+        }
+        else if (action == "conversion_progress" && method == "GET") {
+            // Handle conversion progress tracking
+            if (!trainingModule) {
+                return createErrorResponse("Training module not available", 503);
+            }
+
+            json response = {
+                {"current_file", trainingModule->getCurrentConversionFile()},
+                {"progress", trainingModule->getConversionProgress()},
+                {"total", trainingModule->getConversionTotal()},
+                {"progress_percent", trainingModule->getConversionProgressPercent()},
+                {"timestamp", getTimestampString()}
+            };
+
             return response;
         }
         else if (action == "preprocess" && method == "POST") {

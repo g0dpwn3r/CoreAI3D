@@ -131,6 +131,10 @@ public:
     bool loadDocumentFile(const std::string& filename, int maxSeqLen, int embeddingDim);
     bool loadFile(const std::string& filename, int maxSeqLen, int embeddingDim); // General method that detects file type and routes to appropriate loader
 
+    // Batch processing methods for multiple files
+    bool loadBatchFiles(const std::vector<std::string>& filenames, int maxSeqLen, int embeddingDim);
+    bool loadDirectoryFiles(const std::string& directoryPath, const std::vector<std::string>& extensions, int maxSeqLen, int embeddingDim);
+
     // New methods for learning from web content
     bool loadFromWebURL(const std::string& url, int maxSeqLen, int embeddingDim);
     bool loadFromWebSearch(const std::string& query, int maxResults, int maxSeqLen, int embeddingDim);
@@ -188,6 +192,25 @@ public:
     void printProgressBar(const std::string& prefix, long long current, long long total, int barWidth);
     int detectMaxSeqLength(const std::string& filename);
     long long countLines(const std::string& filename, bool hasHeader);
+
+    // Progress tracking for large file conversions
+    std::atomic<long long> conversionProgress;
+    std::atomic<long long> conversionTotal;
+    std::string currentConversionFile;
+    std::mutex progressMutex;
+
+    // Progress tracking methods
+    long long getConversionProgress() const { return conversionProgress.load(); }
+    long long getConversionTotal() const { return conversionTotal.load(); }
+    std::string getCurrentConversionFile() const {
+        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(progressMutex));
+        return currentConversionFile;
+    }
+    double getConversionProgressPercent() const {
+        long long total = conversionTotal.load();
+        if (total == 0) return 0.0;
+        return (static_cast<double>(conversionProgress.load()) / total) * 100.0;
+    }
 
     std::vector<std::string> original_date_strings; // To store the original date strings
 

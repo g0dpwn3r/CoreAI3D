@@ -13,6 +13,7 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
+    conversionProgress(0), conversionTotal(0), // Initialize progress tracking
     gen(std::random_device{}()) // Initialize random number generator
 {
     // Parameter validation
@@ -32,6 +33,7 @@ Training::Training(bool isOffline, bool verbose)
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
+    conversionProgress(0), conversionTotal(0), // Initialize progress tracking
     gen(std::random_device{}()) // Initialize random number generator
 {
     if (isOfflineMode && verbose) {
@@ -2571,13 +2573,19 @@ bool Training::loadFile(const std::string& filename, int maxSeqLen, int embeddin
         success = loadJSONFile(filename, "", maxSeqLen, embeddingDim); // Empty dataPath for auto-detection
     } else if (extension == "xml") {
         success = loadXMLFile(filename, "", maxSeqLen, embeddingDim); // Empty xpath for auto-extraction
-    } else if (extension == "pdf" || extension == "docx") {
+    } else if (extension == "pdf" || extension == "docx" || extension == "doc") {
         success = loadDocumentFile(filename, maxSeqLen, embeddingDim);
+    } else if (extension == "mp4" || extension == "avi" || extension == "mov" || extension == "mkv") {
+        success = loadFromVideoFile(filename, maxSeqLen, embeddingDim, 30);
+    } else if (extension == "mp3" || extension == "wav" || extension == "flac" || extension == "aac") {
+        success = loadFromAudioFile(filename, maxSeqLen, embeddingDim);
+    } else if (extension == "jpg" || extension == "jpeg" || extension == "png" || extension == "bmp" || extension == "gif") {
+        success = loadFromImageFile(filename, maxSeqLen, embeddingDim);
     } else if (extension == "csv") {
         // Use existing CSV loader with default parameters
         success = loadCSV(filename, -1, 1, true, true, ',', "file_dataset");
     } else {
-        std::cerr << "Error: Unsupported file type: " << extension << std::endl;
+        std::cerr << "Error: Unsupported file type: " << extension << ". Supported formats: txt, json, xml, pdf, docx, doc, mp4, avi, mov, mkv, mp3, wav, flac, aac, jpg, jpeg, png, bmp, gif, csv" << std::endl;
         return false;
     }
 
@@ -2591,22 +2599,204 @@ bool Training::loadFile(const std::string& filename, int maxSeqLen, int embeddin
             std::cerr << "Error: Input and target sizes don't match after loading." << std::endl;
             return false;
         }
-        // Validate input sizes
-        for (const auto& input : inputs) {
-            if (input.size() != (size_t)this->inputSize) {
-                std::cerr << "Error: Inconsistent input size after loading." << std::endl;
-                return false;
+
+        // Validate and fix input sizes - ensure all inputs have consistent size
+        if (!inputs.empty()) {
+            size_t expectedInputSize = inputs[0].size();
+            size_t expectedOutputSize = targets[0].size();
+
+            // Fix inconsistent input sizes by padding/truncating
+            for (auto& input : inputs) {
+                if (input.size() < expectedInputSize) {
+                    input.resize(expectedInputSize, 0.0f);
+                } else if (input.size() > expectedInputSize) {
+                    input.resize(expectedInputSize);
+                }
+            }
+
+            // Fix inconsistent target sizes
+            for (auto& target : targets) {
+                if (target.size() < expectedOutputSize) {
+                    target.resize(expectedOutputSize, 0.0f);
+                } else if (target.size() > expectedOutputSize) {
+                    target.resize(expectedOutputSize);
+                }
+            }
+
+            // Update class members with detected sizes
+            this->inputSize = expectedInputSize;
+            this->outputSize = expectedOutputSize;
+            this->numSamples = inputs.size();
+
+            if (verbose) {
+                std::cout << "Dataset loaded successfully. Samples: " << this->numSamples
+                          << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
             }
         }
-        for (const auto& target : targets) {
-            if (target.size() != (size_t)this->outputSize) {
-                std::cerr << "Error: Inconsistent target size after loading." << std::endl;
-                return false;
+    } else {
+        // Enhanced error handling for file format conversion failures
+        std::cerr << "Error: Failed to load file '" << filename << "' with extension '" << extension << "'." << std::endl;
+        std::cerr << "Possible causes:" << std::endl;
+        std::cerr << "  - File format not supported" << std::endl;
+        std::cerr << "  - File is corrupted or empty" << std::endl;
+        std::cerr << "  - Required external tools/libraries not available (e.g., poppler for PDF, unzip for DOCX)" << std::endl;
+        std::cerr << "  - Language processor not properly initialized" << std::endl;
+        std::cerr << "  - Insufficient permissions to access the file" << std::endl;
+        return false;
+    }
+
+    return success;
+}
+
+// Batch processing methods for multiple files
+bool Training::loadBatchFiles(const std::vector<std::string>& filenames, int maxSeqLen, int embeddingDim) {
+    if (filenames.empty()) {
+        std::cerr << "Error: No files provided for batch processing." << std::endl;
+        return false;
+    }
+
+    // Initialize progress tracking
+    conversionProgress = 0;
+    conversionTotal = filenames.size();
+    currentConversionFile = "Batch processing initialization";
+
+    if (verbose) {
+        std::cout << "Starting batch processing of " << filenames.size() << " files..." << std::endl;
+    }
+
+    std::vector<std::vector<float>> batchInputs;
+    std::vector<std::vector<float>> batchTargets;
+
+    int processedCount = 0;
+    int failedCount = 0;
+
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        const std::string& filename = filenames[i];
+
+        // Update progress tracking
+        {
+            std::lock_guard<std::mutex> lock(progressMutex);
+            currentConversionFile = filename;
+            conversionProgress = i;
+        }
+
+        if (verbose && filenames.size() > 10) {
+            printProgressBar("Processing batch files", i + 1, filenames.size(), 50);
+        }
+
+        // Clear current data before loading each file
+        inputs.clear();
+        targets.clear();
+
+        if (loadFile(filename, maxSeqLen, embeddingDim)) {
+            // Append loaded data to batch collections
+            batchInputs.insert(batchInputs.end(), inputs.begin(), inputs.end());
+            batchTargets.insert(batchTargets.end(), targets.begin(), targets.end());
+            processedCount++;
+
+            if (verbose) {
+                std::cout << "Successfully processed: " << filename << " (" << inputs.size() << " samples)" << std::endl;
+            }
+        } else {
+            failedCount++;
+            if (verbose) {
+                std::cerr << "Failed to process: " << filename << std::endl;
             }
         }
     }
 
-    return success;
+    // Final progress update
+    {
+        std::lock_guard<std::mutex> lock(progressMutex);
+        conversionProgress = filenames.size();
+        currentConversionFile = "Batch processing completed";
+    }
+
+    if (verbose && filenames.size() > 10) {
+        printProgressBar("Processing batch files", filenames.size(), filenames.size(), 50);
+        std::cout << std::endl;
+    }
+
+    // Set the final batch data
+    inputs = std::move(batchInputs);
+    targets = std::move(batchTargets);
+
+    // Update class members
+    if (!inputs.empty()) {
+        this->inputSize = inputs[0].size();
+        this->outputSize = targets[0].size();
+        this->numSamples = inputs.size();
+
+        // Ensure consistency across all samples
+        for (auto& input : inputs) {
+            input.resize(this->inputSize, 0.0f);
+        }
+        for (auto& target : targets) {
+            target.resize(this->outputSize, 0.0f);
+        }
+    }
+
+    if (verbose) {
+        std::cout << "Batch processing completed. Processed: " << processedCount
+                  << ", Failed: " << failedCount << ", Total samples: " << this->numSamples << std::endl;
+    }
+
+    return processedCount > 0;
+}
+
+bool Training::loadDirectoryFiles(const std::string& directoryPath, const std::vector<std::string>& extensions, int maxSeqLen, int embeddingDim) {
+    if (directoryPath.empty()) {
+        std::cerr << "Error: Directory path cannot be empty." << std::endl;
+        return false;
+    }
+
+    if (!std::filesystem::exists(directoryPath) || !std::filesystem::is_directory(directoryPath)) {
+        std::cerr << "Error: Directory does not exist or is not a directory: " << directoryPath << std::endl;
+        return false;
+    }
+
+    std::vector<std::string> matchingFiles;
+
+    // Collect all files with matching extensions
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(directoryPath)) {
+        if (entry.is_regular_file()) {
+            std::string extension = entry.path().extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+            // Remove leading dot from extension
+            if (!extension.empty() && extension[0] == '.') {
+                extension = extension.substr(1);
+            }
+
+            // Check if extension matches any in the provided list
+            for (const std::string& allowedExt : extensions) {
+                std::string lowerAllowedExt = allowedExt;
+                std::transform(lowerAllowedExt.begin(), lowerAllowedExt.end(), lowerAllowedExt.begin(), ::tolower);
+
+                if (extension == lowerAllowedExt) {
+                    matchingFiles.push_back(entry.path().string());
+                    break;
+                }
+            }
+        }
+    }
+
+    if (matchingFiles.empty()) {
+        std::cerr << "Error: No files found with specified extensions in directory: " << directoryPath << std::endl;
+        return false;
+    }
+
+    if (verbose) {
+        std::cout << "Found " << matchingFiles.size() << " files to process in directory: " << directoryPath << std::endl;
+        std::cout << "Extensions: ";
+        for (size_t i = 0; i < extensions.size(); ++i) {
+            std::cout << extensions[i];
+            if (i < extensions.size() - 1) std::cout << ", ";
+        }
+        std::cout << std::endl;
+    }
+
+    return loadBatchFiles(matchingFiles, maxSeqLen, embeddingDim);
 }
 
 // Database integration for new file types
