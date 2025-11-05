@@ -791,6 +791,21 @@ class CoreAI3DClient:
         }
         return await self.post('/models/load', data)
 
+    async def load_dataset(self, filename: str, output_size: int = 1, has_header: bool = True,
+                          contains_text: bool = False, dataset_name: str = "api_dataset",
+                          min_range: float = -1.0, max_range: float = 1.0) -> APIResponse:
+        """Load dataset for training with normalization parameters"""
+        data = {
+            'filename': filename,
+            'output_size': output_size,
+            'has_header': has_header,
+            'contains_text': contains_text,
+            'dataset_name': dataset_name,
+            'min_range': min_range,
+            'max_range': max_range
+        }
+        return await self.post('/training/load_dataset', data)
+
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:
         return await self.get('/neural/topology')

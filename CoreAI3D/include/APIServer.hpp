@@ -263,6 +263,7 @@ public:
     json getErrorLogs(const std::string& sessionId, int limit = 50);
 
     // Utility functions
+    std::string getFileExtension(const std::string& filename);
     std::string generateUniqueId();
     std::string getTimestampString();
     json createSuccessResponse(const std::string& message, const json& data = json::object());

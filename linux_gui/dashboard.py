@@ -1550,13 +1550,29 @@ class CoreAI3DDashboard(QMainWindow):
         self.chat_response_received.connect(self._on_chat_response_received)
 
         # Initialize training argument variables - consolidated learning settings
-        self.norm_min = 0.0
+        self.norm_min = -1.0
         self.norm_max = 1.0
         self.neurons = 10
         self.samples = 0
         self.epochs = 10
         self.layers = 3
         self.learning_rate = 0.01
+        self.current_dataset_loaded = False
+
+        # Initialize learning config with default values
+        self.learning_config = {
+            'neurons_per_layer': self.neurons,
+            'training_samples': self.samples,
+            'epochs': self.epochs,
+            'hidden_layers': self.layers,
+            'learning_rate': self.learning_rate,
+            'normalization_min': self.norm_min,
+            'normalization_max': self.norm_max,
+            'output_size': 1,
+            'contains_text': False,
+            'has_header': True,
+            'dataset_name': 'default_dataset'
+        }
 
         # Global async task serialization - single lock for all async operations
         self.global_async_lock = asyncio.Lock()
@@ -1862,6 +1878,24 @@ class CoreAI3DDashboard(QMainWindow):
         new_dataset_btn = QPushButton("New Dataset")
         new_dataset_btn.clicked.connect(self.create_dataset)
         dataset_buttons.addWidget(new_dataset_btn)
+
+        self.load_dataset_button = QPushButton("Load Dataset")
+        self.load_dataset_button.clicked.connect(lambda: asyncio.ensure_future(self.load_dataset()))
+        dataset_buttons.addWidget(self.load_dataset_button)
+
+        # File type selection for upload
+        self.upload_file_type_combo = QComboBox()
+        self.upload_file_type_combo.addItems([
+            "CSV", "JSON", "XML", "PDF", "DOCX", "DOC", "TXT",
+            "MP4", "AVI", "MOV", "MKV", "MP3", "WAV", "FLAC", "AAC",
+            "JPG", "JPEG", "PNG", "BMP", "GIF"
+        ])
+        dataset_buttons.addWidget(QLabel("Upload:"))
+        dataset_buttons.addWidget(self.upload_file_type_combo)
+
+        upload_file_btn = QPushButton("Upload File")
+        upload_file_btn.clicked.connect(lambda: asyncio.ensure_future(self.upload_file()))
+        dataset_buttons.addWidget(upload_file_btn)
 
         delete_dataset_btn = QPushButton("Delete Dataset")
         delete_dataset_btn.clicked.connect(self.delete_dataset)
@@ -6864,6 +6898,149 @@ capabilities, training data, performance metrics, and usage instructions."""
         self.download_log.clear()
 
     @qasync.asyncSlot()
+    async def load_dataset(self):
+        """Load dataset to API server before training"""
+        task_id = f"load_dataset_{id(asyncio.current_task())}"
+
+        # Use global async lock to prevent concurrent operations
+        async with self.global_async_lock:
+            try:
+                # Register task
+                with self.task_lock:
+                    if task_id in self.active_tasks:
+                        logger.warning(f"Load dataset task {task_id} already active")
+                        return
+                    self.active_tasks.add(task_id)
+
+                # Track the current task for cancellation
+                self.current_async_task = asyncio.current_task()
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.add(self.current_async_task)
+
+                if not self.client:
+                    if not self.initialize_client():
+                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        return
+
+                # Get selected dataset
+                current_item = self.dataset_list.currentItem()
+                if not current_item:
+                    QMessageBox.warning(self, "No Dataset Selected", "Please select a dataset to load")
+                    return
+
+                dataset_name = current_item.text()
+                if dataset_name not in self.training_manager.datasets:
+                    QMessageBox.warning(self, "Dataset Not Found", f"Dataset '{dataset_name}' not found")
+                    return
+
+                dataset_info = self.training_manager.datasets[dataset_name]
+                if not dataset_info.get('files'):
+                    QMessageBox.warning(self, "Empty Dataset", f"Dataset '{dataset_name}' has no files")
+                    return
+
+                # Use the first CSV file from the dataset
+                csv_file = None
+                for file_info in dataset_info['files']:
+                    if file_info['name'].lower().endswith('.csv'):
+                        csv_file = file_info['path']
+                        break
+
+                if not csv_file:
+                    QMessageBox.warning(self, "No CSV File", f"Dataset '{dataset_name}' has no CSV files")
+                    return
+
+                # Show progress
+                self.training_progress.setVisible(True)
+                self.training_progress.setRange(0, 100)
+                self.training_progress.setValue(10)
+
+                # Log dataset loading
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Loading dataset '{dataset_name}' from {csv_file}")
+
+                # Load dataset with normalization parameters
+                result = await self._load_dataset_async(csv_file, dataset_name)
+                self._handle_load_dataset_result_direct(result)
+
+                # Enable training button if dataset loaded successfully
+                if result.success:
+                    self.training_button.setEnabled(True)
+
+                # Mark dataset as loaded if successful
+                if result.success:
+                    self.current_dataset_loaded = True
+
+            except asyncio.CancelledError:
+                logger.info("Dataset loading cancelled")
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading cancelled")
+                raise
+            except Exception as e:
+                self.training_progress.setVisible(False)
+                self.training_progress.setValue(0)
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
+                QMessageBox.warning(self, "Dataset Loading Error", str(e))
+            finally:
+                # Clean up task
+                with self.task_lock:
+                    self.active_tasks.discard(task_id)
+
+                # Remove from pending tasks
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.discard(self.current_async_task)
+                    self.current_async_task = None
+
+    async def _load_dataset_async(self, csv_file: str, dataset_name: str):
+        """Async part of dataset loading"""
+        # Validate parameters before calling API
+        output_size = self.learning_config.get('output_size', 1)
+        has_header = self.learning_config.get('has_header', True)
+        contains_text = self.learning_config.get('contains_text', False)
+        min_range = self.learning_config.get('normalization_min', -1.0)
+        max_range = self.learning_config.get('normalization_max', 1.0)
+
+        # Basic validation
+        if output_size < 1:
+            raise ValueError("Output size must be at least 1")
+        if min_range >= max_range:
+            raise ValueError("Normalization min must be less than max")
+
+        # Call the load_dataset API endpoint with normalization parameters
+        return await self.client.load_dataset(
+            filename=csv_file,
+            output_size=output_size,
+            has_header=has_header,
+            contains_text=contains_text,
+            dataset_name=dataset_name,
+            min_range=min_range,
+            max_range=max_range
+        )
+
+    def _handle_load_dataset_result_direct(self, result):
+        """Handle dataset loading result directly"""
+        try:
+            self.training_progress.setVisible(False)
+            if result.success:
+                data = result.data
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
+                self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Input size: {data.get('input_size', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Output size: {data.get('output_size', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
+
+                QMessageBox.information(self, "Dataset Loaded",
+                                      f"Dataset loaded successfully!\n\n"
+                                      f"Samples: {data.get('samples', 'N/A')}\n"
+                                      f"Input Size: {data.get('input_size', 'N/A')}\n"
+                                      f"Output Size: {data.get('output_size', 'N/A')}")
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
+                QMessageBox.warning(self, "Dataset Loading Failed", error_msg)
+        except Exception as e:
+            self.training_progress.setVisible(False)
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
+            QMessageBox.warning(self, "Dataset Loading Error", str(e))
+
+    @qasync.asyncSlot()
     async def start_training(self):
         """Start training with current configuration and proper locking"""
         task_id = f"training_{id(asyncio.current_task())}"
@@ -6895,6 +7072,12 @@ capabilities, training data, performance metrics, and usage instructions."""
                     if not self.initialize_client():
                         QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
                         return
+
+                # Check if dataset is loaded first
+                if not hasattr(self, 'current_dataset_loaded') or not self.current_dataset_loaded:
+                    QMessageBox.warning(self, "No Dataset Loaded",
+                                      "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button")
+                    return
 
                 # Show progress with actual range
                 self.training_progress.setVisible(True)
@@ -7069,6 +7252,231 @@ capabilities, training data, performance metrics, and usage instructions."""
         except Exception as e:
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
             QMessageBox.warning(self, "Stop Error", str(e))
+
+    @qasync.asyncSlot()
+    async def upload_file(self):
+        """Upload file of various formats to API server"""
+        task_id = f"upload_file_{id(asyncio.current_task())}"
+
+        # Use global async lock to prevent concurrent operations
+        async with self.global_async_lock:
+            try:
+                # Register task
+                with self.task_lock:
+                    if task_id in self.active_tasks:
+                        logger.warning(f"Upload file task {task_id} already active")
+                        return
+                    self.active_tasks.add(task_id)
+
+                # Track the current task for cancellation
+                self.current_async_task = asyncio.current_task()
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.add(self.current_async_task)
+
+                if not self.client:
+                    if not self.initialize_client():
+                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        return
+
+                # Get selected file type
+                file_type = self.upload_file_type_combo.currentText().lower()
+
+                # Set up file dialog filter based on file type
+                file_filters = {
+                    "csv": "CSV Files (*.csv);;All Files (*.*)",
+                    "json": "JSON Files (*.json);;All Files (*.*)",
+                    "xml": "XML Files (*.xml);;All Files (*.*)",
+                    "pdf": "PDF Files (*.pdf);;All Files (*.*)",
+                    "docx": "Word Documents (*.docx);;All Files (*.*)",
+                    "doc": "Word Documents (*.doc);;All Files (*.*)",
+                    "txt": "Text Files (*.txt);;All Files (*.*)",
+                    "mp4": "Video Files (*.mp4);;All Files (*.*)",
+                    "avi": "Video Files (*.avi);;All Files (*.*)",
+                    "mov": "Video Files (*.mov);;All Files (*.*)",
+                    "mkv": "Video Files (*.mkv);;All Files (*.*)",
+                    "mp3": "Audio Files (*.mp3);;All Files (*.*)",
+                    "wav": "Audio Files (*.wav);;All Files (*.*)",
+                    "flac": "Audio Files (*.flac);;All Files (*.*)",
+                    "aac": "Audio Files (*.aac);;All Files (*.*)",
+                    "jpg": "Image Files (*.jpg);;All Files (*.*)",
+                    "jpeg": "Image Files (*.jpeg);;All Files (*.*)",
+                    "png": "Image Files (*.png);;All Files (*.*)",
+                    "bmp": "Image Files (*.bmp);;All Files (*.*)",
+                    "gif": "Image Files (*.gif);;All Files (*.*)"
+                }
+
+                filter_text = file_filters.get(file_type, "All Files (*.*)")
+
+                # Open file dialog to select file
+                file_path, _ = QFileDialog.getOpenFileName(
+                    self, f"Select {file_type.upper()} File",
+                    "", filter_text
+                )
+
+                if not file_path:
+                    return  # User cancelled
+
+                # Validate file exists and is readable
+                if not os.path.exists(file_path):
+                    QMessageBox.warning(self, "File Not Found", f"File does not exist: {file_path}")
+                    return
+
+                if not os.access(file_path, os.R_OK):
+                    QMessageBox.warning(self, "Permission Denied", f"Cannot read file: {file_path}")
+                    return
+
+                # Get dataset name from user
+                dataset_name, ok = QInputDialog.getText(
+                    self, "Dataset Name",
+                    f"Enter a name for this {file_type.upper()} dataset:",
+                    text=os.path.splitext(os.path.basename(file_path))[0]
+                )
+
+                if not ok or not dataset_name.strip():
+                    return  # User cancelled
+
+                dataset_name = dataset_name.strip()
+
+                # Show progress
+                self.training_progress.setVisible(True)
+                self.training_progress.setRange(0, 100)
+                self.training_progress.setValue(10)
+
+                # Log upload start
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Uploading {file_type.upper()} file '{os.path.basename(file_path)}' as dataset '{dataset_name}'")
+
+                # Upload file to API server
+                result = await self._upload_file_async(file_path, dataset_name)
+                self._handle_upload_file_result_direct(result)
+
+                # If successful, also load the dataset
+                if result.success:
+                    self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Upload successful, loading dataset...")
+
+                    # Load the uploaded dataset
+                    load_result = await self._load_dataset_async(file_path, dataset_name)
+                    self._handle_load_dataset_result_direct(load_result)
+
+                    if load_result.success:
+                        self.current_dataset_loaded = True
+                        self.training_button.setEnabled(True)
+
+            except asyncio.CancelledError:
+                logger.info("File upload cancelled")
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] File upload cancelled")
+                raise
+            except Exception as e:
+                self.training_progress.setVisible(False)
+                self.training_progress.setValue(0)
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] File upload error: {str(e)}")
+                QMessageBox.warning(self, "Upload Error", str(e))
+            finally:
+                # Clean up task
+                with self.task_lock:
+                    self.active_tasks.discard(task_id)
+
+                # Remove from pending tasks
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.discard(self.current_async_task)
+                    self.current_async_task = None
+
+    @qasync.asyncSlot()
+    async def upload_csv(self):
+        """Upload CSV file to API server (legacy method)"""
+        # Set file type to CSV and call upload_file
+        self.upload_file_type_combo.setCurrentText("CSV")
+        await self.upload_file()
+
+    async def _upload_file_async(self, file_path: str, dataset_name: str):
+        """Async part of file upload for various formats"""
+        # For now, we'll just validate the file and prepare it for loading
+        # The actual upload happens during load_dataset
+        # This method could be extended to upload to a file storage service if needed
+
+        # Basic validation
+        try:
+            # Check file size
+            file_size = os.path.getsize(file_path)
+            if file_size > 100 * 1024 * 1024:  # 100MB limit
+                return APIResponse(success=False, data={"error": "File too large (max 100MB)"})
+
+            # Get file extension for format-specific validation
+            file_ext = os.path.splitext(file_path)[1].lower()
+
+            # Format-specific validation
+            if file_ext == '.csv':
+                # Validate CSV format
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    first_line = f.readline().strip()
+                    if not first_line:
+                        return APIResponse(success=False, data={"error": "File appears to be empty"})
+
+                    # Count columns
+                    reader = csv.reader([first_line])
+                    try:
+                        columns = next(reader)
+                        if len(columns) < 2:
+                            return APIResponse(success=False, data={"error": "CSV must have at least 2 columns"})
+                    except csv.Error as e:
+                        return APIResponse(success=False, data={"error": f"Invalid CSV format: {str(e)}"})
+
+            elif file_ext in ['.json', '.xml', '.pdf', '.docx', '.doc', '.txt']:
+                # Basic text-based file validation
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read(1024)  # Read first 1KB
+                    if not content.strip():
+                        return APIResponse(success=False, data={"error": "File appears to be empty"})
+
+            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac']:
+                # For media files, just check if file is readable
+                if not os.access(file_path, os.R_OK):
+                    return APIResponse(success=False, data={"error": "Cannot read media file"})
+
+            elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
+                # For image files, just check if file is readable
+                if not os.access(file_path, os.R_OK):
+                    return APIResponse(success=False, data={"error": "Cannot read image file"})
+
+            else:
+                return APIResponse(success=False, data={"error": f"Unsupported file format: {file_ext}"})
+
+            # Return success - file is valid for upload
+            return APIResponse(success=True, data={
+                "message": f"File '{os.path.basename(file_path)}' validated successfully",
+                "file_path": file_path,
+                "dataset_name": dataset_name,
+                "file_size": file_size,
+                "file_type": file_ext[1:] if file_ext else "unknown"
+            })
+
+        except Exception as e:
+            return APIResponse(success=False, data={"error": f"File validation failed: {str(e)}"})
+
+    def _handle_upload_file_result_direct(self, result):
+        """Handle file upload result directly"""
+        try:
+            self.training_progress.setVisible(False)
+            if result.success:
+                data = result.data
+                file_type = data.get('file_type', 'unknown').upper()
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {file_type} validation successful")
+                self.training_log.appendPlainText(f"  - File: {os.path.basename(data.get('file_path', 'Unknown'))}")
+                self.training_log.appendPlainText(f"  - Size: {data.get('file_size', 0) / 1024:.1f} KB")
+                self.training_log.appendPlainText(f"  - Dataset: {data.get('dataset_name', 'Unknown')}")
+
+                QMessageBox.information(self, "Upload Successful",
+                                      f"{file_type} file uploaded and validated successfully!\n\n"
+                                      f"File: {os.path.basename(data.get('file_path', 'Unknown'))}\n"
+                                      f"Dataset: {data.get('dataset_name', 'Unknown')}\n"
+                                      f"Size: {data.get('file_size', 0) / 1024:.1f} KB")
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] File upload failed: {error_msg}")
+                QMessageBox.warning(self, "Upload Failed", error_msg)
+        except Exception as e:
+            self.training_progress.setVisible(False)
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Upload result handling error: {str(e)}")
+            QMessageBox.warning(self, "Upload Error", str(e))
 
     def clear_training_log(self):
         """Clear training log"""
@@ -8016,30 +8424,37 @@ capabilities, training data, performance metrics, and usage instructions."""
     def on_norm_min_changed(self, value):
         """Handle normalization min value change"""
         self.norm_min = value
+        self.learning_config['normalization_min'] = value
 
     def on_norm_max_changed(self, value):
         """Handle normalization max value change"""
         self.norm_max = value
+        self.learning_config['normalization_max'] = value
 
     def on_neurons_changed(self, value):
         """Handle neurons value change"""
         self.neurons = value
+        self.learning_config['neurons_per_layer'] = value
 
     def on_samples_changed(self, value):
         """Handle samples value change"""
         self.samples = value
+        self.learning_config['training_samples'] = value
 
     def on_epochs_changed(self, value):
         """Handle epochs value change"""
         self.epochs = value
+        self.learning_config['epochs'] = value
 
     def on_layers_changed(self, value):
         """Handle layers value change"""
         self.layers = value
+        self.learning_config['hidden_layers'] = value
 
     def on_learning_rate_changed(self, value):
         """Handle learning rate value change"""
         self.learning_rate = value
+        self.learning_config['learning_rate'] = value
 
     def cancel_all_tasks(self):
         """Cancel all pending async tasks"""

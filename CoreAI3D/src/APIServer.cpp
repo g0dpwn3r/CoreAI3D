@@ -1582,32 +1582,79 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             return response;
         }
         else if (action == "load_dataset" && method == "POST") {
-            // Handle dataset loading
+            // Handle dataset loading for multiple file formats
             std::string filename = parameters.value("filename", "");
             int outputSize = parameters.value("output_size", 1);
             bool hasHeader = parameters.value("has_header", true);
             bool containsText = parameters.value("contains_text", false);
             std::string datasetName = parameters.value("dataset_name", "api_dataset");
+            float minRange = parameters.value("min_range", -1.0f);
+            float maxRange = parameters.value("max_range", 1.0f);
 
             if (filename.empty()) {
                 return createErrorResponse("Filename is required", 400);
             }
 
-            // Load CSV dataset
-            bool loaded = trainingModule->loadCSV(filename, -1, outputSize, hasHeader, containsText, ',', datasetName);
+            // Validate normalization parameters
+            if (minRange >= maxRange) {
+                return createErrorResponse("min_range must be less than max_range", 400);
+            }
+
+            // Get file extension to determine file type
+            std::string extension = getFileExtension(filename);
+            std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+            bool loaded = false;
+
+            // Route to appropriate loading method based on file extension
+            if (extension == "csv") {
+                loaded = trainingModule->loadCSV(filename, -1, outputSize, hasHeader, containsText, ',', datasetName);
+            }
+            else if (extension == "json") {
+                loaded = trainingModule->loadJSONFile(filename, "", 512, EMBEDDING_DIM);
+            }
+            else if (extension == "xml") {
+                loaded = trainingModule->loadXMLFile(filename, "", 512, EMBEDDING_DIM);
+            }
+            else if (extension == "pdf" || extension == "docx" || extension == "doc" || extension == "txt") {
+                loaded = trainingModule->loadDocumentFile(filename, 512, EMBEDDING_DIM);
+            }
+            else if (extension == "mp4" || extension == "avi" || extension == "mov" || extension == "mkv") {
+                loaded = trainingModule->loadFromVideoFile(filename, 512, EMBEDDING_DIM, 30);
+            }
+            else if (extension == "mp3" || extension == "wav" || extension == "flac" || extension == "aac") {
+                loaded = trainingModule->loadFromAudioFile(filename, 512, EMBEDDING_DIM);
+            }
+            else if (extension == "jpg" || extension == "jpeg" || extension == "png" || extension == "bmp" || extension == "gif") {
+                loaded = trainingModule->loadFromImageFile(filename, 512, EMBEDDING_DIM);
+            }
+            else {
+                return createErrorResponse("Unsupported file format: " + extension + ". Supported formats: csv, json, xml, pdf, docx, doc, txt, mp4, avi, mov, mkv, mp3, wav, flac, aac, jpg, jpeg, png, bmp, gif", 400);
+            }
 
             if (!loaded) {
-                return createErrorResponse("Failed to load dataset", 500);
+                return createErrorResponse("Failed to load dataset from file: " + filename, 500);
+            }
+
+            // Perform data preprocessing with normalization
+            try {
+                trainingModule->preprocess(minRange, maxRange);
+            }
+            catch (const std::exception& e) {
+                return createErrorResponse("Preprocessing failed: " + std::string(e.what()), 500);
             }
 
             json response = {
                 {"status", "loaded"},
                 {"filename", filename},
+                {"file_type", extension},
                 {"dataset_name", datasetName},
                 {"samples", trainingModule->numSamples},
                 {"input_size", trainingModule->inputSize},
                 {"output_size", trainingModule->outputSize},
-                {"message", "Dataset loaded successfully"},
+                {"min_range", minRange},
+                {"max_range", maxRange},
+                {"message", "Dataset loaded and preprocessed successfully"},
                 {"timestamp", getTimestampString()}
             };
             return response;
@@ -2823,6 +2870,14 @@ json APIServer::getErrorLogs(const std::string& sessionId, int limit) {
 }
 
 // Utility functions
+std::string APIServer::getFileExtension(const std::string& filename) {
+    size_t lastDot = filename.find_last_of('.');
+    if (lastDot == std::string::npos) {
+        return "";
+    }
+    return filename.substr(lastDot + 1);
+}
+
 std::string APIServer::generateUniqueId() {
     static std::atomic<int> counter{0};
     return "session_" + std::to_string(++counter);
