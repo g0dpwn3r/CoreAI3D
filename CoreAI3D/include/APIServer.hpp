@@ -187,6 +187,16 @@ public:
     json systemGetSystemMetrics(const std::string& sessionId);
     json systemCaptureScreen(const std::string& sessionId, const std::string& outputPath = "");
 
+    // Automation task implementations
+    json performFileBackup(const std::string& sourcePath, const std::string& destPath, bool compress);
+    json performSystemCleanup(const std::string& cleanupType, bool force);
+    json performLogRotation(const std::string& logPath, int maxSize, int keepFiles);
+    json performServiceRestart(const std::string& serviceName);
+    json performDiskSpaceCheck(const std::string& path, int thresholdPercent);
+    json performNetworkTest(const std::string& target, int timeout);
+    json performProcessMonitor(const std::string& processName, int maxMemory, int maxCpu);
+    json performCustomScript(const std::string& scriptPath, const std::vector<std::string>& args, int timeout);
+
     // Web API endpoints
     json webSearch(const std::string& sessionId, const std::string& query, int maxResults = 10);
     json webExtractContent(const std::string& sessionId, const std::string& url);

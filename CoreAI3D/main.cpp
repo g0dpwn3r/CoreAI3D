@@ -91,6 +91,19 @@ int main(int argc, char* argv[]) {
             ++argc;
         }
         if (arg == "--help" || arg == "-h") {
+            std::cout << R"(
+     ,     ,
+    (\____/)
+     (_oo_)
+       / \  Archangel Seraphim
+      /| |\
+     / \_/ \
+    /  ||  \
+   /   ||   \
+  /    ||    \
+ /     ||     \
+/      ||      \
+)" << std::endl;
             std::cout << "CoreAI3D - Advanced AI Training and Prediction Tool\n";
             std::cout << "====================================================\n\n";
             std::cout << "USAGE:\n";
@@ -198,6 +211,12 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --load-model <id> or --load-model <name>\n";
             std::cout << "    Dependencies: Requires database connection; used in prediction mode\n";
             std::cout << "    Example: --load-model 123 or --load-model my_trained_model\n\n";
+            std::cout << "  --embedding-file <file>\n";
+            std::cout << "    Specify the path to a custom embedding file for language processing.\n";
+            std::cout << "    Expected value: Path to a valid embedding file\n";
+            std::cout << "    Usage: --embedding-file <path>\n";
+            std::cout << "    Dependencies: Used in chat mode for custom embeddings\n";
+            std::cout << "    Example: --embedding-file ./embeddings/custom_embeddings.txt\n\n";
             std::cout << "EXAMPLES:\n";
             std::cout << "  1. Start API server with WebSocket support:\n";
             std::cout << "     ./CoreAI3D --enable-websocket --api-port 8080\n\n";
@@ -232,6 +251,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--load-model") {
             std::string value = extractValue(i, "--load-model", arg);
             if (!value.empty()) loadModelId = value;
+        } else if (arg == "--embedding-file") {
+            std::string value = extractValue(i, "--embedding-file", arg);
+            if (!value.empty()) embeddingFile = value;
         } else if (arg == "--offline") {
             isOfflineMode = true;
         } else if (arg == "--enable-websocket") {

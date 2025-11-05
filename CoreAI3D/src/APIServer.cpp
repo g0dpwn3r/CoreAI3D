@@ -22,6 +22,7 @@
 #include <random>
 #include <regex>
 #include <ctime>
+#include <filesystem>
 
 using namespace std::chrono_literals;
 
@@ -340,7 +341,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             }
             return createErrorResponse("Unknown websocket action: " + action, 400);
         }
-        else if (module == "predict") {
+        else if (module == "predict" || module == "prediction") {
             return handlePredictAPI(action, requestData, method);
         }
         else if (module == "training") {
@@ -461,6 +462,10 @@ json APIServer::handleSystemAPI(const std::string& action, const json& parameter
         }
         else if (action == "metrics") {
             return systemGetSystemMetrics("");
+        }
+        else if (action == "automate") {
+            std::string taskType = parameters.value("task_type", "");
+            return systemAutomateTask("", taskType, parameters);
         }
         else {
             return createErrorResponse("Unknown system action: " + action, 400);
@@ -1020,6 +1025,8 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
             int neurons = parameters.value("neurons", 10);
             float minRange = parameters.value("min_range", 0.0f);
             float maxRange = parameters.value("max_range", 1.0f);
+            int inputSize = parameters.value("input_size", trainingModule->inputSize);
+            int outputSize = parameters.value("output_size", trainingModule->outputSize);
 
             // Validate parameters
             if (learningRate <= 0.0 || learningRate > 1.0) {
@@ -1034,12 +1041,29 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
             if (neurons <= 0) {
                 return createErrorResponse("Neurons must be positive", 400);
             }
+            if (inputSize <= 0) {
+                return createErrorResponse("Input size must be positive", 400);
+            }
+            if (outputSize <= 0) {
+                return createErrorResponse("Output size must be positive", 400);
+            }
+            if (minRange >= maxRange) {
+                return createErrorResponse("min_range must be less than max_range", 400);
+            }
 
             // Initialize the network
             trainingModule->layers = layers;
             trainingModule->neurons = neurons;
+            trainingModule->inputSize = inputSize;
+            trainingModule->outputSize = outputSize;
             trainingModule->learningRate = learningRate;
-            trainingModule->preprocess(minRange, maxRange);
+
+            try {
+                trainingModule->preprocess(minRange, maxRange);
+            }
+            catch (const std::exception& e) {
+                return createErrorResponse("Failed to initialize neural network: " + std::string(e.what()), 500);
+            }
 
             json response = {
                 {"status", "initialized"},
@@ -1047,6 +1071,8 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
                 {"epochs", epochs},
                 {"layers", layers},
                 {"neurons", neurons},
+                {"input_size", inputSize},
+                {"output_size", outputSize},
                 {"min_range", minRange},
                 {"max_range", maxRange},
                 {"message", "Neural network initialized successfully"},
@@ -1237,7 +1263,10 @@ json APIServer::handlePredictAPI(const std::string& action, const json& paramete
 
         if (action == "run" && method == "POST") {
             // Handle prediction request
+            std::string inputType = parameters.value("input_type", "file");
             std::string inputFile = parameters.value("input_file", "");
+            std::string inputText = parameters.value("input_text", "");
+            std::string inputUrl = parameters.value("input_url", "");
             std::string outputCsvFile = parameters.value("output_file", "predictions.csv");
             std::string targetFile = parameters.value("target_file", "");
             std::string loadModelId = parameters.value("load_model_id", "");
@@ -1254,20 +1283,56 @@ json APIServer::handlePredictAPI(const std::string& action, const json& paramete
             std::string embeddingFile = parameters.value("embedding_file", "embedding.txt");
             std::string language = parameters.value("language", "en");
             std::string datasetName = parameters.value("dataset_name", "online-1a");
-            bool hasHeader = parameters.value("has_header", true);
+            bool hasHeader = parameters.value("contains_header", true);
             bool containsText = parameters.value("contains_text", false);
             char delimiter = parameters.value("delimiter", ',');
 
-            if (inputFile.empty()) {
-                return createErrorResponse("Input file cannot be empty", 400);
+            // Validate input based on type
+            if (inputType == "file" && inputFile.empty()) {
+                return createErrorResponse("Input file cannot be empty for file input type", 400);
+            }
+            if (inputType == "text" && inputText.empty()) {
+                return createErrorResponse("Input text cannot be empty for text input type", 400);
+            }
+            if (inputType == "url" && inputUrl.empty()) {
+                return createErrorResponse("Input URL cannot be empty for URL input type", 400);
+            }
+
+            // Handle different input types
+            std::string processedInputFile = inputFile;
+            if (inputType == "text") {
+                // Create temporary file from text input
+                processedInputFile = "temp_text_input.csv";
+                std::ofstream tempFile(processedInputFile);
+                if (tempFile.is_open()) {
+                    // For text input, treat it as a single data row without header
+                    tempFile << inputText << std::endl;
+                    tempFile.close();
+                    hasHeader = false; // Text input doesn't have headers
+                } else {
+                    return createErrorResponse("Failed to create temporary file for text input", 500);
+                }
+            }
+            else if (inputType == "url") {
+                // TODO: Implement URL download functionality
+                return createErrorResponse("URL input type not yet implemented", 501);
+            }
+            else if (inputType == "image" || inputType == "audio") {
+                // TODO: Implement image/audio processing
+                return createErrorResponse(inputType + " input type not yet implemented", 501);
             }
 
             // Run prediction
-            bool success = predictModule->runPrediction(inputFile, outputCsvFile, targetFile, loadModelId,
+            bool success = predictModule->runPrediction(processedInputFile, outputCsvFile, targetFile, loadModelId,
                                                       datasetId, layers, neurons, minRange, maxRange,
                                                       inputSize, outputSize, numSamples, learningRate,
                                                       epochs, embeddingFile, language, datasetName,
                                                       hasHeader, containsText, delimiter);
+
+            // Clean up temporary file if created
+            if (inputType == "text" && processedInputFile != inputFile) {
+                std::remove(processedInputFile.c_str());
+            }
 
             if (!success) {
                 return createErrorResponse("Prediction failed", 500);
@@ -1275,7 +1340,8 @@ json APIServer::handlePredictAPI(const std::string& action, const json& paramete
 
             // Get evaluation metrics
             json response = {
-                {"input_file", inputFile},
+                {"input_type", inputType},
+                {"input_file", processedInputFile},
                 {"output_file", outputCsvFile},
                 {"rmse", predictModule->getRMSE()},
                 {"mse", predictModule->getMSE()},
@@ -1328,6 +1394,45 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             // Check if already training
             if (trainingModule->isTraining()) {
                 return createErrorResponse("Training is already in progress", 409);
+            }
+
+            // Ensure CoreAI is initialized before starting training
+            if (!trainingModule->getCore()) {
+                // Initialize CoreAI if not already done
+                float minRange = parameters.value("min_range", 0.0f);
+                float maxRange = parameters.value("max_range", 1.0f);
+                int layers = parameters.value("layers", trainingModule->layers);
+                int neurons = parameters.value("neurons", trainingModule->neurons);
+                int inputSize = parameters.value("input_size", trainingModule->inputSize);
+                int outputSize = parameters.value("output_size", trainingModule->outputSize);
+
+                // Validate parameters
+                if (minRange >= maxRange) {
+                    return createErrorResponse("min_range must be less than max_range", 400);
+                }
+                if (layers <= 0) {
+                    return createErrorResponse("layers must be positive", 400);
+                }
+                if (neurons <= 0) {
+                    return createErrorResponse("neurons must be positive", 400);
+                }
+                if (inputSize <= 0) {
+                    return createErrorResponse("input_size must be positive", 400);
+                }
+                if (outputSize <= 0) {
+                    return createErrorResponse("output_size must be positive", 400);
+                }
+
+                try {
+                    trainingModule->layers = layers;
+                    trainingModule->neurons = neurons;
+                    trainingModule->inputSize = inputSize;
+                    trainingModule->outputSize = outputSize;
+                    trainingModule->preprocess(minRange, maxRange);
+                }
+                catch (const std::exception& e) {
+                    return createErrorResponse("Failed to initialize neural network: " + std::string(e.what()), 500);
+                }
             }
 
             // Start training asynchronously
@@ -1710,6 +1815,439 @@ json APIServer::systemGetProcesses(const std::string& sessionId) {
     return result;
 }
 
+// Automation task implementations
+json APIServer::performFileBackup(const std::string& sourcePath, const std::string& destPath, bool compress) {
+    try {
+        // Create destination directory if it doesn't exist
+        std::filesystem::path destDir = std::filesystem::path(destPath).parent_path();
+        if (!destDir.empty() && !std::filesystem::exists(destDir)) {
+            std::filesystem::create_directories(destDir);
+        }
+
+        if (compress) {
+            // Create tar.gz archive
+            std::string tarCmd = "tar -czf " + destPath + " -C " + std::filesystem::path(sourcePath).parent_path().string() + " " + std::filesystem::path(sourcePath).filename().string();
+            int ret = system(tarCmd.c_str());
+            if (ret != 0) {
+                return createErrorResponse("Failed to create compressed backup archive", 500);
+            }
+        } else {
+            // Simple copy
+            std::filesystem::copy(sourcePath, destPath, std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+        }
+
+        // Get file size
+        size_t fileSize = std::filesystem::file_size(destPath);
+
+        return {
+            {"status", "success"},
+            {"message", "File backup completed successfully"},
+            {"source_path", sourcePath},
+            {"dest_path", destPath},
+            {"compressed", compress},
+            {"file_size_bytes", fileSize}
+        };
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("File backup failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performSystemCleanup(const std::string& cleanupType, bool force) {
+    try {
+        json result = {
+            {"status", "success"},
+            {"cleanup_type", cleanupType},
+            {"files_cleaned", 0},
+            {"space_freed_bytes", 0}
+        };
+
+        if (cleanupType == "temp_files") {
+            // Clean temporary files
+            std::vector<std::string> tempDirs = {"/tmp", "/var/tmp"};
+            size_t totalCleaned = 0;
+            size_t spaceFreed = 0;
+
+            for (const auto& tempDir : tempDirs) {
+                if (std::filesystem::exists(tempDir)) {
+                    for (const auto& entry : std::filesystem::directory_iterator(tempDir)) {
+                        try {
+                            if (entry.is_regular_file()) {
+                                auto fileTime = std::filesystem::last_write_time(entry);
+                                auto now = std::filesystem::file_time_type::clock::now();
+                                auto age = std::chrono::duration_cast<std::chrono::hours>(now - fileTime).count();
+
+                                // Remove files older than 24 hours or if force is true
+                                if (force || age > 24) {
+                                    size_t fileSize = entry.file_size();
+                                    std::filesystem::remove(entry);
+                                    totalCleaned++;
+                                    spaceFreed += fileSize;
+                                }
+                            }
+                        } catch (...) {
+                            // Skip files that can't be processed
+                        }
+                    }
+                }
+            }
+
+            result["files_cleaned"] = totalCleaned;
+            result["space_freed_bytes"] = spaceFreed;
+            result["message"] = "Temporary files cleanup completed";
+        }
+        else if (cleanupType == "cache") {
+            // Clean cache files
+            std::vector<std::string> cacheDirs = {"/var/cache", "/home/" + std::string(getenv("USER") ? getenv("USER") : "user") + "/.cache"};
+            size_t spaceFreed = 0;
+
+            for (const auto& cacheDir : cacheDirs) {
+                if (std::filesystem::exists(cacheDir)) {
+                    // Use system command to clean cache (safer than recursive deletion)
+                    std::string cleanCmd = "find " + cacheDir + " -type f -mtime +7 -delete 2>/dev/null || true";
+                    system(cleanCmd.c_str());
+                    result["message"] = "Cache cleanup completed (removed files older than 7 days)";
+                }
+            }
+        }
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("System cleanup failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performLogRotation(const std::string& logPath, int maxSize, int keepFiles) {
+    try {
+        json result = {
+            {"status", "success"},
+            {"log_path", logPath},
+            {"max_size_mb", maxSize},
+            {"keep_files", keepFiles},
+            {"rotated_files", 0}
+        };
+
+        if (!std::filesystem::exists(logPath)) {
+            return createErrorResponse("Log path does not exist: " + logPath, 400);
+        }
+
+        int rotatedCount = 0;
+
+        // Find log files in the directory
+        for (const auto& entry : std::filesystem::directory_iterator(logPath)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+
+                // Check if it's a log file (basic check)
+                if (filename.find(".log") != std::string::npos) {
+                    size_t fileSize = entry.file_size();
+                    size_t maxSizeBytes = maxSize * 1024 * 1024; // Convert MB to bytes
+
+                    if (fileSize > maxSizeBytes) {
+                        // Rotate the log file
+                        std::string baseName = filename.substr(0, filename.find_last_of("."));
+                        std::string rotatedName = baseName + "." + std::to_string(keepFiles) + ".log";
+
+                        // Remove oldest rotated file if it exists
+                        std::filesystem::path oldestRotated = entry.path().parent_path() / rotatedName;
+                        if (std::filesystem::exists(oldestRotated)) {
+                            std::filesystem::remove(oldestRotated);
+                        }
+
+                        // Shift existing rotated files
+                        for (int i = keepFiles - 1; i >= 1; --i) {
+                            std::string currentName = baseName + "." + std::to_string(i) + ".log";
+                            std::string nextName = baseName + "." + std::to_string(i + 1) + ".log";
+
+                            std::filesystem::path currentPath = entry.path().parent_path() / currentName;
+                            std::filesystem::path nextPath = entry.path().parent_path() / nextName;
+
+                            if (std::filesystem::exists(currentPath)) {
+                                std::filesystem::rename(currentPath, nextPath);
+                            }
+                        }
+
+                        // Create the first rotated file
+                        std::filesystem::path rotatedPath = entry.path().parent_path() / (baseName + ".1.log");
+                        std::filesystem::rename(entry.path(), rotatedPath);
+
+                        rotatedCount++;
+                    }
+                }
+            }
+        }
+
+        result["rotated_files"] = rotatedCount;
+        result["message"] = "Log rotation completed successfully";
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Log rotation failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performServiceRestart(const std::string& serviceName) {
+    try {
+        // Use systemctl to restart service (Linux specific)
+        std::string restartCmd = "sudo systemctl restart " + serviceName + " 2>&1";
+        int ret = system(restartCmd.c_str());
+
+        json result = {
+            {"status", ret == 0 ? "success" : "failed"},
+            {"service_name", serviceName},
+            {"message", ret == 0 ? "Service restarted successfully" : "Failed to restart service"}
+        };
+
+        if (ret != 0) {
+            result["error_code"] = ret;
+        }
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Service restart failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performDiskSpaceCheck(const std::string& path, int thresholdPercent) {
+    try {
+        std::filesystem::space_info space = std::filesystem::space(path);
+
+        size_t totalBytes = space.capacity;
+        size_t freeBytes = space.available;
+        size_t usedBytes = totalBytes - freeBytes;
+
+        double usedPercent = (static_cast<double>(usedBytes) / totalBytes) * 100.0;
+        double freePercent = (static_cast<double>(freeBytes) / totalBytes) * 100.0;
+
+        bool thresholdExceeded = usedPercent >= thresholdPercent;
+
+        json result = {
+            {"status", "success"},
+            {"path", path},
+            {"total_bytes", totalBytes},
+            {"used_bytes", usedBytes},
+            {"free_bytes", freeBytes},
+            {"used_percent", usedPercent},
+            {"free_percent", freePercent},
+            {"threshold_percent", thresholdPercent},
+            {"threshold_exceeded", thresholdExceeded}
+        };
+
+        if (thresholdExceeded) {
+            result["warning"] = "Disk space usage exceeds threshold";
+        } else {
+            result["message"] = "Disk space is within acceptable limits";
+        }
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Disk space check failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performNetworkTest(const std::string& target, int timeout) {
+    try {
+        // Use ping to test network connectivity
+        std::string pingCmd = "ping -c 3 -W " + std::to_string(timeout) + " " + target + " 2>&1";
+        FILE* pipe = popen(pingCmd.c_str(), "r");
+
+        if (!pipe) {
+            return createErrorResponse("Failed to execute ping command", 500);
+        }
+
+        std::string output;
+        char buffer[128];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            output += buffer;
+        }
+
+        int ret = pclose(pipe);
+        bool success = (ret == 0);
+
+        // Parse ping output for basic metrics
+        double avgRtt = 0.0;
+        std::regex rttRegex("rtt min/avg/max/mdev = [0-9.]+/([0-9.]+)/[0-9.]+/[0-9.]+ ms");
+        std::smatch match;
+        if (std::regex_search(output, match, rttRegex)) {
+            avgRtt = std::stod(match[1]);
+        }
+
+        json result = {
+            {"status", success ? "success" : "failed"},
+            {"target", target},
+            {"timeout_seconds", timeout},
+            {"reachable", success},
+            {"average_rtt_ms", avgRtt}
+        };
+
+        if (success) {
+            result["message"] = "Network connectivity test passed";
+        } else {
+            result["message"] = "Network connectivity test failed";
+            result["error"] = "Host unreachable or network issues";
+        }
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Network test failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performProcessMonitor(const std::string& processName, int maxMemory, int maxCpu) {
+    try {
+        json result = {
+            {"status", "success"},
+            {"process_name", processName},
+            {"max_memory_mb", maxMemory},
+            {"max_cpu_percent", maxCpu},
+            {"processes_found", 0},
+            {"issues_detected", 0}
+        };
+
+        // Use ps command to get process information
+        std::string psCmd = "ps aux --no-headers 2>/dev/null";
+        FILE* pipe = popen(psCmd.c_str(), "r");
+
+        if (!pipe) {
+            return createErrorResponse("Failed to execute ps command", 500);
+        }
+
+        std::vector<json> processes;
+        char buffer[1024];
+        int foundCount = 0;
+        int issuesCount = 0;
+
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            std::string line(buffer);
+            std::istringstream iss(line);
+
+            std::string user, pid, cpu, mem, vsz, rss, tty, stat, start, time, command;
+            iss >> user >> pid >> cpu >> mem >> vsz >> rss >> tty >> stat >> start >> time;
+
+            // Get the rest as command
+            std::getline(iss, command);
+
+            // Check if process name matches (case-insensitive)
+            if (!processName.empty()) {
+                std::string lowerCommand = command;
+                std::string lowerProcessName = processName;
+                std::transform(lowerCommand.begin(), lowerCommand.end(), lowerCommand.begin(), ::tolower);
+                std::transform(lowerProcessName.begin(), lowerProcessName.end(), lowerProcessName.begin(), ::tolower);
+
+                if (lowerCommand.find(lowerProcessName) == std::string::npos) {
+                    continue;
+                }
+            }
+
+            foundCount++;
+
+            double cpuPercent = std::stod(cpu);
+            double memPercent = std::stod(mem);
+            int memMB = std::stoi(rss) / 1024; // Convert KB to MB
+
+            bool hasIssues = false;
+            if (maxCpu > 0 && cpuPercent > maxCpu) {
+                hasIssues = true;
+            }
+            if (maxMemory > 0 && memMB > maxMemory) {
+                hasIssues = true;
+            }
+
+            if (hasIssues) {
+                issuesCount++;
+            }
+
+            processes.push_back({
+                {"pid", std::stoi(pid)},
+                {"user", user},
+                {"cpu_percent", cpuPercent},
+                {"memory_percent", memPercent},
+                {"memory_mb", memMB},
+                {"command", command.substr(0, 100)}, // Truncate long commands
+                {"has_issues", hasIssues}
+            });
+        }
+
+        pclose(pipe);
+
+        result["processes_found"] = foundCount;
+        result["issues_detected"] = issuesCount;
+        result["processes"] = processes;
+
+        if (issuesCount > 0) {
+            result["warning"] = "Some processes exceed specified limits";
+        } else {
+            result["message"] = "Process monitoring completed successfully";
+        }
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Process monitoring failed: " + std::string(e.what()), 500);
+    }
+}
+
+json APIServer::performCustomScript(const std::string& scriptPath, const std::vector<std::string>& args, int timeout) {
+    try {
+        if (!std::filesystem::exists(scriptPath)) {
+            return createErrorResponse("Script file does not exist: " + scriptPath, 400);
+        }
+
+        // Build command with arguments
+        std::string cmd = scriptPath;
+        for (const auto& arg : args) {
+            cmd += " \"" + arg + "\"";
+        }
+
+        // Add timeout wrapper
+        cmd = "timeout " + std::to_string(timeout) + "s " + cmd;
+
+        // Execute the script
+        FILE* pipe = popen(cmd.c_str(), "r");
+
+        if (!pipe) {
+            return createErrorResponse("Failed to execute script", 500);
+        }
+
+        std::string output;
+        char buffer[128];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            output += buffer;
+        }
+
+        int ret = pclose(pipe);
+        bool success = (ret == 0);
+
+        json result = {
+            {"status", success ? "success" : "failed"},
+            {"script_path", scriptPath},
+            {"arguments", args},
+            {"timeout_seconds", timeout},
+            {"exit_code", ret},
+            {"output", output.substr(0, 10000)} // Limit output size
+        };
+
+        if (success) {
+            result["message"] = "Script executed successfully";
+        } else {
+            result["message"] = "Script execution failed";
+            if (ret == 124) {
+                result["error"] = "Script timed out";
+            }
+        }
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Custom script execution failed: " + std::string(e.what()), 500);
+    }
+}
+
 json APIServer::systemStartApplication(const std::string& sessionId, const std::string& appName, const std::vector<std::string>& args) {
     json result = {
         {"action", "start_application"},
@@ -1722,14 +2260,88 @@ json APIServer::systemStartApplication(const std::string& sessionId, const std::
 }
 
 json APIServer::systemAutomateTask(const std::string& sessionId, const std::string& taskType, const json& parameters) {
-    json result = {
-        {"action", "automate_task"},
-        {"task_type", taskType},
-        {"parameters", parameters},
-        {"status", "processing"},
-        {"message", "Task automation not yet implemented"}
-    };
-    return result;
+    try {
+        json result = {
+            {"action", "automate_task"},
+            {"task_type", taskType},
+            {"status", "processing"},
+            {"timestamp", getTimestampString()}
+        };
+
+        if (taskType == "file_backup") {
+            std::string sourcePath = parameters.value("source_path", "");
+            std::string destPath = parameters.value("dest_path", "");
+            bool compress = parameters.value("compress", false);
+
+            if (sourcePath.empty() || destPath.empty()) {
+                return createErrorResponse("Source and destination paths are required for file backup", 400);
+            }
+
+            result = performFileBackup(sourcePath, destPath, compress);
+        }
+        else if (taskType == "system_cleanup") {
+            std::string cleanupType = parameters.value("cleanup_type", "temp_files");
+            bool force = parameters.value("force", false);
+
+            result = performSystemCleanup(cleanupType, force);
+        }
+        else if (taskType == "log_rotation") {
+            std::string logPath = parameters.value("log_path", "/var/log");
+            int maxSize = parameters.value("max_size_mb", 100);
+            int keepFiles = parameters.value("keep_files", 5);
+
+            result = performLogRotation(logPath, maxSize, keepFiles);
+        }
+        else if (taskType == "service_restart") {
+            std::string serviceName = parameters.value("service_name", "");
+
+            if (serviceName.empty()) {
+                return createErrorResponse("Service name is required for service restart", 400);
+            }
+
+            result = performServiceRestart(serviceName);
+        }
+        else if (taskType == "disk_space_check") {
+            std::string path = parameters.value("path", "/");
+            int thresholdPercent = parameters.value("threshold_percent", 90);
+
+            result = performDiskSpaceCheck(path, thresholdPercent);
+        }
+        else if (taskType == "network_test") {
+            std::string target = parameters.value("target", "8.8.8.8");
+            int timeout = parameters.value("timeout", 5);
+
+            result = performNetworkTest(target, timeout);
+        }
+        else if (taskType == "process_monitor") {
+            std::string processName = parameters.value("process_name", "");
+            int maxMemory = parameters.value("max_memory_mb", 0);
+            int maxCpu = parameters.value("max_cpu_percent", 0);
+
+            result = performProcessMonitor(processName, maxMemory, maxCpu);
+        }
+        else if (taskType == "custom_script") {
+            std::string scriptPath = parameters.value("script_path", "");
+            std::vector<std::string> args = parameters.value("arguments", std::vector<std::string>{});
+            int timeout = parameters.value("timeout", 30);
+
+            if (scriptPath.empty()) {
+                return createErrorResponse("Script path is required for custom script execution", 400);
+            }
+
+            result = performCustomScript(scriptPath, args, timeout);
+        }
+        else {
+            return createErrorResponse("Unknown automation task type: " + taskType, 400);
+        }
+
+        result["task_type"] = taskType;
+        result["completed_at"] = getTimestampString();
+        return result;
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Automation task failed: " + std::string(e.what()), 500);
+    }
 }
 
 json APIServer::systemGetSystemMetrics(const std::string& sessionId) {
