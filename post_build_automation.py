@@ -54,11 +54,14 @@ def delete_directory(path):
         if path.exists():
             logging.info(f"Deleting directory: {path}")
             shutil.rmtree(path)
+            return True
         else:
             logging.info(f"Directory does not exist, skipping deletion: {path}")
+            return True
     except Exception as e:
-        logging.error(f"Failed to delete {path}: {e}")
-        raise
+        logging.warning(f"Failed to delete {path}: {e}. Skipping deletion and continuing with copy.")
+        return False
+        # Don't raise exception - allow build to continue
 
 def copy_source_to_destination(src, dest):
     """Copy source directory to destination, excluding build artifacts."""
@@ -271,8 +274,13 @@ def main():
     try:
         # Copy to destinations
         for dest in destinations:
-            delete_directory(dest)
-            copy_source_to_destination(source_dir, dest)
+            if delete_directory(dest):
+                try:
+                    copy_source_to_destination(source_dir, dest)
+                except Exception as e:
+                    logging.error(f"Failed to copy to {dest}: {e}. Continuing with other destinations.")
+            else:
+                logging.warning(f"Skipping copy to {dest} because deletion failed.")
 
         # Perform git operations
         branch = get_current_branch()
@@ -283,7 +291,8 @@ def main():
 
     except Exception as e:
         logging.error(f"Post-build automation failed: {e}")
-        sys.exit(1)
+        # Don't exit to avoid failing the build
+        logging.warning("Continuing build despite post-build automation failure")
 
 if __name__ == '__main__':
     main()
