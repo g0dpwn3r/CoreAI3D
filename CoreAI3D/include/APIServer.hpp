@@ -247,7 +247,9 @@ public:
 
     // Performance API endpoints
     json runPerformanceTest(const std::string& sessionId, const std::string& testType, int duration, int iterations, int concurrency);
-    json runLoadTest(const std::string& sessionId, int concurrentUsers, int duration, const std::string& endpoint);
+    json runLoadTest(const std::string& sessionId, int concurrentUsers, int duration, int rampUpTime,
+                    const std::string& endpoint, const std::string& method = "GET",
+                    const json& headers = json::object(), const json& body = json::object());
 
     // Performance test implementations
     double runCPUTest(int duration, int iterations, int concurrency, std::vector<double>& operationTimes);

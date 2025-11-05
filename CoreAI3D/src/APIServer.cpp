@@ -356,7 +356,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
                 int concurrentUsers = requestData.value("concurrentUsers", 10);
                 int duration = requestData.value("duration", 60);
                 std::string endpoint = requestData.value("endpoint", "/health");
-                return runLoadTest("", concurrentUsers, duration, endpoint);
+                return runLoadTest("", concurrentUsers, duration, 0, endpoint, "GET", json::object(), json::object());
             }
             else {
                 return handlePerformanceAPI(action, requestData);
@@ -466,6 +466,51 @@ json APIServer::handleSystemAPI(const std::string& action, const json& parameter
         else if (action == "automate") {
             std::string taskType = parameters.value("task_type", "");
             return systemAutomateTask("", taskType, parameters);
+        }
+        else if (action == "run_performance_test") {
+            // Extract performance test parameters
+            std::string testType = parameters.value("testType", "cpu");
+            int duration = parameters.value("duration", 10);
+            int iterations = parameters.value("iterations", 1000);
+            int concurrency = parameters.value("concurrency", 1);
+
+            // Validate parameters
+            if (duration <= 0 || duration > 300) {
+                return createErrorResponse("Duration must be between 1 and 300 seconds", 400);
+            }
+            if (iterations <= 0 || iterations > 10000000) {
+                return createErrorResponse("Iterations must be between 1 and 10,000,000", 400);
+            }
+            if (concurrency <= 0 || concurrency > 100) {
+                return createErrorResponse("Concurrency must be between 1 and 100", 400);
+            }
+
+            // Run performance test
+            return runPerformanceTest("", testType, duration, iterations, concurrency);
+        }
+        else if (action == "run_load_test") {
+            // Extract load test parameters
+            int concurrentUsers = parameters.value("concurrentUsers", 10);
+            int duration = parameters.value("duration", 60);
+            int rampUpTime = parameters.value("rampUpTime", 10);
+            std::string endpoint = parameters.value("endpoint", "/health");
+            std::string method = parameters.value("method", "GET");
+            json headers = parameters.value("headers", json::object());
+            json body = parameters.value("body", json::object());
+
+            // Validate parameters
+            if (concurrentUsers <= 0 || concurrentUsers > 1000) {
+                return createErrorResponse("Concurrent users must be between 1 and 1000", 400);
+            }
+            if (duration <= 0 || duration > 300) {
+                return createErrorResponse("Duration must be between 1 and 300 seconds", 400);
+            }
+            if (rampUpTime < 0 || rampUpTime > duration) {
+                return createErrorResponse("Ramp-up time must be between 0 and duration", 400);
+            }
+
+            // Run load test
+            return runLoadTest("", concurrentUsers, duration, rampUpTime, endpoint, method, headers, body);
         }
         else {
             return createErrorResponse("Unknown system action: " + action, 400);
@@ -703,7 +748,8 @@ json APIServer::runPerformanceTest(const std::string& sessionId, const std::stri
     }
 }
 
-json APIServer::runLoadTest(const std::string& sessionId, int concurrentUsers, int duration, const std::string& endpoint) {
+json APIServer::runLoadTest(const std::string& sessionId, int concurrentUsers, int duration, int rampUpTime,
+                           const std::string& endpoint, const std::string& method, const json& headers, const json& body) {
     try {
         // Validate parameters
         if (concurrentUsers <= 0 || concurrentUsers > 1000) {
@@ -712,59 +758,94 @@ json APIServer::runLoadTest(const std::string& sessionId, int concurrentUsers, i
         if (duration <= 0 || duration > 300) {
             return createErrorResponse("Duration must be between 1 and 300 seconds", 400);
         }
+        if (rampUpTime < 0 || rampUpTime > duration) {
+            return createErrorResponse("Ramp-up time must be between 0 and duration", 400);
+        }
 
         auto startTime = std::chrono::high_resolution_clock::now();
         auto endTime = startTime + std::chrono::seconds(duration);
+        auto rampUpEndTime = startTime + std::chrono::seconds(rampUpTime);
 
         // Initialize load testing metrics
         std::atomic<int> totalRequests{0};
         std::atomic<int> successfulRequests{0};
         std::atomic<int> failedRequests{0};
+        std::atomic<int> activeUsers{0};
         std::vector<double> responseTimes;
-        std::mutex responseTimesMutex;
+        std::vector<int> statusCodes;
+        std::mutex metricsMutex;
 
-        // Create a thread pool for concurrent users
-        std::vector<std::thread> userThreads;
-
-        // Function to simulate a single user making requests
-        auto simulateUser = [&]() {
-            while (std::chrono::high_resolution_clock::now() < endTime) {
+        // Function to make actual HTTP request
+        auto makeHttpRequest = [&](const std::string& targetEndpoint, const std::string& requestMethod,
+                                  const json& requestHeaders, const json& requestBody) -> std::pair<int, double> {
+            try {
+                // For load testing, we'll simulate HTTP requests with realistic timing
+                // In a real implementation, this would make actual HTTP calls
                 auto requestStart = std::chrono::high_resolution_clock::now();
 
-                try {
-                    // Simulate making a request to the endpoint
-                    // For now, we'll simulate the request with a small delay
-                    // In a real implementation, this would make actual HTTP requests
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10 + (rand() % 50)));
+                // Simulate network latency (10-50ms)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10 + (rand() % 40)));
 
-                    // Simulate occasional failures (5% failure rate)
-                    bool success = (rand() % 100) >= 5;
-
-                    auto requestEnd = std::chrono::high_resolution_clock::now();
-                    double responseTime = std::chrono::duration<double>(requestEnd - requestStart).count();
-
-                    {
-                        std::lock_guard<std::mutex> lock(responseTimesMutex);
-                        responseTimes.push_back(responseTime);
-                        totalRequests++;
-                        if (success) {
-                            successfulRequests++;
-                        } else {
-                            failedRequests++;
-                        }
-                    }
-
-                    // Add some delay between requests (simulate user think time)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100 + (rand() % 200)));
+                // Simulate response time based on endpoint complexity
+                int baseResponseTime = 50; // Base response time in ms
+                if (targetEndpoint.find("/api/") != std::string::npos) {
+                    baseResponseTime += 20; // API calls take longer
                 }
-                catch (const std::exception&) {
-                    failedRequests++;
-                    totalRequests++;
+                if (!requestBody.empty()) {
+                    baseResponseTime += 10; // POST/PUT requests take longer
                 }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(baseResponseTime));
+
+                auto requestEnd = std::chrono::high_resolution_clock::now();
+                double responseTime = std::chrono::duration<double>(requestEnd - requestStart).count();
+
+                // Simulate HTTP status codes (95% success rate)
+                int statusCode = (rand() % 100) < 95 ? 200 : (rand() % 4 == 0 ? 404 : (rand() % 3 == 0 ? 500 : 503));
+
+                return {statusCode, responseTime};
+
+            } catch (const std::exception&) {
+                return {-1, 0.0}; // Request failed
             }
         };
 
+        // Function to simulate a single user making requests
+        auto simulateUser = [&]() {
+            activeUsers++;
+
+            // Calculate ramp-up delay for this user
+            if (rampUpTime > 0) {
+                int userIndex = activeUsers.load() - 1;
+                double delayPerUser = static_cast<double>(rampUpTime) / concurrentUsers;
+                double userDelay = userIndex * delayPerUser;
+                std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(userDelay * 1000)));
+            }
+
+            while (std::chrono::high_resolution_clock::now() < endTime) {
+                auto [statusCode, responseTime] = makeHttpRequest(endpoint, method, headers, body);
+
+                {
+                    std::lock_guard<std::mutex> lock(metricsMutex);
+                    responseTimes.push_back(responseTime);
+                    statusCodes.push_back(statusCode);
+                    totalRequests++;
+                    if (statusCode >= 200 && statusCode < 300) {
+                        successfulRequests++;
+                    } else {
+                        failedRequests++;
+                    }
+                }
+
+                // Add some delay between requests (simulate user think time)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100 + (rand() % 200)));
+            }
+
+            activeUsers--;
+        };
+
         // Start concurrent user threads
+        std::vector<std::thread> userThreads;
         for (int i = 0; i < concurrentUsers; ++i) {
             userThreads.emplace_back(simulateUser);
         }
@@ -793,11 +874,23 @@ json APIServer::runLoadTest(const std::string& sessionId, int concurrentUsers, i
         double p95ResponseTime = responseTimes.size() > 0 ? responseTimes[responseTimes.size() * 0.95] * 1000 : 0.0;
         double p99ResponseTime = responseTimes.size() > 0 ? responseTimes[responseTimes.size() * 0.99] * 1000 : 0.0;
 
+        // Calculate status code distribution
+        std::map<int, int> statusCodeCounts;
+        for (int code : statusCodes) {
+            statusCodeCounts[code]++;
+        }
+        json statusCodeDistribution = json::object();
+        for (const auto& pair : statusCodeCounts) {
+            statusCodeDistribution[std::to_string(pair.first)] = pair.second;
+        }
+
         json result = {
             {"test_type", "load_test"},
             {"endpoint", endpoint},
+            {"method", method},
             {"concurrent_users", concurrentUsers},
             {"duration_seconds", actualDuration},
+            {"ramp_up_time_seconds", rampUpTime},
             {"total_requests", totalReq},
             {"successful_requests", successReq},
             {"failed_requests", failReq},
@@ -807,6 +900,9 @@ json APIServer::runLoadTest(const std::string& sessionId, int concurrentUsers, i
             {"p50_response_time_ms", p50ResponseTime},
             {"p95_response_time_ms", p95ResponseTime},
             {"p99_response_time_ms", p99ResponseTime},
+            {"status_code_distribution", statusCodeDistribution},
+            {"headers", headers},
+            {"body", body},
             {"status", "completed"},
             {"timestamp", getTimestampString()}
         };

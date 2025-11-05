@@ -4208,21 +4208,21 @@ if __name__ == "__main__":
 
     def on_sandbox_started(self, message: str):
         """Handle sandbox started event"""
-        self.sandbox_status_label.setText("Sandboxie: Running")
+        self.sandbox_status_label.setText("Docker: Running")
         self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-        self.status_bar.showMessage("Sandboxie started successfully")
+        self.status_bar.showMessage("Docker started successfully")
 
     def on_sandbox_stopped(self, message: str):
         """Handle sandbox stopped event"""
-        self.sandbox_status_label.setText("Sandboxie: Not Running")
+        self.sandbox_status_label.setText("Docker: Not Running")
         self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-        self.status_bar.showMessage("Sandboxie stopped")
+        self.status_bar.showMessage("Docker stopped")
 
     def on_sandbox_error(self, title: str, message: str):
         """Handle sandbox error event"""
         self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {message}")
         QMessageBox.warning(self, title, message)
-        self.status_bar.showMessage(f"Sandboxie error: {title}")
+        self.status_bar.showMessage(f"Docker error: {title}")
 
     def on_dataset_created(self, name: str, message: str):
         """Handle dataset created event"""
@@ -4945,7 +4945,7 @@ if __name__ == "__main__":
         self.test_results_table.setRowCount(0)
 
     def start_sandbox(self):
-        """Start Sandboxie sandbox"""
+        """Start Docker sandbox"""
         config = {
             'sandbox_name': self.sandbox_name_edit.text(),
             'startup_command': self.startup_command_edit.text(),
