@@ -144,6 +144,7 @@ public:
     bool trainOnVideoDataset(const std::string& videoPath, int epochs = 10, int frameSamplingRate = 30);
     bool analyzeVideoContent(const std::string& videoPath);
     std::vector<std::vector<float>> extractVideoFeatures(const std::string& videoPath, int temporalWindow = 5);
+    std::vector<std::vector<float>> extractVideoFeaturesBuiltin(const std::string& videoPath, int frameSamplingRate);
 
     // New methods for learning from image content
     bool loadFromImageFile(const std::string& imagePath, int maxSeqLen, int embeddingDim);
@@ -152,6 +153,17 @@ public:
     bool trainOnImageDataset(const std::string& datasetPath, int epochs = 10);
     bool analyzeImageContent(const std::string& imagePath);
     std::vector<float> extractImageFeatures(const std::string& imagePath);
+    std::vector<float> extractImageFeaturesBuiltin(const std::string& imagePath);
+
+    // Document processing helper methods
+    std::string extractTextFromPDF(const std::string& filename);
+    std::string extractTextFromRawPDF(const std::string& filename);
+    std::string decodePDFText(const std::string& pdfText);
+    std::string extractTextFromDOCX(const std::string& filename);
+    std::string extractTextFromRawDOCX(const std::string& filename);
+    std::string extractTextFromDOC(const std::string& filename);
+    std::string extractTextFromTXT(const std::string& filename);
+    bool processExtractedText(const std::string& extractedText, int maxSeqLen, int embeddingDim, const std::string& filename);
 
     // New methods for learning from audio content
     bool loadFromAudioFile(const std::string& audioPath, int maxSeqLen, int embeddingDim);
@@ -160,6 +172,7 @@ public:
     bool trainOnAudioFile(const std::string& audioPath, int epochs = 10);
     bool analyzeAudioContent(const std::string& audioPath);
     std::vector<float> extractAudioFeatures(const std::string& audioPath, int temporalWindow = 5);
+    std::vector<float> extractAudioFeaturesBuiltin(const std::string& audioPath);
     bool loadAudioDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim);
     bool trainOnAudioDataset(const std::string& datasetPath, int epochs = 10);
 

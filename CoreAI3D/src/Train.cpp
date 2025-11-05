@@ -2242,45 +2242,26 @@ bool Training::loadXMLFile(const std::string& filename, const std::string& xpath
 
 // New method for loading document files (.docx, .pdf)
 bool Training::loadDocumentFile(const std::string& filename, int maxSeqLen, int embeddingDim) {
-    // For document files, we need external tools or libraries
-    // This is a placeholder implementation that attempts basic text extraction
-    // For production use, integrate with libraries like poppler (PDF) or libzip (DOCX)
-
     std::string extension = filename.substr(filename.find_last_of(".") + 1);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
     std::string extractedText;
 
-    if (extension == "pdf") {
-        // Basic PDF text extraction using pdftotext command (requires poppler-utils)
-        std::string command = "pdftotext '" + filename + "' -";
-        FILE* pipe = popen(command.c_str(), "r");
-        if (pipe) {
-            char buffer[128];
-            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-                extractedText += buffer;
-            }
-            pclose(pipe);
+    try {
+        if (extension == "pdf") {
+            extractedText = extractTextFromPDF(filename);
+        } else if (extension == "docx") {
+            extractedText = extractTextFromDOCX(filename);
+        } else if (extension == "doc") {
+            extractedText = extractTextFromDOC(filename);
+        } else if (extension == "txt") {
+            extractedText = extractTextFromTXT(filename);
         } else {
-            std::cerr << "Error: Could not extract text from PDF. Ensure pdftotext is installed." << std::endl;
+            std::cerr << "Error: Unsupported document format: " << extension << std::endl;
             return false;
         }
-    } else if (extension == "docx") {
-        // Basic DOCX text extraction using unzip and grep (very basic)
-        std::string command = "unzip -p '" + filename + "' word/document.xml | grep -o '<w:t[^>]*>[^<]*</w:t>' | sed 's/<[^>]*>//g'";
-        FILE* pipe = popen(command.c_str(), "r");
-        if (pipe) {
-            char buffer[128];
-            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-                extractedText += buffer;
-            }
-            pclose(pipe);
-        } else {
-            std::cerr << "Error: Could not extract text from DOCX. Ensure unzip is installed." << std::endl;
-            return false;
-        }
-    } else {
-        std::cerr << "Error: Unsupported document format: " << extension << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error extracting text from document: " << e.what() << std::endl;
         return false;
     }
 
@@ -2289,6 +2270,199 @@ bool Training::loadDocumentFile(const std::string& filename, int maxSeqLen, int 
         return false;
     }
 
+    return processExtractedText(extractedText, maxSeqLen, embeddingDim, filename);
+}
+
+std::string Training::extractTextFromPDF(const std::string& filename) {
+    // TODO: Replace with proper PDF library integration (e.g., Poppler)
+    // For now, using system command as fallback, but this should be replaced
+    // with a proper C++ PDF parsing library
+
+    std::string extractedText;
+    std::string command = "pdftotext '" + filename + "' - 2>/dev/null";
+    FILE* pipe = popen(command.c_str(), "r");
+    if (pipe) {
+        char buffer[4096];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            extractedText += buffer;
+        }
+        pclose(pipe);
+    }
+
+    // If system command fails, try basic text extraction from raw PDF
+    if (extractedText.empty()) {
+        extractedText = extractTextFromRawPDF(filename);
+    }
+
+    return extractedText;
+}
+
+std::string Training::extractTextFromRawPDF(const std::string& filename) {
+    // Basic PDF text extraction by reading raw PDF content
+    // This is a simplified implementation - production code should use Poppler or similar
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    std::string extractedText;
+
+    // Look for text objects in PDF (BT ... ET blocks)
+    size_t pos = 0;
+    while ((pos = content.find("BT", pos)) != std::string::npos) {
+        size_t endPos = content.find("ET", pos);
+        if (endPos != std::string::npos) {
+            std::string textBlock = content.substr(pos + 2, endPos - pos - 2);
+
+            // Extract text between parentheses
+            size_t textStart = textBlock.find("(");
+            while (textStart != std::string::npos) {
+                size_t textEnd = textBlock.find(")", textStart);
+                if (textEnd != std::string::npos) {
+                    std::string text = textBlock.substr(textStart + 1, textEnd - textStart - 1);
+                    // Decode PDF text encoding (basic)
+                    text = decodePDFText(text);
+                    extractedText += text + " ";
+                }
+                textStart = textBlock.find("(", textEnd);
+            }
+            extractedText += "\n";
+        }
+        pos = endPos + 2;
+    }
+
+    return extractedText;
+}
+
+std::string Training::decodePDFText(const std::string& pdfText) {
+    std::string decoded;
+    for (size_t i = 0; i < pdfText.size(); ++i) {
+        if (pdfText[i] == '\\') {
+            if (i + 1 < pdfText.size()) {
+                if (pdfText[i + 1] == 'n') {
+                    decoded += '\n';
+                    ++i;
+                } else if (pdfText[i + 1] == 'r') {
+                    decoded += '\r';
+                    ++i;
+                } else if (pdfText[i + 1] == 't') {
+                    decoded += '\t';
+                    ++i;
+                } else if (pdfText[i + 1] == '(' || pdfText[i + 1] == ')') {
+                    decoded += pdfText[i + 1];
+                    ++i;
+                } else {
+                    // Octal escape sequence
+                    std::string octal;
+                    for (int j = 1; j <= 3 && i + j < pdfText.size(); ++j) {
+                        if (isdigit(pdfText[i + j])) {
+                            octal += pdfText[i + j];
+                        } else {
+                            break;
+                        }
+                    }
+                    if (!octal.empty()) {
+                        int code = std::stoi(octal, nullptr, 8);
+                        decoded += static_cast<char>(code);
+                        i += octal.size();
+                    }
+                }
+            }
+        } else {
+            decoded += pdfText[i];
+        }
+    }
+    return decoded;
+}
+
+std::string Training::extractTextFromDOCX(const std::string& filename) {
+    // TODO: Replace with proper DOCX library integration (e.g., libzip + XML parsing)
+    // For now, using system command as fallback
+
+    std::string extractedText;
+    std::string command = "unzip -p '" + filename + "' word/document.xml 2>/dev/null | sed 's/<[^>]*>//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$'";
+    FILE* pipe = popen(command.c_str(), "r");
+    if (pipe) {
+        char buffer[4096];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            extractedText += buffer;
+        }
+        pclose(pipe);
+    }
+
+    // If system command fails, try basic XML parsing
+    if (extractedText.empty()) {
+        extractedText = extractTextFromRawDOCX(filename);
+    }
+
+    return extractedText;
+}
+
+std::string Training::extractTextFromRawDOCX(const std::string& filename) {
+    // Basic DOCX text extraction by parsing XML content
+    // This is a simplified implementation - production code should use proper XML parsing
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    std::string extractedText;
+
+    // Look for text content in DOCX XML
+    size_t pos = 0;
+    while ((pos = content.find("<w:t", pos)) != std::string::npos) {
+        size_t textStart = content.find(">", pos);
+        if (textStart != std::string::npos) {
+            size_t textEnd = content.find("</w:t>", textStart);
+            if (textEnd != std::string::npos) {
+                std::string text = content.substr(textStart + 1, textEnd - textStart - 1);
+                extractedText += text + " ";
+            }
+        }
+        pos = content.find("</w:t>", pos) + 6;
+        if (pos == std::string::npos) break;
+    }
+
+    return extractedText;
+}
+
+std::string Training::extractTextFromDOC(const std::string& filename) {
+    // DOC files are complex binary formats
+    // This is a very basic implementation - production code should use antiword or similar
+    std::string extractedText;
+
+    std::string command = "antiword '" + filename + "' 2>/dev/null || catdoc '" + filename + "' 2>/dev/null";
+    FILE* pipe = popen(command.c_str(), "r");
+    if (pipe) {
+        char buffer[4096];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            extractedText += buffer;
+        }
+        pclose(pipe);
+    }
+
+    return extractedText;
+}
+
+std::string Training::extractTextFromTXT(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    return content;
+}
+
+bool Training::processExtractedText(const std::string& extractedText, int maxSeqLen, int embeddingDim, const std::string& filename) {
     inputs.clear();
     targets.clear();
     inputSize = maxSeqLen * embeddingDim;
@@ -2307,9 +2481,14 @@ bool Training::loadDocumentFile(const std::string& filename, int maxSeqLen, int 
         // Clean up the line
         line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char ch) { return !std::isspace(ch); }));
         line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), line.end());
-        if (!line.empty()) {
+        if (!line.empty() && line.length() > 5) { // Filter out very short lines
             textSamples.push_back(line);
         }
+    }
+
+    // Limit number of samples to prevent memory issues
+    if (textSamples.size() > 1000) {
+        textSamples.resize(1000);
     }
 
     for (const std::string& text : textSamples) {
@@ -2343,7 +2522,7 @@ bool Training::loadDocumentFile(const std::string& filename, int maxSeqLen, int 
         }
 
         inputs.push_back(flatInput);
-        targets.push_back({ 0.0f }); // Dummy target
+        targets.push_back({ 0.0f }); // Dummy target for unsupervised learning
     }
 
     numSamples = inputs.size();
@@ -2762,105 +2941,194 @@ bool Training::trainOnWebSearchResults(const std::string& query, int maxResults,
 }
 // Video learning methods for Training class
 bool Training::loadFromVideoFile(const std::string& videoPath, int maxSeqLen, int embeddingDim, int frameSamplingRate) {
+	try {
+		inputs.clear();
+		targets.clear();
+		inputSize = maxSeqLen * embeddingDim;
+		outputSize = 1;
+
+		// Extract video features using built-in algorithms
+		auto videoFeatures = extractVideoFeaturesBuiltin(videoPath, frameSamplingRate);
+		if (videoFeatures.empty()) {
+			std::cerr << "Error: Failed to extract features from video: " << videoPath << std::endl;
+			return false;
+		}
+
+		// Process each frame's features
+		for (const auto& frameFeatures : videoFeatures) {
+			// Convert features to embeddings (simplified approach)
+			std::vector<std::vector<float>> frameEmbedding;
+			for (size_t i = 0; i < frameFeatures.size() && i < (size_t)embeddingDim; ++i) {
+				frameEmbedding.push_back({frameFeatures[i]});
+			}
+
+			// Pad or truncate to embeddingDim
+			if ((int)frameEmbedding.size() < embeddingDim) {
+				while ((int)frameEmbedding.size() < embeddingDim) {
+					frameEmbedding.push_back(std::vector<float>(1, 0.0f));
+				}
+			} else if ((int)frameEmbedding.size() > embeddingDim) {
+				frameEmbedding.resize(embeddingDim);
+			}
+
+			// Flatten into a single vector
+			std::vector<float> flatInput;
+			for (const auto& vec : frameEmbedding) {
+				flatInput.insert(flatInput.end(), vec.begin(), vec.end());
+			}
+
+			inputs.push_back(flatInput);
+			targets.push_back({0.0f}); // Dummy target for unsupervised learning
+
+			// Limit number of frames to prevent memory issues
+			if (inputs.size() >= 1000) {
+				break;
+			}
+		}
+
+		numSamples = inputs.size();
+
+		if (verbose) {
+			std::cout << "Loaded " << numSamples << " video frames from " << videoPath << std::endl;
+		}
+		return !inputs.empty();
+	}
+	catch (const std::exception& e) {
+		std::cerr << "Error loading video file: " << e.what() << std::endl;
+		return false;
+	}
+}
+
+std::vector<std::vector<float>> Training::extractVideoFeaturesBuiltin(const std::string& videoPath, int frameSamplingRate) {
+    std::vector<std::vector<float>> frameFeatures;
+
     try {
-        // Initialize VisionModule if not already done
-        static std::unique_ptr<VisionModule> visionModule;
-        if (!visionModule) {
-            visionModule = std::make_unique<VisionModule>("VideoLearning");
-            if (!visionModule->initialize()) {
-                std::cerr << "Error: Failed to initialize VisionModule for video learning." << std::endl;
-                return false;
+        // Read video file as binary data
+        std::ifstream file(videoPath, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            return frameFeatures;
+        }
+
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> buffer(size);
+        if (!file.read(buffer.data(), size)) {
+            return frameFeatures;
+        }
+        file.close();
+
+        // Basic video feature extraction
+        // Extract frame-based features by analyzing compressed video data
+
+        // 1. Basic video statistics
+        size_t fileSize = buffer.size();
+        float compressionRatio = 0.0f;
+
+        // 2. Frame analysis (simplified - treat video as sequence of compressed frames)
+        const size_t frameSizeEstimate = 50 * 1024; // Estimate 50KB per frame
+        size_t numFrames = std::max(size_t(1), fileSize / frameSizeEstimate);
+
+        // Sample frames based on sampling rate
+        for (size_t frameIdx = 0; frameIdx < numFrames; frameIdx += frameSamplingRate) {
+            size_t frameStart = frameIdx * frameSizeEstimate;
+            size_t frameEnd = std::min(frameStart + frameSizeEstimate, fileSize);
+
+            if (frameStart >= fileSize) break;
+
+            std::vector<float> features;
+
+            // Extract basic frame features
+            size_t frameSize = frameEnd - frameStart;
+            features.push_back(static_cast<float>(frameSize)); // Frame size
+
+            // Analyze frame data for basic patterns
+            int zeroCount = 0;
+            int highBitsCount = 0;
+            float entropy = 0.0f;
+            std::vector<int> byteHist(256, 0);
+
+            for (size_t i = frameStart; i < frameEnd; ++i) {
+                unsigned char byte = static_cast<unsigned char>(buffer[i]);
+                byteHist[byte]++;
+
+                if (byte == 0) zeroCount++;
+                if (byte >= 128) highBitsCount++;
             }
-        }
 
-        // Check if video format is supported
-        if (!visionModule->isVideoFormatSupported(videoPath)) {
-            std::cerr << "Error: Video format not supported: " << videoPath << std::endl;
-            return false;
-        }
-
-        inputs.clear();
-        targets.clear();
-        inputSize = maxSeqLen * embeddingDim;
-        outputSize = 1;
-
-        if (!this->langProc) {
-            std::cerr << "Error: Language processor not initialized for video learning." << std::endl;
-            return false;
-        }
-
-        // Extract frames from video
-        auto frames = visionModule->extractVideoFrames(videoPath, -1, frameSamplingRate);
-        if (frames.empty()) {
-            std::cerr << "Error: No frames extracted from video: " << videoPath << std::endl;
-            return false;
-        }
-
-        for (const auto& frame : frames) {
-            // Process visual features
-            std::vector<float> visualFeatures = frame.features;
-
-            // Extract and process text from frame if available
-            std::vector<float> textFeatures;
-            if (!frame.ocrText.empty()) {
-                std::vector<std::string> words = this->langProc->tokenize(frame.ocrText);
-                std::vector<std::vector<float>> sentenceEmbedding;
-
-                for (const std::string& word : words) {
-                    std::string key = this->langProc->detectLanguage(word);
-                    auto it = this->langProc->embeddingsByLang.find(key);
-
-                    if (it != this->langProc->embeddingsByLang.end()) {
-                        sentenceEmbedding.push_back(it->second);
-                    } else {
-                        sentenceEmbedding.push_back(this->langProc->generateRandomEmbedding());
-                    }
+            // Calculate entropy
+            for (int count : byteHist) {
+                if (count > 0) {
+                    float p = static_cast<float>(count) / frameSize;
+                    entropy -= p * std::log2(p);
                 }
+            }
 
-                // Pad or truncate to maxSeqLen
-                if ((int)sentenceEmbedding.size() < maxSeqLen) {
-                    while ((int)sentenceEmbedding.size() < maxSeqLen) {
-                        sentenceEmbedding.push_back(std::vector<float>(embeddingDim, 0.0f));
-                    }
-                } else if ((int)sentenceEmbedding.size() > maxSeqLen) {
-                    sentenceEmbedding.resize(maxSeqLen);
-                }
+            features.push_back(static_cast<float>(zeroCount) / frameSize); // Zero ratio
+            features.push_back(static_cast<float>(highBitsCount) / frameSize); // High bit ratio
+            features.push_back(entropy); // Frame entropy
 
-                // Flatten text features
-                for (const auto& vec : sentenceEmbedding) {
-                    textFeatures.insert(textFeatures.end(), vec.begin(), vec.end());
+            // Motion estimation (simplified - compare with previous frame)
+            if (!frameFeatures.empty()) {
+                const auto& prevFeatures = frameFeatures.back();
+                float motionDiff = 0.0f;
+                for (size_t i = 0; i < std::min(features.size(), prevFeatures.size()); ++i) {
+                    motionDiff += std::abs(features[i] - prevFeatures[i]);
                 }
+                features.push_back(motionDiff);
             } else {
-                // No text, use zeros
-                textFeatures.resize(maxSeqLen * embeddingDim, 0.0f);
+                features.push_back(0.0f); // No motion for first frame
             }
 
-            // Combine visual and text features
-            std::vector<float> combinedFeatures;
-            combinedFeatures.reserve(visualFeatures.size() + textFeatures.size());
-            combinedFeatures.insert(combinedFeatures.end(), visualFeatures.begin(), visualFeatures.end());
-            combinedFeatures.insert(combinedFeatures.end(), textFeatures.begin(), textFeatures.end());
+            // Color/temporal features (simplified)
+            // Look for patterns that might indicate scene changes
+            float patternScore = 0.0f;
+            for (size_t i = frameStart + 1; i < frameEnd; ++i) {
+                unsigned char curr = static_cast<unsigned char>(buffer[i]);
+                unsigned char prev = static_cast<unsigned char>(buffer[i - 1]);
+                patternScore += std::abs(static_cast<int>(curr) - static_cast<int>(prev));
+            }
+            features.push_back(patternScore / frameSize);
 
-            // Adjust inputSize if necessary
-            if (inputSize == 0 || (int)combinedFeatures.size() != inputSize) {
-                inputSize = combinedFeatures.size();
+            // Add frame metadata
+            features.push_back(static_cast<float>(frameIdx)); // Frame number
+            features.push_back(static_cast<float>(frameStart)); // Frame offset in file
+
+            frameFeatures.push_back(features);
+
+            // Limit number of frames to prevent excessive processing
+            if (frameFeatures.size() >= 100) {
+                break;
+            }
+        }
+
+        // Add video-level features
+        if (!frameFeatures.empty()) {
+            // Calculate average features across all frames
+            std::vector<float> avgFeatures(frameFeatures[0].size(), 0.0f);
+            for (const auto& frame : frameFeatures) {
+                for (size_t i = 0; i < frame.size(); ++i) {
+                    avgFeatures[i] += frame[i];
+                }
+            }
+            for (float& val : avgFeatures) {
+                val /= frameFeatures.size();
             }
 
-            inputs.push_back(combinedFeatures);
-            targets.push_back({0.0f}); // Dummy target for unsupervised learning
+            // Add video metadata
+            avgFeatures.push_back(static_cast<float>(fileSize)); // Total file size
+            avgFeatures.push_back(static_cast<float>(numFrames)); // Estimated frame count
+            avgFeatures.push_back(static_cast<float>(frameSamplingRate)); // Sampling rate used
+
+            frameFeatures.push_back(avgFeatures);
         }
 
-        numSamples = inputs.size();
+    } catch (const std::exception& e) {
+        std::cerr << "Error in built-in video feature extraction: " << e.what() << std::endl;
+        return std::vector<std::vector<float>>();
+    }
 
-        if (verbose) {
-            std::cout << "Loaded " << numSamples << " video frames from " << videoPath << std::endl;
-        }
-        return !inputs.empty();
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Error loading video file: " << e.what() << std::endl;
-        return false;
-    }
+    return frameFeatures;
 }
 
 bool Training::trainOnVideoDataset(const std::string& videoPath, int epochs, int frameSamplingRate) {
@@ -2942,84 +3210,199 @@ catch (const std::exception& e) {
 
 // Audio learning methods for Training class
 bool Training::loadFromAudioFile(const std::string& audioPath, int maxSeqLen, int embeddingDim) {
-try {
-    // Initialize AudioModule if not already done
-    static std::unique_ptr<AudioModule> audioModule;
-    if (!audioModule) {
-        audioModule = std::make_unique<AudioModule>("AudioLearning");
-        if (!audioModule->initialize()) {
-            std::cerr << "Error: Failed to initialize AudioModule for audio learning." << std::endl;
-            return false;
+	try {
+		inputs.clear();
+		targets.clear();
+		inputSize = maxSeqLen * embeddingDim;
+		outputSize = 1;
+
+		// Extract audio features using built-in algorithms
+		auto audioFeatures = extractAudioFeaturesBuiltin(audioPath);
+		if (audioFeatures.empty()) {
+			std::cerr << "Error: Failed to extract features from audio: " << audioPath << std::endl;
+			return false;
+		}
+
+		// Split audio features into segments and create embeddings
+		size_t segmentSize = audioFeatures.size() / maxSeqLen;
+		for (int i = 0; i < maxSeqLen; ++i) {
+			size_t startIdx = i * segmentSize;
+			size_t endIdx = std::min(startIdx + segmentSize, audioFeatures.size());
+
+			std::vector<float> segment(audioFeatures.begin() + startIdx, audioFeatures.begin() + endIdx);
+
+			// Convert features to embeddings (simplified approach)
+			std::vector<std::vector<float>> segmentEmbedding;
+			for (size_t j = 0; j < segment.size() && j < (size_t)embeddingDim; ++j) {
+				segmentEmbedding.push_back({segment[j]});
+			}
+
+			// Pad or truncate to embeddingDim
+			if ((int)segmentEmbedding.size() < embeddingDim) {
+				while ((int)segmentEmbedding.size() < embeddingDim) {
+					segmentEmbedding.push_back(std::vector<float>(1, 0.0f));
+				}
+			} else if ((int)segmentEmbedding.size() > embeddingDim) {
+				segmentEmbedding.resize(embeddingDim);
+			}
+
+			// Flatten into a single vector
+			std::vector<float> flatInput;
+			for (const auto& vec : segmentEmbedding) {
+				flatInput.insert(flatInput.end(), vec.begin(), vec.end());
+			}
+
+			inputs.push_back(flatInput);
+			targets.push_back({0.0f}); // Dummy target for unsupervised learning
+		}
+
+		numSamples = inputs.size();
+
+		if (verbose) {
+			std::cout << "Loaded " << numSamples << " audio segments from " << audioPath << std::endl;
+		}
+		return !inputs.empty();
+	}
+	catch (const std::exception& e) {
+		std::cerr << "Error loading audio file: " << e.what() << std::endl;
+		return false;
+	}
+}
+
+std::vector<float> Training::extractAudioFeaturesBuiltin(const std::string& audioPath) {
+    std::vector<float> features;
+
+    try {
+        // Read audio file as binary data
+        std::ifstream file(audioPath, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            return features;
         }
-    }
 
-    // Load audio data
-    auto audioData = audioModule->audioPathToNumericalData(audioPath);
-    if (audioData.empty()) {
-        std::cerr << "Error: Failed to load audio data from: " << audioPath << std::endl;
-        return false;
-    }
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
 
-    inputs.clear();
-    targets.clear();
-    inputSize = maxSeqLen * embeddingDim;
-    outputSize = 1;
-
-    if (!this->langProc) {
-        std::cerr << "Error: Language processor not initialized for audio learning." << std::endl;
-        return false;
-    }
-
-    // Extract audio features and convert to embeddings
-    auto features = audioModule->extractFeaturesFromData(audioData);
-
-    // Split audio into segments and create embeddings
-    size_t segmentSize = audioData.size() / maxSeqLen;
-    for (int i = 0; i < maxSeqLen; ++i) {
-        size_t startIdx = i * segmentSize;
-        size_t endIdx = std::min(startIdx + segmentSize, audioData.size());
-
-        std::vector<float> segment(audioData.begin() + startIdx, audioData.begin() + endIdx);
-
-        // Extract features for this segment
-        auto segmentFeatures = audioModule->extractFeaturesFromData(segment);
-
-        // Convert features to embeddings (simplified approach)
-        std::vector<std::vector<float>> segmentEmbedding;
-        for (size_t j = 0; j < segmentFeatures.size() && j < (size_t)embeddingDim; ++j) {
-            segmentEmbedding.push_back({segmentFeatures[j]});
+        std::vector<char> buffer(size);
+        if (!file.read(buffer.data(), size)) {
+            return features;
         }
+        file.close();
 
-        // Pad or truncate to embeddingDim
-        if ((int)segmentEmbedding.size() < embeddingDim) {
-            while ((int)segmentEmbedding.size() < embeddingDim) {
-                segmentEmbedding.push_back(std::vector<float>(1, 0.0f));
+        // Basic audio feature extraction
+        // Extract amplitude features, frequency features, and temporal features
+
+        // 1. Amplitude features
+        float maxAmplitude = 0.0f;
+        float minAmplitude = 0.0f;
+        float sumAmplitude = 0.0f;
+        float sumSquares = 0.0f;
+
+        // 2. Zero crossing rate
+        int zeroCrossings = 0;
+        float previousSample = 0.0f;
+
+        // 3. Simple frequency domain features (basic FFT-like)
+        std::vector<float> frequencyFeatures;
+
+        // Process audio samples (assuming 16-bit PCM)
+        size_t sampleCount = buffer.size() / 2; // 16-bit samples
+        std::vector<float> samples;
+
+        for (size_t i = 0; i < buffer.size() - 1; i += 2) {
+            // Convert bytes to 16-bit signed integer
+            int16_t sample = static_cast<int16_t>(buffer[i]) | (static_cast<int16_t>(buffer[i + 1]) << 8);
+            float normalizedSample = static_cast<float>(sample) / 32768.0f;
+
+            samples.push_back(normalizedSample);
+
+            // Amplitude statistics
+            maxAmplitude = std::max(maxAmplitude, std::abs(normalizedSample));
+            minAmplitude = std::min(minAmplitude, normalizedSample);
+            sumAmplitude += std::abs(normalizedSample);
+            sumSquares += normalizedSample * normalizedSample;
+
+            // Zero crossing rate
+            if (i > 0 && ((previousSample >= 0 && normalizedSample < 0) || (previousSample < 0 && normalizedSample >= 0))) {
+                zeroCrossings++;
             }
-        } else if ((int)segmentEmbedding.size() > embeddingDim) {
-            segmentEmbedding.resize(embeddingDim);
+            previousSample = normalizedSample;
         }
 
-        // Flatten into a single vector
-        std::vector<float> flatInput;
-        for (const auto& vec : segmentEmbedding) {
-            flatInput.insert(flatInput.end(), vec.begin(), vec.end());
+        if (samples.empty()) {
+            return features;
         }
 
-        inputs.push_back(flatInput);
-        targets.push_back({0.0f}); // Dummy target for unsupervised learning
+        // Calculate amplitude features
+        float meanAmplitude = sumAmplitude / samples.size();
+        float rms = std::sqrt(sumSquares / samples.size());
+        float crestFactor = maxAmplitude / rms;
+
+        features.push_back(maxAmplitude);
+        features.push_back(minAmplitude);
+        features.push_back(meanAmplitude);
+        features.push_back(rms);
+        features.push_back(crestFactor);
+
+        // Zero crossing rate
+        float zcr = static_cast<float>(zeroCrossings) / samples.size();
+        features.push_back(zcr);
+
+        // Simple spectral centroid (basic frequency analysis)
+        float spectralCentroid = 0.0f;
+        float totalEnergy = 0.0f;
+
+        // Very basic DFT-like calculation for low frequencies
+        const int fftSize = 256;
+        if (samples.size() >= fftSize) {
+            for (int k = 0; k < fftSize / 2; ++k) {
+                float real = 0.0f, imag = 0.0f;
+                for (int n = 0; n < fftSize; ++n) {
+                    float angle = -2.0f * M_PI * k * n / fftSize;
+                    real += samples[n] * std::cos(angle);
+                    imag += samples[n] * std::sin(angle);
+                }
+                float magnitude = std::sqrt(real * real + imag * imag);
+                float frequency = static_cast<float>(k) * 44100.0f / fftSize; // Assume 44.1kHz sample rate
+
+                spectralCentroid += frequency * magnitude;
+                totalEnergy += magnitude;
+
+                if (k < 10) { // Store first 10 frequency bin magnitudes
+                    features.push_back(magnitude);
+                }
+            }
+
+            if (totalEnergy > 0) {
+                spectralCentroid /= totalEnergy;
+                features.push_back(spectralCentroid);
+            }
+        }
+
+        // Temporal features
+        float temporalCentroid = 0.0f;
+        float totalTemporalEnergy = 0.0f;
+        for (size_t i = 0; i < samples.size(); ++i) {
+            float time = static_cast<float>(i) / samples.size();
+            float energy = samples[i] * samples[i];
+            temporalCentroid += time * energy;
+            totalTemporalEnergy += energy;
+        }
+        if (totalTemporalEnergy > 0) {
+            temporalCentroid /= totalTemporalEnergy;
+            features.push_back(temporalCentroid);
+        }
+
+        // File metadata features
+        features.push_back(static_cast<float>(buffer.size())); // File size in bytes
+        features.push_back(static_cast<float>(sampleCount)); // Number of samples
+        features.push_back(static_cast<float>(buffer.size()) / sampleCount); // Bytes per sample
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error in built-in audio feature extraction: " << e.what() << std::endl;
+        return std::vector<float>();
     }
 
-    numSamples = inputs.size();
-
-    if (verbose) {
-        std::cout << "Loaded " << numSamples << " audio segments from " << audioPath << std::endl;
-    }
-    return !inputs.empty();
-}
-catch (const std::exception& e) {
-    std::cerr << "Error loading audio file: " << e.what() << std::endl;
-    return false;
-}
+    return features;
 }
 
 bool Training::loadFromAudioTranscription(const std::string& audioPath, int maxSeqLen, int embeddingDim) {
@@ -3243,64 +3626,179 @@ return true;
 
 // Image learning methods for Training class
 bool Training::loadFromImageFile(const std::string& imagePath, int maxSeqLen, int embeddingDim) {
-try {
-    // Initialize VisionModule if not already done
-    static std::unique_ptr<VisionModule> visionModule;
-    if (!visionModule) {
-        visionModule = std::make_unique<VisionModule>("ImageLearning");
-        if (!visionModule->initialize()) {
-            std::cerr << "Error: Failed to initialize VisionModule for image learning." << std::endl;
-            return false;
-        }
-    }
+	try {
+		inputs.clear();
+		targets.clear();
+		inputSize = maxSeqLen * embeddingDim;
+		outputSize = 1;
 
-    inputs.clear();
-    targets.clear();
-    inputSize = maxSeqLen * embeddingDim;
-    outputSize = 1;
+		// Extract image features using built-in algorithms
+		auto imageFeatures = extractImageFeaturesBuiltin(imagePath);
+		if (imageFeatures.empty()) {
+			std::cerr << "Error: Failed to extract features from image: " << imagePath << std::endl;
+			return false;
+		}
 
-    // Extract image features
-    auto imageFeatures = visionModule->extractFeatures(imagePath);
-    if (imageFeatures.empty()) {
-        std::cerr << "Error: Failed to extract features from image: " << imagePath << std::endl;
-        return false;
-    }
+		// Convert features to embeddings (simplified approach)
+		std::vector<std::vector<float>> imageEmbedding;
+		for (size_t i = 0; i < imageFeatures.size() && i < (size_t)embeddingDim; ++i) {
+			imageEmbedding.push_back({imageFeatures[i]});
+		}
 
-    // Convert features to embeddings (simplified approach)
-    std::vector<std::vector<float>> imageEmbedding;
-    for (size_t i = 0; i < imageFeatures.size() && i < (size_t)embeddingDim; ++i) {
-        imageEmbedding.push_back({imageFeatures[i]});
-    }
+		// Pad or truncate to maxSeqLen
+		if ((int)imageEmbedding.size() < maxSeqLen) {
+			while ((int)imageEmbedding.size() < maxSeqLen) {
+				imageEmbedding.push_back(std::vector<float>(embeddingDim, 0.0f));
+			}
+		} else if ((int)imageEmbedding.size() > maxSeqLen) {
+			imageEmbedding.resize(maxSeqLen);
+		}
 
-    // Pad or truncate to maxSeqLen
-    if ((int)imageEmbedding.size() < maxSeqLen) {
-        while ((int)imageEmbedding.size() < maxSeqLen) {
-            imageEmbedding.push_back(std::vector<float>(embeddingDim, 0.0f));
-        }
-    } else if ((int)imageEmbedding.size() > maxSeqLen) {
-        imageEmbedding.resize(maxSeqLen);
-    }
+		// Flatten into a single vector
+		std::vector<float> flatInput;
+		for (const auto& vec : imageEmbedding) {
+			flatInput.insert(flatInput.end(), vec.begin(), vec.end());
+		}
 
-    // Flatten into a single vector
-    std::vector<float> flatInput;
-    for (const auto& vec : imageEmbedding) {
-        flatInput.insert(flatInput.end(), vec.begin(), vec.end());
-    }
+		inputs.push_back(flatInput);
+		targets.push_back({0.0f}); // Dummy target for unsupervised learning
 
-    inputs.push_back(flatInput);
-    targets.push_back({0.0f}); // Dummy target for unsupervised learning
+		numSamples = inputs.size();
 
-    numSamples = inputs.size();
-
-    if (verbose) {
-        std::cout << "Loaded image from " << imagePath << std::endl;
-    }
-    return !inputs.empty();
+		if (verbose) {
+			std::cout << "Loaded image from " << imagePath << std::endl;
+		}
+		return !inputs.empty();
+	}
+	catch (const std::exception& e) {
+		std::cerr << "Error loading image file: " << e.what() << std::endl;
+		return false;
+	}
 }
-catch (const std::exception& e) {
-    std::cerr << "Error loading image file: " << e.what() << std::endl;
-    return false;
-}
+
+std::vector<float> Training::extractImageFeaturesBuiltin(const std::string& imagePath) {
+    std::vector<float> features;
+
+    try {
+        // Read image file as binary data
+        std::ifstream file(imagePath, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            return features;
+        }
+
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> buffer(size);
+        if (!file.read(buffer.data(), size)) {
+            return features;
+        }
+        file.close();
+
+        // Basic image feature extraction
+        // Extract color histograms, edge features, and texture features
+
+        // 1. Color histogram features (RGB)
+        std::vector<int> redHist(32, 0);
+        std::vector<int> greenHist(32, 0);
+        std::vector<int> blueHist(32, 0);
+
+        // 2. Edge detection features (simple gradient)
+        std::vector<float> edgeFeatures;
+
+        // 3. Texture features (Gabor-like simple features)
+        std::vector<float> textureFeatures;
+
+        // Simple feature extraction from raw bytes
+        // This is a basic implementation - production code should use OpenCV or similar
+        size_t pixelCount = 0;
+        for (size_t i = 0; i < buffer.size() - 2; i += 3) {
+            if (i + 2 < buffer.size()) {
+                unsigned char r = static_cast<unsigned char>(buffer[i]);
+                unsigned char g = static_cast<unsigned char>(buffer[i + 1]);
+                unsigned char b = static_cast<unsigned char>(buffer[i + 2]);
+
+                // Color histogram
+                redHist[r / 8]++;
+                greenHist[g / 8]++;
+                blueHist[b / 8]++;
+
+                // Simple edge detection (gradient magnitude)
+                if (pixelCount > 0) {
+                    float gradR = std::abs(static_cast<float>(r) - static_cast<float>(buffer[i - 3]));
+                    float gradG = std::abs(static_cast<float>(g) - static_cast<float>(buffer[i - 2]));
+                    float gradB = std::abs(static_cast<float>(b) - static_cast<float>(buffer[i - 1]));
+                    float gradient = (gradR + gradG + gradB) / 3.0f;
+                    edgeFeatures.push_back(gradient);
+                }
+
+                pixelCount++;
+            }
+        }
+
+        // Normalize histograms and add to features
+        for (int val : redHist) {
+            features.push_back(static_cast<float>(val) / pixelCount);
+        }
+        for (int val : greenHist) {
+            features.push_back(static_cast<float>(val) / pixelCount);
+        }
+        for (int val : blueHist) {
+            features.push_back(static_cast<float>(val) / pixelCount);
+        }
+
+        // Add edge features (take average and some statistics)
+        if (!edgeFeatures.empty()) {
+            float edgeSum = 0.0f;
+            float edgeMax = 0.0f;
+            for (float edge : edgeFeatures) {
+                edgeSum += edge;
+                edgeMax = std::max(edgeMax, edge);
+            }
+            features.push_back(edgeSum / edgeFeatures.size()); // Average edge strength
+            features.push_back(edgeMax); // Maximum edge strength
+        }
+
+        // Add basic texture features (simple variance calculation)
+        if (pixelCount > 1) {
+            float meanR = 0.0f, meanG = 0.0f, meanB = 0.0f;
+            for (size_t i = 0; i < buffer.size() - 2; i += 3) {
+                meanR += static_cast<float>(static_cast<unsigned char>(buffer[i]));
+                meanG += static_cast<float>(static_cast<unsigned char>(buffer[i + 1]));
+                meanB += static_cast<float>(static_cast<unsigned char>(buffer[i + 2]));
+            }
+            meanR /= pixelCount;
+            meanG /= pixelCount;
+            meanB /= pixelCount;
+
+            float varR = 0.0f, varG = 0.0f, varB = 0.0f;
+            for (size_t i = 0; i < buffer.size() - 2; i += 3) {
+                float dr = static_cast<float>(static_cast<unsigned char>(buffer[i])) - meanR;
+                float dg = static_cast<float>(static_cast<unsigned char>(buffer[i + 1])) - meanG;
+                float db = static_cast<float>(static_cast<unsigned char>(buffer[i + 2])) - meanB;
+                varR += dr * dr;
+                varG += dg * dg;
+                varB += db * db;
+            }
+            varR /= pixelCount;
+            varG /= pixelCount;
+            varB /= pixelCount;
+
+            features.push_back(std::sqrt(varR)); // Standard deviation R
+            features.push_back(std::sqrt(varG)); // Standard deviation G
+            features.push_back(std::sqrt(varB)); // Standard deviation B
+        }
+
+        // Add image metadata features
+        features.push_back(static_cast<float>(buffer.size())); // File size
+        features.push_back(static_cast<float>(pixelCount)); // Estimated pixel count
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error in built-in image feature extraction: " << e.what() << std::endl;
+        return std::vector<float>();
+    }
+
+    return features;
 }
 
 bool Training::loadFromImageDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim) {

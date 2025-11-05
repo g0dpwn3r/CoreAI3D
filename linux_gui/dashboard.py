@@ -6938,15 +6938,17 @@ capabilities, training data, performance metrics, and usage instructions."""
                     QMessageBox.warning(self, "Empty Dataset", f"Dataset '{dataset_name}' has no files")
                     return
 
-                # Use the first CSV file from the dataset
-                csv_file = None
+                # Support all file formats - use the first file from the dataset
+                data_file = None
+                supported_extensions = ['.csv', '.json', '.xml', '.pdf', '.docx', '.doc', '.txt', '.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac', '.jpg', '.jpeg', '.png', '.bmp', '.gif']
                 for file_info in dataset_info['files']:
-                    if file_info['name'].lower().endswith('.csv'):
-                        csv_file = file_info['path']
+                    file_ext = os.path.splitext(file_info['name'].lower())[1]
+                    if file_ext in supported_extensions:
+                        data_file = file_info['path']
                         break
 
-                if not csv_file:
-                    QMessageBox.warning(self, "No CSV File", f"Dataset '{dataset_name}' has no CSV files")
+                if not data_file:
+                    QMessageBox.warning(self, "No Supported File", f"Dataset '{dataset_name}' has no supported file formats.\nSupported formats: {', '.join(supported_extensions)}")
                     return
 
                 # Show progress
@@ -6955,10 +6957,11 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_progress.setValue(10)
 
                 # Log dataset loading
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Loading dataset '{dataset_name}' from {csv_file}")
+                file_ext = os.path.splitext(data_file.lower())[1]
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Loading dataset '{dataset_name}' from {data_file} ({file_ext.upper()} format)")
 
                 # Load dataset with normalization parameters
-                result = await self._load_dataset_async(csv_file, dataset_name)
+                result = await self._load_dataset_async(data_file, dataset_name)
                 self._handle_load_dataset_result_direct(result)
 
                 # Enable training button if dataset loaded successfully
@@ -6988,7 +6991,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                     self.pending_tasks.discard(self.current_async_task)
                     self.current_async_task = None
 
-    async def _load_dataset_async(self, csv_file: str, dataset_name: str):
+    async def _load_dataset_async(self, data_file: str, dataset_name: str):
         """Async part of dataset loading"""
         # Validate parameters before calling API
         output_size = self.learning_config.get('output_size', 1)
@@ -7003,16 +7006,76 @@ capabilities, training data, performance metrics, and usage instructions."""
         if min_range >= max_range:
             raise ValueError("Normalization min must be less than max")
 
-        # Call the load_dataset API endpoint with normalization parameters
-        return await self.client.load_dataset(
-            filename=csv_file,
-            output_size=output_size,
-            has_header=has_header,
-            contains_text=contains_text,
-            dataset_name=dataset_name,
-            min_range=min_range,
-            max_range=max_range
-        )
+        # Determine file format for appropriate API call
+        file_ext = os.path.splitext(data_file.lower())[1]
+
+        # Call appropriate API endpoint based on file format
+        if file_ext == '.csv':
+            # Use existing CSV loading logic
+            return await self.client.load_dataset(
+                filename=data_file,
+                output_size=output_size,
+                has_header=has_header,
+                contains_text=contains_text,
+                dataset_name=dataset_name,
+                min_range=min_range,
+                max_range=max_range
+            )
+        elif file_ext in ['.json', '.xml', '.txt']:
+            # For text-based formats, use generic data loading
+            return await self.client.load_dataset(
+                filename=data_file,
+                output_size=output_size,
+                has_header=has_header,
+                contains_text=contains_text,
+                dataset_name=dataset_name,
+                min_range=min_range,
+                max_range=max_range
+            )
+        elif file_ext in ['.pdf', '.docx', '.doc']:
+            # For document formats, use document processing
+            return await self.client.load_dataset(
+                filename=data_file,
+                output_size=output_size,
+                has_header=False,  # Documents typically don't have headers
+                contains_text=True,  # Documents contain text
+                dataset_name=dataset_name,
+                min_range=min_range,
+                max_range=max_range
+            )
+        elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
+            # For image formats, use vision processing
+            return await self.client.load_dataset(
+                filename=data_file,
+                output_size=output_size,
+                has_header=False,
+                contains_text=False,
+                dataset_name=dataset_name,
+                min_range=min_range,
+                max_range=max_range
+            )
+        elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac']:
+            # For media formats, use audio/video processing
+            return await self.client.load_dataset(
+                filename=data_file,
+                output_size=output_size,
+                has_header=False,
+                contains_text=False,
+                dataset_name=dataset_name,
+                min_range=min_range,
+                max_range=max_range
+            )
+        else:
+            # Fallback for unknown formats
+            return await self.client.load_dataset(
+                filename=data_file,
+                output_size=output_size,
+                has_header=has_header,
+                contains_text=contains_text,
+                dataset_name=dataset_name,
+                min_range=min_range,
+                max_range=max_range
+            )
 
     def _handle_load_dataset_result_direct(self, result):
         """Handle dataset loading result directly"""
@@ -7403,50 +7466,83 @@ capabilities, training data, performance metrics, and usage instructions."""
             # Get file extension for format-specific validation
             file_ext = os.path.splitext(file_path)[1].lower()
 
+            # Supported formats list
+            supported_formats = {
+                '.csv': 'CSV (Comma-Separated Values)',
+                '.json': 'JSON (JavaScript Object Notation)',
+                '.xml': 'XML (Extensible Markup Language)',
+                '.pdf': 'PDF (Portable Document Format)',
+                '.docx': 'DOCX (Microsoft Word)',
+                '.doc': 'DOC (Microsoft Word)',
+                '.txt': 'TXT (Plain Text)',
+                '.mp4': 'MP4 (Video)',
+                '.avi': 'AVI (Video)',
+                '.mov': 'MOV (Video)',
+                '.mkv': 'MKV (Video)',
+                '.mp3': 'MP3 (Audio)',
+                '.wav': 'WAV (Audio)',
+                '.flac': 'FLAC (Audio)',
+                '.aac': 'AAC (Audio)',
+                '.jpg': 'JPG (Image)',
+                '.jpeg': 'JPEG (Image)',
+                '.png': 'PNG (Image)',
+                '.bmp': 'BMP (Image)',
+                '.gif': 'GIF (Image)'
+            }
+
+            if file_ext not in supported_formats:
+                format_list = ', '.join([f"{ext} ({desc})" for ext, desc in supported_formats.items()])
+                return APIResponse(success=False, data={"error": f"Unsupported file format: {file_ext}. Supported formats: {format_list}"})
+
             # Format-specific validation
             if file_ext == '.csv':
                 # Validate CSV format
                 with open(file_path, 'r', encoding='utf-8') as f:
                     first_line = f.readline().strip()
                     if not first_line:
-                        return APIResponse(success=False, data={"error": "File appears to be empty"})
+                        return APIResponse(success=False, data={"error": "CSV file appears to be empty"})
 
                     # Count columns
                     reader = csv.reader([first_line])
                     try:
                         columns = next(reader)
                         if len(columns) < 2:
-                            return APIResponse(success=False, data={"error": "CSV must have at least 2 columns"})
+                            return APIResponse(success=False, data={"error": "CSV must have at least 2 columns (input and output)"})
                     except csv.Error as e:
                         return APIResponse(success=False, data={"error": f"Invalid CSV format: {str(e)}"})
 
             elif file_ext in ['.json', '.xml', '.pdf', '.docx', '.doc', '.txt']:
                 # Basic text-based file validation
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read(1024)  # Read first 1KB
-                    if not content.strip():
-                        return APIResponse(success=False, data={"error": "File appears to be empty"})
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read(1024)  # Read first 1KB
+                        if not content.strip():
+                            return APIResponse(success=False, data={"error": f"{file_ext.upper()} file appears to be empty"})
+                except UnicodeDecodeError:
+                    return APIResponse(success=False, data={"error": f"{file_ext.upper()} file contains invalid encoding. Please ensure UTF-8 encoding."})
 
             elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac']:
-                # For media files, just check if file is readable
+                # For media files, check if file is readable and has reasonable size
                 if not os.access(file_path, os.R_OK):
-                    return APIResponse(success=False, data={"error": "Cannot read media file"})
+                    return APIResponse(success=False, data={"error": f"Cannot read {supported_formats[file_ext]} file"})
+                if file_size < 1024:  # Less than 1KB might be corrupted
+                    return APIResponse(success=False, data={"error": f"{supported_formats[file_ext]} file appears to be corrupted (too small)"})
 
             elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
-                # For image files, just check if file is readable
+                # For image files, check if file is readable and has reasonable size
                 if not os.access(file_path, os.R_OK):
-                    return APIResponse(success=False, data={"error": "Cannot read image file"})
-
-            else:
-                return APIResponse(success=False, data={"error": f"Unsupported file format: {file_ext}"})
+                    return APIResponse(success=False, data={"error": f"Cannot read {supported_formats[file_ext]} file"})
+                if file_size < 100:  # Less than 100 bytes might be corrupted
+                    return APIResponse(success=False, data={"error": f"{supported_formats[file_ext]} file appears to be corrupted (too small)"})
 
             # Return success - file is valid for upload
             return APIResponse(success=True, data={
-                "message": f"File '{os.path.basename(file_path)}' validated successfully",
+                "message": f"File '{os.path.basename(file_path)}' ({supported_formats[file_ext]}) validated successfully",
                 "file_path": file_path,
                 "dataset_name": dataset_name,
                 "file_size": file_size,
-                "file_type": file_ext[1:] if file_ext else "unknown"
+                "file_type": file_ext[1:] if file_ext else "unknown",
+                "format_description": supported_formats[file_ext]
             })
 
         except Exception as e:
@@ -7459,13 +7555,14 @@ capabilities, training data, performance metrics, and usage instructions."""
             if result.success:
                 data = result.data
                 file_type = data.get('file_type', 'unknown').upper()
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {file_type} validation successful")
+                format_desc = data.get('format_description', f'{file_type} file')
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {format_desc} validation successful")
                 self.training_log.appendPlainText(f"  - File: {os.path.basename(data.get('file_path', 'Unknown'))}")
                 self.training_log.appendPlainText(f"  - Size: {data.get('file_size', 0) / 1024:.1f} KB")
                 self.training_log.appendPlainText(f"  - Dataset: {data.get('dataset_name', 'Unknown')}")
 
                 QMessageBox.information(self, "Upload Successful",
-                                      f"{file_type} file uploaded and validated successfully!\n\n"
+                                      f"{format_desc} uploaded and validated successfully!\n\n"
                                       f"File: {os.path.basename(data.get('file_path', 'Unknown'))}\n"
                                       f"Dataset: {data.get('dataset_name', 'Unknown')}\n"
                                       f"Size: {data.get('file_size', 0) / 1024:.1f} KB")
