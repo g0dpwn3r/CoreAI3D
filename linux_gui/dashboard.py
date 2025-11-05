@@ -164,7 +164,7 @@ class SandboxManager(QObject):
         self.sandbox_process: Optional[subprocess.Popen] = None
         self.sandboxed_processes: List[subprocess.Popen] = []
         self.is_running = False
-        self.sandbox_name = "CoreAI3D_Sandbox"
+        self.sandbox_name = "coreai3d_sandbox"
         self.sandbox_config: Optional[Dict[str, Any]] = None
         self.monitor_thread: Optional[threading.Thread] = None
 
@@ -176,7 +176,7 @@ class SandboxManager(QObject):
                 'container_name': self.sandbox_name,
                 'image': config.get('image', 'kali:latest'),
                 'host_folder': config.get('host_folder', '/tmp'),
-                'startup_command': config.get('startup_command', 'echo "Container started"'),
+                'startup_command': config.get('startup_command', 'tail -f /dev/null'),
                 'networking': config.get('networking', 'enable'),
                 'privileged': config.get('privileged', False),
                 'detach': True
@@ -292,6 +292,9 @@ class SandboxManager(QObject):
 
             # Add privileged option (opposite of drop_rights)
             if not self.sandbox_config.get('privileged', False):
+                cmd.append('--user')
+                cmd.append('1000:1000')  # Non-root user
+            elif self.sandbox_config.get('drop_rights', True):
                 cmd.append('--user')
                 cmd.append('1000:1000')  # Non-root user
 
@@ -675,8 +678,8 @@ class ModelDiscoveryService(QObject):
         """Discover models from Kaggle with comprehensive pagination across multiple pages"""
         try:
             models = []
-            total_models_needed = page_size * 15  # Get 15x the requested page size for comprehensive discovery
-            max_pages = 100  # Allow up to 100 pages to get comprehensive results
+            total_models_needed = page_size * 100  # Get 100x the requested page size for comprehensive discovery
+            max_pages = 500  # Allow up to 500 pages to get comprehensive results
 
             # Try Kaggle API v1 models endpoint first
             search_url = "https://www.kaggle.com/api/v1/models/list"
@@ -684,12 +687,12 @@ class ModelDiscoveryService(QObject):
             # Start from page 1 and go up to max_pages or until we have enough models
             for current_page in range(1, max_pages + 1):
                 # Emit progress signal
-                self.discovery_progress.emit("Kaggle", current_page, max_pages)
+                self.discovery_progress.emit("Kaggle", current_page, min(max_pages, 100))  # Cap progress display at 100 for UI
 
                 params = {
                     'search': query,
                     'page': current_page,
-                    'pageSize': 20,  # Kaggle API v1 uses pageSize
+                    'pageSize': 50,  # Increased page size for more efficient fetching
                     'sortBy': 'hottest'  # Kaggle API v1 uses 'hottest'
                 }
 
@@ -844,7 +847,7 @@ class ModelDiscoveryService(QObject):
                 params = {
                     'search': enhanced_query,
                     'page': current_page,
-                    'pageSize': 20,
+                    'pageSize': 50,  # Increased page size for more efficient fetching
                     'sortBy': 'hottest'
                 }
 
@@ -923,7 +926,7 @@ class ModelDiscoveryService(QObject):
                         )
                         models.append(model_info)
 
-                if len(models) >= page_size * 5:  # Get 5x the requested size
+                if len(models) >= page_size * 50:  # Get 50x the requested size for comprehensive discovery
                     break
 
             logger.info(f"Kaggle datasets fallback found {len(models)} potential models")
@@ -1069,8 +1072,8 @@ class ModelDiscoveryService(QObject):
         """Discover models from HuggingFace with comprehensive pagination across multiple pages"""
         try:
             models = []
-            total_models_needed = page_size * 20  # Get 20x the requested page size for comprehensive discovery
-            max_pages = 200  # Allow up to 200 pages to get comprehensive results
+            total_models_needed = page_size * 200  # Get 200x the requested page size for comprehensive discovery
+            max_pages = 1000  # Allow up to 1000 pages to get comprehensive results
 
             # HuggingFace API search - comprehensive discovery across multiple pages
             search_url = "https://huggingface.co/api/models"
@@ -1078,7 +1081,7 @@ class ModelDiscoveryService(QObject):
             # Start from page 1 and go up to max_pages or until we have enough models
             for current_page in range(1, max_pages + 1):
                 # Emit progress signal
-                self.discovery_progress.emit("HuggingFace", current_page, max_pages)
+                self.discovery_progress.emit("HuggingFace", current_page, min(max_pages, 100))  # Cap progress display at 100 for UI
 
                 params = {
                     'search': query,
@@ -1522,6 +1525,9 @@ class CodeDebugger(QObject):
 class CoreAI3DDashboard(QMainWindow):
     """Main dashboard window"""
 
+    # Chat signals for thread-safe UI updates
+    chat_response_received = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
 
@@ -1539,6 +1545,9 @@ class CoreAI3DDashboard(QMainWindow):
 
         # Chat response handler
         self.chat_response_handler = None
+
+        # Connect chat signal to handler
+        self.chat_response_received.connect(self._on_chat_response_received)
 
         # Initialize training argument variables - consolidated learning settings
         self.norm_min = 0.0
@@ -1673,12 +1682,14 @@ class CoreAI3DDashboard(QMainWindow):
             # Register chat response handler
             self.chat_response_handler = self._handle_chat_response
             self.client.register_chat_handler(self.chat_response_handler)
+            logger.info("Chat response handler registered successfully")
 
             # Create debugger
             self.debugger = CodeDebugger(self.client)
 
             # Register error handler
             self.client.register_error_handler(self._handle_chat_error)
+            logger.info("Chat error handler registered successfully")
 
             logger.info("CoreAI3D client initialized successfully")
             self.client_initialized = True
@@ -2300,6 +2311,31 @@ class CoreAI3DDashboard(QMainWindow):
 
         layout.addWidget(debug_group)
 
+        # API Debug Results section
+        api_debug_results_group = QGroupBox("API Debug Results")
+        api_debug_layout = QVBoxLayout(api_debug_results_group)
+
+        # API Debug output
+        self.api_debug_output = QPlainTextEdit()
+        self.api_debug_output.setReadOnly(True)
+        self.api_debug_output.setMaximumHeight(300)
+        api_debug_layout.addWidget(self.api_debug_output)
+
+        # API Debug controls
+        api_debug_controls = QHBoxLayout()
+
+        clear_api_debug_btn = QPushButton("Clear Results")
+        clear_api_debug_btn.clicked.connect(self.clear_api_debug_results)
+        api_debug_controls.addWidget(clear_api_debug_btn)
+
+        export_api_debug_btn = QPushButton("Export Debug Log")
+        export_api_debug_btn.clicked.connect(self.export_api_debug_log)
+        api_debug_controls.addWidget(export_api_debug_btn)
+
+        api_debug_layout.addLayout(api_debug_controls)
+
+        layout.addWidget(api_debug_results_group)
+
     def create_linux_sandbox_tab(self):
         """Create Linux Sandbox testing tab"""
         tab = QWidget()
@@ -2704,9 +2740,24 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _start_linux_container_async(self, container: str):
         """Async part of container start"""
-        async with self.client_lock:
-            result = await self.client.post('/linux/start', {'container': container})
-            return result
+        # Use sandbox manager directly instead of API call
+        config = {
+            'image': container,  # Use container name as image
+            'startup_command': 'tail -f /dev/null',
+            'networking': 'enable',
+            'privileged': False
+        }
+        success = await asyncio.get_event_loop().run_in_executor(
+            None, self.sandbox_manager.start_sandbox, config
+        )
+
+        # Create result object similar to API response
+        class StartResult:
+            def __init__(self, success, container):
+                self.success = success
+                self.data = {'container': container} if success else {'error': 'Failed to start container'}
+
+        return StartResult(success, container)
 
     def _handle_start_container_result_direct(self, result):
         """Handle container start result directly"""
@@ -2739,9 +2790,18 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _stop_linux_container_async(self, container: str):
         """Async part of container stop"""
-        async with self.client_lock:
-            result = await self.client.post('/linux/stop', {'container': container})
-            return result
+        # Use sandbox manager directly instead of API call
+        success = await asyncio.get_event_loop().run_in_executor(
+            None, self.sandbox_manager.stop_sandbox
+        )
+
+        # Create result object similar to API response
+        class StopResult:
+            def __init__(self, success, container):
+                self.success = success
+                self.data = {'container': container} if success else {'error': 'Failed to stop container'}
+
+        return StopResult(success, container)
 
     def _handle_stop_container_result_direct(self, result):
         """Handle container stop result directly"""
@@ -2786,13 +2846,37 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _run_linux_training_async(self, container: str, scenario: str):
         """Async part of Linux training"""
-        async with self.client_lock:
-            # Run training scenario via generic API
-            result = await self.client.post('/linux/training', {
-                'container': container,
-                'scenario': scenario
-            })
-            return result
+        # Use sandbox manager directly instead of API call
+        # For training scenarios, we'll execute appropriate commands in the container
+        training_commands = {
+            "File System Operations": "ls -la / && echo 'File system operations completed'",
+            "Process Management": "ps aux | head -10 && echo 'Process management completed'",
+            "Network Operations": "ping -c 3 8.8.8.8 && echo 'Network operations completed'",
+            "Package Management": "which apt && echo 'Package management available' || echo 'Package management not available'",
+            "Text Processing": "echo 'Hello World' | grep Hello && echo 'Text processing completed'",
+            "Permissions and Security": "id && echo 'Permissions check completed'",
+            "System Monitoring": "uptime && echo 'System monitoring completed'",
+            "Scripting and Automation": "echo '#!/bin/bash\necho \"Automation script\"' > test.sh && chmod +x test.sh && ./test.sh && echo 'Scripting completed'",
+            "hacking-white": "echo 'White hat hacking simulation - authorized testing only' && echo 'Simulation completed'",
+            "hacking-gray": "echo 'Gray hat hacking simulation - educational purposes only' && echo 'Simulation completed'",
+            "hacking-black": "echo 'Black hat hacking simulation - illegal activities not permitted' && echo 'Simulation cancelled'"
+        }
+
+        command = training_commands.get(scenario, f"echo 'Unknown scenario: {scenario}'")
+        success, output = await asyncio.get_event_loop().run_in_executor(
+            None, self.sandbox_manager.execute_command, command
+        )
+
+        # Create result object similar to API response
+        class TrainingResult:
+            def __init__(self, success, output, scenario):
+                self.success = success
+                self.data = {
+                    'scenario': scenario,
+                    'report': output if success else f'Failed: {output}'
+                }
+
+        return TrainingResult(success, output, scenario)
 
     def _handle_linux_training_result_direct(self, result):
         """Handle Linux training result directly"""
@@ -4950,18 +5034,18 @@ if __name__ == "__main__":
             'sandbox_name': self.sandbox_name_edit.text(),
             'startup_command': self.startup_command_edit.text(),
             'networking': self.networking_combo.currentText().lower(),
-            'drop_rights': self.drop_rights_check.isChecked()
+            'privileged': not self.drop_rights_check.isChecked()
         }
 
         success = self.sandbox_manager.start_sandbox(config)
         if not success:
-            QMessageBox.warning(self, "Sandboxie Error", "Failed to start Sandboxie sandbox")
+            QMessageBox.warning(self, "Docker Error", "Failed to start Docker sandbox")
 
     def stop_sandbox(self):
-        """Stop Sandboxie sandbox"""
+        """Stop Docker sandbox"""
         success = self.sandbox_manager.stop_sandbox()
         if not success:
-            QMessageBox.warning(self, "Sandboxie Error", "Failed to stop Sandboxie sandbox")
+            QMessageBox.warning(self, "Docker Error", "Failed to stop Docker sandbox")
 
     def clear_sandbox_logs(self):
         """Clear sandbox logs"""
@@ -5007,81 +5091,670 @@ if __name__ == "__main__":
 
     @qasync.asyncSlot()
     async def run_api_debug(self):
-        """Run API debugging"""
-        async with self.client_lock:
-            if not self.client:
-                if not self.initialize_client():
-                    QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
-                    return
+        """Run comprehensive API debugging with detailed request/response logging"""
+        if not self.client_initialized:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                return
 
-            try:
-                # Test various API endpoints
-                endpoints = [
-                    ("health_check", {}),
-                    ("system_metrics", {}),
-                    ("module_status", {})
-                ]
-
-                results = []
-                for endpoint, params in endpoints:
-                    try:
-                        if endpoint == "health_check":
-                            result = await self.client.health_check()
-                        elif endpoint == "system_metrics":
-                            result = await self.client.get_system_metrics()
-                        elif endpoint == "module_status":
-                            result = await self.client.get_module_status()
-
-                        results.append((endpoint, result.success, None))
-
-                    except Exception as e:
-                        results.append((endpoint, False, str(e)))
-
-                for endpoint, success, error in results:
-                    if error:
-                        message = f"{endpoint}: ERROR - {error}"
-                    else:
-                        message = f"{endpoint}: {'OK' if success else 'FAILED'}"
-                    self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-
-            except Exception as e:
-                self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Debug API Error: {str(e)}")
-                QMessageBox.warning(self, "Debug Error", str(e))
-
-    def run_system_debug(self):
-        """Run system debugging"""
         try:
-            # Collect system diagnostics
-            diagnostics = []
+            # Clear previous results
+            self.api_debug_output.clear()
 
-            # CPU info
-            cpu_count = psutil.cpu_count()
-            cpu_freq = psutil.cpu_freq()
-            diagnostics.append(f"CPU Cores: {cpu_count}")
-            if cpu_freq:
-                diagnostics.append(f"CPU Frequency: {cpu_freq.current:.2f} MHz")
+            # Add header
+            self.api_debug_output.appendPlainText("=" * 60)
+            self.api_debug_output.appendPlainText("COREAI3D API DEBUG SESSION")
+            self.api_debug_output.appendPlainText("=" * 60)
+            self.api_debug_output.appendPlainText(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self.api_debug_output.appendPlainText("")
 
-            # Memory info
-            memory = psutil.virtual_memory()
-            diagnostics.append(f"Total Memory: {memory.total / (1024**3):.2f} GB")
-            diagnostics.append(f"Available Memory: {memory.available / (1024**3):.2f} GB")
+            # Configuration info
+            self.api_debug_output.appendPlainText("CONFIGURATION:")
+            self.api_debug_output.appendPlainText(f"  API URL: {self.config.api_url}")
+            self.api_debug_output.appendPlainText(f"  WebSocket URL: {self.config.ws_url}")
+            self.api_debug_output.appendPlainText(f"  API Key: {'Configured' if self.config.api_key else 'Not configured'}")
+            self.api_debug_output.appendPlainText("")
 
-            # Disk info
-            disk = psutil.disk_usage('/')
-            diagnostics.append(f"Total Disk: {disk.total / (1024**3):.2f} GB")
-            diagnostics.append(f"Free Disk: {disk.free / (1024**3):.2f} GB")
+            # Network connectivity test
+            self.api_debug_output.appendPlainText("NETWORK CONNECTIVITY TEST:")
+            await self._test_api_connectivity()
+            self.api_debug_output.appendPlainText("")
 
-            # Network info
-            network = psutil.net_if_addrs()
-            diagnostics.append(f"Network Interfaces: {len(network)}")
+            # API endpoint tests
+            self.api_debug_output.appendPlainText("API ENDPOINT TESTS:")
+            endpoints = [
+                ("Health Check", "health_check", {}),
+                ("System Metrics", "system_metrics", {}),
+                ("Module Status", "module_status", {})
+            ]
 
-            # Display diagnostics
-            self.sandbox_logs.appendPlainText("=== SYSTEM DIAGNOSTICS ===")
-            for diag in diagnostics:
-                self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {diag}")
+            for display_name, endpoint, params in endpoints:
+                await self._test_api_endpoint(display_name, endpoint, params)
+                self.api_debug_output.appendPlainText("")
+
+            # Summary
+            self.api_debug_output.appendPlainText("=" * 60)
+            self.api_debug_output.appendPlainText("DEBUG SESSION COMPLETE")
+            self.api_debug_output.appendPlainText("=" * 60)
 
         except Exception as e:
-            QMessageBox.warning(self, "Debug Error", str(e))
+            self.api_debug_output.appendPlainText(f"CRITICAL ERROR: {str(e)}")
+            QMessageBox.warning(self, "Debug Error", f"API debug failed: {str(e)}")
+
+    async def _test_api_connectivity(self):
+        """Test basic API connectivity"""
+        try:
+            import urllib.request
+            import urllib.error
+            import socket
+
+            # Extract host and port
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.config.api_url)
+            host = parsed_url.hostname
+            port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+
+            # Test TCP connectivity
+            self.api_debug_output.appendPlainText(f"  Testing TCP connection to {host}:{port}...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+
+            try:
+                result = sock.connect_ex((host, port))
+                if result == 0:
+                    self.api_debug_output.appendPlainText("  ✓ TCP connectivity: SUCCESS")
+                else:
+                    self.api_debug_output.appendPlainText(f"  ✗ TCP connectivity: FAILED (error code: {result})")
+            except Exception as e:
+                self.api_debug_output.appendPlainText(f"  ✗ TCP connectivity: ERROR - {str(e)}")
+            finally:
+                sock.close()
+
+            # Test HTTP connectivity
+            self.api_debug_output.appendPlainText(f"  Testing HTTP GET to {self.config.api_url}...")
+            try:
+                req = urllib.request.Request(self.config.api_url)
+                req.add_header('User-Agent', 'CoreAI3D-Dashboard/1.3.0')
+
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    self.api_debug_output.appendPlainText("  ✓ HTTP connectivity: SUCCESS")
+                    self.api_debug_output.appendPlainText(f"    Status Code: {response.getcode()}")
+                    self.api_debug_output.appendPlainText(f"    Content-Type: {response.headers.get('content-type', 'Unknown')}")
+
+                    # Read response preview
+                    content = response.read(512).decode('utf-8', errors='ignore')
+                    if content:
+                        preview = content[:200] + "..." if len(content) > 200 else content
+                        self.api_debug_output.appendPlainText(f"    Response Preview: {preview}")
+
+            except urllib.error.HTTPError as e:
+                self.api_debug_output.appendPlainText("  ✗ HTTP connectivity: HTTP ERROR")
+                self.api_debug_output.appendPlainText(f"    Status Code: {e.code}")
+                self.api_debug_output.appendPlainText(f"    Reason: {e.reason}")
+            except urllib.error.URLError as e:
+                self.api_debug_output.appendPlainText("  ✗ HTTP connectivity: URL ERROR")
+                self.api_debug_output.appendPlainText(f"    Reason: {e.reason}")
+            except Exception as e:
+                self.api_debug_output.appendPlainText("  ✗ HTTP connectivity: ERROR")
+                self.api_debug_output.appendPlainText(f"    Error: {str(e)}")
+
+        except Exception as e:
+            self.api_debug_output.appendPlainText(f"  ✗ Connectivity test error: {str(e)}")
+
+    async def _test_api_endpoint(self, display_name: str, endpoint: str, params: Dict[str, Any]):
+        """Test specific API endpoint with detailed logging"""
+        try:
+            self.api_debug_output.appendPlainText(f"  Testing {display_name}...")
+
+            # Record start time
+            start_time = time.time()
+
+            # Make API call
+            if endpoint == "health_check":
+                result = await self.client.health_check()
+            elif endpoint == "system_metrics":
+                result = await self.client.get_system_metrics()
+            elif endpoint == "module_status":
+                result = await self.client.get_module_status()
+            else:
+                result = type('Result', (), {'success': False, 'data': {'error': f'Unknown endpoint: {endpoint}'}})()
+
+            # Calculate response time
+            response_time = time.time() - start_time
+
+            # Log results
+            if result.success:
+                self.api_debug_output.appendPlainText("  ✓ SUCCESS")
+                self.api_debug_output.appendPlainText(f"    Response Time: {response_time:.3f}s")
+
+                # Log response data (truncated for readability)
+                if hasattr(result, 'data') and result.data:
+                    data_str = json.dumps(result.data, indent=2)
+                    if len(data_str) > 500:
+                        data_str = data_str[:500] + "\n    ... (truncated)"
+                    self.api_debug_output.appendPlainText("    Response Data:")
+                    for line in data_str.split('\n'):
+                        self.api_debug_output.appendPlainText(f"      {line}")
+            else:
+                self.api_debug_output.appendPlainText("  ✗ FAILED")
+                self.api_debug_output.appendPlainText(f"    Response Time: {response_time:.3f}s")
+
+                # Log error details
+                if hasattr(result, 'data') and result.data:
+                    error_info = result.data.get('error', 'Unknown error')
+                    self.api_debug_output.appendPlainText(f"    Error: {error_info}")
+
+                    # Additional error details
+                    if isinstance(result.data, dict):
+                        for key, value in result.data.items():
+                            if key != 'error':
+                                self.api_debug_output.appendPlainText(f"    {key}: {value}")
+
+        except Exception as e:
+            self.api_debug_output.appendPlainText("  ✗ EXCEPTION")
+            self.api_debug_output.appendPlainText(f"    Error: {str(e)}")
+            import traceback
+            self.api_debug_output.appendPlainText("    Traceback:")
+            for line in traceback.format_exc().split('\n')[-5:]:  # Last 5 lines of traceback
+                if line.strip():
+                    self.api_debug_output.appendPlainText(f"      {line}")
+
+    def clear_api_debug_results(self):
+        """Clear API debug results"""
+        self.api_debug_output.clear()
+
+    def export_api_debug_log(self):
+        """Export API debug log to file"""
+        try:
+            # Get current debug output
+            debug_content = self.api_debug_output.toPlainText()
+            if not debug_content:
+                QMessageBox.warning(self, "No Data", "No debug data to export")
+                return
+
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"api_debug_log_{timestamp}.txt"
+
+            # Get save location
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Export API Debug Log",
+                default_filename, "Text files (*.txt);;All files (*.*)"
+            )
+
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(debug_content)
+
+                QMessageBox.information(self, "Export Complete",
+                                      f"API debug log exported to:\n{file_path}")
+                self.status_bar.showMessage(f"Debug log exported to {file_path}")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Export Error", f"Failed to export debug log: {str(e)}")
+
+    def calculate_health_score(self, cpu_percent, memory_percent, disk_percent):
+        """Calculate overall system health score (0-100)"""
+        try:
+            # Weight the components (CPU: 40%, Memory: 40%, Disk: 20%)
+            cpu_score = max(0, 100 - cpu_percent * 1.25)  # Penalize heavily above 80%
+            memory_score = max(0, 100 - memory_percent * 1.25)
+            disk_score = max(0, 100 - disk_percent * 2)  # Disk space is critical
+
+            overall_score = (cpu_score * 0.4) + (memory_score * 0.4) + (disk_score * 0.2)
+            return int(overall_score)
+        except Exception:
+            return 50  # Default neutral score
+    def _collect_hardware_info(self):
+        """Collect comprehensive hardware information"""
+        try:
+            self.sandbox_logs.appendPlainText("HARDWARE INFORMATION:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # CPU Information
+            cpu_count = psutil.cpu_count(logical=True)
+            cpu_physical = psutil.cpu_count(logical=False)
+            cpu_freq = psutil.cpu_freq()
+
+            self.sandbox_logs.appendPlainText(f"CPU Cores: {cpu_physical} physical, {cpu_count} logical")
+            if cpu_freq:
+                self.sandbox_logs.appendPlainText(f"CPU Frequency: {cpu_freq.current:.1f} MHz (max: {cpu_freq.max:.1f} MHz)")
+
+            # CPU Usage per core
+            cpu_percents = psutil.cpu_percent(percpu=True)
+            self.sandbox_logs.appendPlainText(f"CPU Usage per Core: {', '.join([f'{p:.1f}%' for p in cpu_percents])}")
+
+            # Memory Information
+            memory = psutil.virtual_memory()
+            swap = psutil.swap_memory()
+
+            self.sandbox_logs.appendPlainText(f"Total Memory: {memory.total / (1024**3):.2f} GB")
+            self.sandbox_logs.appendPlainText(f"Available Memory: {memory.available / (1024**3):.2f} GB ({memory.percent:.1f}%)")
+            self.sandbox_logs.appendPlainText(f"Used Memory: {memory.used / (1024**3):.2f} GB")
+            self.sandbox_logs.appendPlainText(f"Swap Total: {swap.total / (1024**3):.2f} GB")
+            self.sandbox_logs.appendPlainText(f"Swap Used: {swap.used / (1024**3):.2f} GB ({swap.percent:.1f}%)")
+
+            # Disk Information
+            disk_partitions = psutil.disk_partitions()
+            self.sandbox_logs.appendPlainText(f"Disk Partitions: {len(disk_partitions)}")
+
+            for partition in disk_partitions:
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    self.sandbox_logs.appendPlainText(f"  {partition.device} ({partition.mountpoint}): {usage.total / (1024**3):.1f} GB total, {usage.free / (1024**3):.1f} GB free ({usage.percent:.1f}%)")
+                except PermissionError:
+                    self.sandbox_logs.appendPlainText(f"  {partition.device} ({partition.mountpoint}): Access denied")
+
+            # Battery Information (if available)
+            try:
+                battery = psutil.sensors_battery()
+                if battery:
+                    self.sandbox_logs.appendPlainText(f"Battery: {battery.percent:.1f}% ({'charging' if battery.power_plugged else 'discharging'})")
+                    if battery.secsleft != psutil.POWER_TIME_UNLIMITED:
+                        hours, remainder = divmod(battery.secsleft, 3600)
+                        minutes, _ = divmod(remainder, 60)
+                        self.sandbox_logs.appendPlainText(f"Battery Time Left: {hours}h {minutes}m")
+            except Exception:
+                pass  # Battery info not available on all systems
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting hardware info: {str(e)}")
+
+    def _collect_software_info(self):
+        """Collect comprehensive software information"""
+        try:
+            self.sandbox_logs.appendPlainText("SOFTWARE INFORMATION:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # OS Information
+            import platform
+            self.sandbox_logs.appendPlainText(f"Operating System: {platform.system()} {platform.release()}")
+            self.sandbox_logs.appendPlainText(f"Platform: {platform.platform()}")
+            self.sandbox_logs.appendPlainText(f"Architecture: {platform.architecture()[0]}")
+            self.sandbox_logs.appendPlainText(f"Python Version: {platform.python_version()}")
+
+            # System uptime
+            uptime = time.time() - psutil.boot_time()
+            uptime_str = str(datetime.timedelta(seconds=int(uptime)))
+            self.sandbox_logs.appendPlainText(f"System Uptime: {uptime_str}")
+
+            # User information
+            self.sandbox_logs.appendPlainText(f"Current User: {os.environ.get('USER', 'Unknown')}")
+            self.sandbox_logs.appendPlainText(f"Home Directory: {os.path.expanduser('~')}")
+
+            # Environment variables (key ones)
+            env_vars = ['PATH', 'SHELL', 'TERM', 'LANG', 'DISPLAY']
+            self.sandbox_logs.appendPlainText("Environment Variables:")
+            for var in env_vars:
+                value = os.environ.get(var, 'Not set')
+                if len(value) > 50:
+                    value = value[:47] + "..."
+                self.sandbox_logs.appendPlainText(f"  {var}: {value}")
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting software info: {str(e)}")
+
+    def _collect_system_health(self):
+        """Collect system health indicators"""
+        try:
+            self.sandbox_logs.appendPlainText("SYSTEM HEALTH CHECKS:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # CPU Health
+            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_status = "GOOD" if cpu_percent < 80 else "WARNING" if cpu_percent < 95 else "CRITICAL"
+            self.sandbox_logs.appendPlainText(f"CPU Health: {cpu_status} ({cpu_percent:.1f}% usage)")
+
+            # Memory Health
+            memory = psutil.virtual_memory()
+            memory_status = "GOOD" if memory.percent < 80 else "WARNING" if memory.percent < 95 else "CRITICAL"
+            self.sandbox_logs.appendPlainText(f"Memory Health: {memory_status} ({memory.percent:.1f}% used)")
+
+            # Disk Health
+            disk_usage = psutil.disk_usage('/')
+            disk_status = "GOOD" if disk_usage.percent < 80 else "WARNING" if disk_usage.percent < 95 else "CRITICAL"
+            self.sandbox_logs.appendPlainText(f"Disk Health: {disk_status} ({disk_usage.percent:.1f}% used)")
+
+            # Overall Health Score
+            health_score = self.calculate_health_score(cpu_percent, memory.percent, disk_usage.percent)
+            health_status = "EXCELLENT" if health_score >= 90 else "GOOD" if health_score >= 70 else "WARNING" if health_score >= 50 else "CRITICAL"
+            self.sandbox_logs.appendPlainText(f"Overall Health Score: {health_score}/100 ({health_status})")
+
+            # Load Average (Unix-like systems)
+            try:
+                load_avg = psutil.getloadavg()
+                self.sandbox_logs.appendPlainText(f"Load Average: {load_avg[0]:.2f}, {load_avg[1]:.2f}, {load_avg[2]:.2f}")
+            except AttributeError:
+                pass  # Not available on Windows
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting system health: {str(e)}")
+
+    def _collect_performance_metrics(self):
+        """Collect detailed performance metrics"""
+        try:
+            self.sandbox_logs.appendPlainText("PERFORMANCE METRICS:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # CPU Metrics
+            cpu_times = psutil.cpu_times()
+            self.sandbox_logs.appendPlainText("CPU Time Breakdown:")
+            self.sandbox_logs.appendPlainText(f"  User: {cpu_times.user:.1f}s")
+            self.sandbox_logs.appendPlainText(f"  System: {cpu_times.system:.1f}s")
+            self.sandbox_logs.appendPlainText(f"  Idle: {cpu_times.idle:.1f}s")
+
+            # Memory Details
+            memory = psutil.virtual_memory()
+            self.sandbox_logs.appendPlainText("Memory Details:")
+            self.sandbox_logs.appendPlainText(f"  Active: {memory.active / (1024**3):.2f} GB")
+            self.sandbox_logs.appendPlainText(f"  Inactive: {memory.inactive / (1024**3):.2f} GB")
+            self.sandbox_logs.appendPlainText(f"  Buffers: {memory.buffers / (1024**3):.2f} GB")
+            self.sandbox_logs.appendPlainText(f"  Cached: {memory.cached / (1024**3):.2f} GB")
+
+            # I/O Statistics
+            try:
+                io_counters = psutil.disk_io_counters()
+                if io_counters:
+                    self.sandbox_logs.appendPlainText("Disk I/O Statistics:")
+                    self.sandbox_logs.appendPlainText(f"  Read Count: {io_counters.read_count}")
+                    self.sandbox_logs.appendPlainText(f"  Write Count: {io_counters.write_count}")
+                    self.sandbox_logs.appendPlainText(f"  Read Bytes: {io_counters.read_bytes / (1024**3):.2f} GB")
+                    self.sandbox_logs.appendPlainText(f"  Write Bytes: {io_counters.write_bytes / (1024**3):.2f} GB")
+            except Exception:
+                pass
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting performance metrics: {str(e)}")
+
+    def _collect_network_diagnostics(self):
+        """Collect network diagnostics"""
+        try:
+            self.sandbox_logs.appendPlainText("NETWORK DIAGNOSTICS:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # Network interfaces
+            net_if_addrs = psutil.net_if_addrs()
+            net_if_stats = psutil.net_if_stats()
+
+            self.sandbox_logs.appendPlainText(f"Network Interfaces: {len(net_if_addrs)}")
+
+            for interface, addrs in net_if_addrs.items():
+                self.sandbox_logs.appendPlainText(f"  {interface}:")
+                for addr in addrs:
+                    if addr.family.name == 'AF_INET':
+                        self.sandbox_logs.appendPlainText(f"    IPv4: {addr.address}/{addr.netmask}")
+                    elif addr.family.name == 'AF_INET6':
+                        self.sandbox_logs.appendPlainText(f"    IPv6: {addr.address}")
+                    elif addr.family.name == 'AF_PACKET':
+                        self.sandbox_logs.appendPlainText(f"    MAC: {addr.address}")
+
+                # Interface stats
+                if interface in net_if_stats:
+                    stats = net_if_stats[interface]
+                    self.sandbox_logs.appendPlainText(f"    Status: {'Up' if stats.isup else 'Down'}")
+                    self.sandbox_logs.appendPlainText(f"    Speed: {stats.speed} Mbps")
+
+            # Network I/O
+            net_io = psutil.net_io_counters()
+            self.sandbox_logs.appendPlainText("Network I/O:")
+            self.sandbox_logs.appendPlainText(f"  Bytes Sent: {net_io.bytes_sent / (1024**2):.2f} MB")
+            self.sandbox_logs.appendPlainText(f"  Bytes Received: {net_io.bytes_recv / (1024**2):.2f} MB")
+            self.sandbox_logs.appendPlainText(f"  Packets Sent: {net_io.packets_sent}")
+            self.sandbox_logs.appendPlainText(f"  Packets Received: {net_io.packets_recv}")
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting network diagnostics: {str(e)}")
+
+    def _collect_process_analysis(self):
+        """Collect process analysis and monitoring"""
+        try:
+            self.sandbox_logs.appendPlainText("PROCESS ANALYSIS:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # Process counts
+            process_count = len(psutil.pids())
+            self.sandbox_logs.appendPlainText(f"Total Processes: {process_count}")
+
+            # Top CPU processes
+            self.sandbox_logs.appendPlainText("Top CPU Processes:")
+            try:
+                processes = []
+                for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+                    try:
+                        processes.append((proc.info['cpu_percent'], proc.info['name'], proc.info['pid']))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+
+                # Sort by CPU usage and show top 5
+                processes.sort(reverse=True)
+                for i, (cpu, name, pid) in enumerate(processes[:5]):
+                    self.sandbox_logs.appendPlainText(f"  {i+1}. {name} (PID: {pid}): {cpu:.1f}% CPU")
+            except Exception:
+                self.sandbox_logs.appendPlainText("  Unable to retrieve process information")
+
+            # Top memory processes
+            self.sandbox_logs.appendPlainText("Top Memory Processes:")
+            try:
+                processes = []
+                for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+                    try:
+                        processes.append((proc.info['memory_percent'], proc.info['name'], proc.info['pid']))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+
+                # Sort by memory usage and show top 5
+                processes.sort(reverse=True)
+                for i, (mem, name, pid) in enumerate(processes[:5]):
+                    self.sandbox_logs.appendPlainText(f"  {i+1}. {name} (PID: {pid}): {mem:.1f}% Memory")
+            except Exception:
+                self.sandbox_logs.appendPlainText("  Unable to retrieve process information")
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting process analysis: {str(e)}")
+
+    def _collect_disk_health(self):
+        """Collect disk health information"""
+        try:
+            self.sandbox_logs.appendPlainText("DISK HEALTH CHECKS:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # Disk partitions and usage
+            partitions = psutil.disk_partitions()
+            for partition in partitions:
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    self.sandbox_logs.appendPlainText(f"Partition: {partition.device} ({partition.mountpoint})")
+                    self.sandbox_logs.appendPlainText(f"  File System: {partition.fstype}")
+                    self.sandbox_logs.appendPlainText(f"  Total: {usage.total / (1024**3):.2f} GB")
+                    self.sandbox_logs.appendPlainText(f"  Used: {usage.used / (1024**3):.2f} GB")
+                    self.sandbox_logs.appendPlainText(f"  Free: {usage.free / (1024**3):.2f} GB")
+                    self.sandbox_logs.appendPlainText(f"  Usage: {usage.percent:.1f}%")
+
+                    # Health assessment
+                    if usage.percent > 90:
+                        self.sandbox_logs.appendPlainText("  Status: CRITICAL - Disk space very low")
+                    elif usage.percent > 80:
+                        self.sandbox_logs.appendPlainText("  Status: WARNING - Disk space low")
+                    else:
+                        self.sandbox_logs.appendPlainText("  Status: GOOD")
+
+                except PermissionError:
+                    self.sandbox_logs.appendPlainText(f"Partition: {partition.device} ({partition.mountpoint}) - Access denied")
+                except Exception as e:
+                    self.sandbox_logs.appendPlainText(f"Partition: {partition.device} ({partition.mountpoint}) - Error: {str(e)}")
+
+            # Disk I/O statistics
+            try:
+                io_stats = psutil.disk_io_counters(perdisk=True)
+                if io_stats:
+                    self.sandbox_logs.appendPlainText("Disk I/O Statistics:")
+                    for disk, stats in io_stats.items():
+                        self.sandbox_logs.appendPlainText(f"  {disk}:")
+                        self.sandbox_logs.appendPlainText(f"    Read: {stats.read_count} operations, {stats.read_bytes / (1024**2):.2f} MB")
+                        self.sandbox_logs.appendPlainText(f"    Write: {stats.write_count} operations, {stats.write_bytes / (1024**2):.2f} MB")
+            except Exception:
+                pass
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting disk health: {str(e)}")
+
+    def _collect_system_configuration(self):
+        """Collect system configuration information"""
+        try:
+            self.sandbox_logs.appendPlainText("SYSTEM CONFIGURATION:")
+            self.sandbox_logs.appendPlainText("-" * 30)
+
+            # Kernel information
+            try:
+                import platform
+                self.sandbox_logs.appendPlainText(f"Kernel: {platform.release()}")
+                self.sandbox_logs.appendPlainText(f"Architecture: {platform.machine()}")
+            except Exception:
+                pass
+
+            # System limits (if available)
+            try:
+                import resource
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                self.sandbox_logs.appendPlainText(f"File Descriptor Limit: {soft} (soft), {hard} (hard)")
+            except Exception:
+                pass
+
+            # Environment information
+            self.sandbox_logs.appendPlainText(f"Current Working Directory: {os.getcwd()}")
+            self.sandbox_logs.appendPlainText(f"Python Executable: {sys.executable}")
+            self.sandbox_logs.appendPlainText(f"Python Path: {sys.path[0] if sys.path else 'Not available'}")
+
+            # Timezone information
+            import time
+            local_tz = time.tzname[0] if time.tzname else "Unknown"
+            self.sandbox_logs.appendPlainText(f"Timezone: {local_tz}")
+
+            # Locale information
+            try:
+                import locale
+                current_locale = locale.getlocale()
+                self.sandbox_logs.appendPlainText(f"Locale: {current_locale[0] if current_locale[0] else 'Unknown'}")
+            except Exception:
+                pass
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error collecting system configuration: {str(e)}")
+
+    def _generate_debug_summary(self):
+        """Generate a summary and recommendations based on debug data"""
+        try:
+            self.sandbox_logs.appendPlainText("DEBUG SUMMARY & RECOMMENDATIONS:")
+            self.sandbox_logs.appendPlainText("-" * 40)
+
+            # Get current metrics for summary
+            cpu_percent = psutil.cpu_percent()
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+
+            # Performance assessment
+            issues = []
+            recommendations = []
+
+            if cpu_percent > 80:
+                issues.append("High CPU usage")
+                recommendations.append("Consider closing unnecessary applications or processes")
+            if memory.percent > 80:
+                issues.append("High memory usage")
+                recommendations.append("Close memory-intensive applications or add more RAM")
+            if disk.percent > 90:
+                issues.append("Low disk space")
+                recommendations.append("Free up disk space by deleting unnecessary files")
+
+            # Process count assessment
+            process_count = len(psutil.pids())
+            if process_count > 500:
+                issues.append("High process count")
+                recommendations.append("Review running processes and terminate unnecessary ones")
+
+            # Network assessment
+            try:
+                net_io = psutil.net_io_counters()
+                if net_io.errin > 0 or net_io.errout > 0:
+                    issues.append("Network errors detected")
+                    recommendations.append("Check network configuration and connections")
+            except Exception:
+                pass
+
+            # Generate summary
+            if issues:
+                self.sandbox_logs.appendPlainText("ISSUES DETECTED:")
+                for issue in issues:
+                    self.sandbox_logs.appendPlainText(f"  • {issue}")
+
+                self.sandbox_logs.appendPlainText("")
+                self.sandbox_logs.appendPlainText("RECOMMENDATIONS:")
+                for rec in recommendations:
+                    self.sandbox_logs.appendPlainText(f"  • {rec}")
+            else:
+                self.sandbox_logs.appendPlainText("✓ No critical issues detected")
+                self.sandbox_logs.appendPlainText("  System appears to be running normally")
+
+            # Overall status
+            health_score = self.calculate_health_score(cpu_percent, memory.percent, disk.percent)
+            if health_score >= 80:
+                self.sandbox_logs.appendPlainText(f"\nOVERALL STATUS: HEALTHY (Score: {health_score}/100)")
+            elif health_score >= 60:
+                self.sandbox_logs.appendPlainText(f"\nOVERALL STATUS: WARNING (Score: {health_score}/100)")
+            else:
+                self.sandbox_logs.appendPlainText(f"\nOVERALL STATUS: CRITICAL (Score: {health_score}/100)")
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"Error generating debug summary: {str(e)}")
+    def run_system_debug(self):
+        """Run comprehensive system debugging with detailed diagnostics"""
+        try:
+            # Clear previous results
+            self.sandbox_logs.clear()
+
+            # Add header
+            self.sandbox_logs.appendPlainText("=" * 60)
+            self.sandbox_logs.appendPlainText("COMPREHENSIVE SYSTEM DEBUG SESSION")
+            self.sandbox_logs.appendPlainText("=" * 60)
+            self.sandbox_logs.appendPlainText(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self.sandbox_logs.appendPlainText("")
+
+            # Collect comprehensive system diagnostics
+            self._collect_hardware_info()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_software_info()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_system_health()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_performance_metrics()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_network_diagnostics()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_process_analysis()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_disk_health()
+            self.sandbox_logs.appendPlainText("")
+
+            self._collect_system_configuration()
+            self.sandbox_logs.appendPlainText("")
+
+            # Summary and recommendations
+            self._generate_debug_summary()
+
+            # Footer
+            self.sandbox_logs.appendPlainText("=" * 60)
+            self.sandbox_logs.appendPlainText("SYSTEM DEBUG SESSION COMPLETE")
+            self.sandbox_logs.appendPlainText("=" * 60)
+
+        except Exception as e:
+            self.sandbox_logs.appendPlainText(f"CRITICAL ERROR: {str(e)}")
+            QMessageBox.warning(self, "Debug Error", f"System debug failed: {str(e)}")
 
     def browse_data_directory(self):
         """Browse for data directory"""
@@ -5155,10 +5828,9 @@ if __name__ == "__main__":
 
     def send_chat_message(self):
         """Send chat message to AI"""
-        if not self.client_initialized:
-            if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
-                return
+        if not self.initialize_client():
+            QMessageBox.warning(self, "Connection Error", "Client not connected. Please wait for initialization or check server status.")
+            return
 
         message = self.chat_input.text().strip()
         if not message:
@@ -5211,10 +5883,16 @@ if __name__ == "__main__":
         logger.info(f"Handling chat response: {data}")
         content = data.get('content', '')
         if content:
-            logger.info(f"Adding chat response to history: {content}")
-            self.chat_history.append(f"AI: {content}")
+            logger.info(f"Emitting chat response signal: {content}")
+            self.chat_response_received.emit(content)
         else:
             logger.warning("Received chat response with empty content")
+
+    def _on_chat_response_received(self, response: str):
+        """Handle chat response signal and update UI"""
+        logger.info(f"Chat response received via signal: {response}")
+        # Use QTimer to ensure UI update happens in main thread
+        QTimer.singleShot(0, lambda: self.chat_history.append(f"AI: {response}"))
 
     def _handle_chat_error(self, error_msg: str):
         """Handle chat error"""
@@ -5567,34 +6245,158 @@ capabilities, training data, performance metrics, and usage instructions."""
         else:
             # Simulate download progress for local models
             logger.info(f"Starting local download simulation for {model_name}")
-            self.download_timer = QTimer()
-            self.download_timer.timeout.connect(lambda: self.update_download_progress(current_row, model_name))
-            self.download_timer.start(500)
-            logger.debug("Download timer started")
+            self._simulate_download_progress(current_row, model_name)
 
-    def update_download_progress(self, row, model_name):
-        """Update download progress for local models"""
+    def _simulate_download_progress(self, row, model_name):
+        """Simulate download progress for local models with proper progress tracking"""
         try:
-            logger.debug(f"Updating download progress for {model_name}, row {row}")
-            current_value = self.download_progress.value()
-            logger.debug(f"Current progress value: {current_value}")
+            logger.info(f"Starting download simulation for {model_name}")
 
-            if current_value < 100:
-                new_value = current_value + 10
-                self.download_progress.setValue(new_value)
-                self.download_status_label.setText(f"Downloading {model_name}... {new_value}%")
-                logger.debug(f"Progress updated to {new_value}%")
-            else:
-                # Download complete
-                logger.info(f"Download completed for {model_name}")
-                if hasattr(self, 'download_timer') and self.download_timer.isActive():
-                    self.download_timer.stop()
-                    logger.debug("Download timer stopped")
+            # Initialize progress tracking
+            self.download_progress_data = {
+                'row': row,
+                'model_name': model_name,
+                'progress': 0,
+                'start_time': time.time(),
+                'estimated_total_time': 5.0,  # 5 seconds for simulation
+                'last_update': time.time()
+            }
 
-                # Update status in main thread
-                QTimer.singleShot(0, lambda: self._update_download_complete(row, model_name))
+            # Create timer for progress updates
+            self.download_timer = QTimer()
+            self.download_timer.timeout.connect(self._update_simulated_progress)
+            self.download_timer.start(200)  # Update every 200ms for smooth progress
+
+            logger.debug("Download simulation timer started")
         except Exception as e:
-            logger.error(f"Error updating download progress: {str(e)}")
+            logger.error(f"Error starting download simulation: {str(e)}")
+
+    def _download_with_progress(self, row, model_name, source_url, dest_path):
+        """Download file with actual progress tracking"""
+        try:
+            import urllib.request
+            import threading
+
+            def download_worker():
+                try:
+                    # Initialize progress tracking
+                    self.download_progress_data = {
+                        'row': row,
+                        'model_name': model_name,
+                        'progress': 0,
+                        'start_time': time.time(),
+                        'total_size': 0,
+                        'downloaded_size': 0,
+                        'dest_path': dest_path
+                    }
+
+                    # Create request
+                    req = urllib.request.Request(
+                        source_url,
+                        headers={'User-Agent': 'CoreAI3D-Dashboard/1.0'}
+                    )
+
+                    # Get file size first
+                    try:
+                        with urllib.request.urlopen(req) as response:
+                            self.download_progress_data['total_size'] = int(response.headers.get('Content-Length', 0))
+                    except Exception as e:
+                        logger.warning(f"Could not get file size: {str(e)}")
+
+                    # Start download with progress tracking
+                    with urllib.request.urlopen(req) as response:
+                        total_size = self.download_progress_data['total_size']
+
+                        with open(dest_path, 'wb') as f:
+                            downloaded = 0
+                            chunk_size = 8192
+
+                            while True:
+                                chunk = response.read(chunk_size)
+                                if not chunk:
+                                    break
+
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                self.download_progress_data['downloaded_size'] = downloaded
+
+                                # Update progress
+                                if total_size > 0:
+                                    progress = min(95, int((downloaded / total_size) * 100))
+                                else:
+                                    # Estimate based on time for unknown size
+                                    elapsed = time.time() - self.download_progress_data['start_time']
+                                    progress = min(90, int((elapsed / 30.0) * 100))  # Assume 30 seconds
+
+                                # Update UI in main thread
+                                QTimer.singleShot(0, lambda p=progress: self._update_download_progress(row, model_name, p))
+
+                    # Complete download
+                    QTimer.singleShot(0, lambda: self._update_download_complete(row, model_name))
+
+                except Exception as e:
+                    QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+                    # Clean up progress data on error
+                    if hasattr(self, 'download_progress_data'):
+                        delattr(self, 'download_progress_data')
+
+            # Start download in background thread
+            threading.Thread(target=download_worker, daemon=True).start()
+
+        except Exception as e:
+            self._download_error(row, model_name, f"Failed to start download: {str(e)}")
+
+    def _update_simulated_progress(self):
+        """Update simulated download progress"""
+        try:
+            if not hasattr(self, 'download_progress_data'):
+                return
+
+            data = self.download_progress_data
+            current_time = time.time()
+            elapsed = current_time - data['start_time']
+
+            # Calculate progress based on elapsed time (non-linear for realism)
+            if elapsed < data['estimated_total_time']:
+                # Use sigmoid-like progression for more realistic download curve
+                progress_ratio = elapsed / data['estimated_total_time']
+                # Apply sigmoid function: smooth start, faster middle, smooth end
+                import math
+                sigmoid_progress = 1 / (1 + math.exp(-6 * (progress_ratio - 0.5)))
+                new_progress = min(95, int(sigmoid_progress * 100))
+            else:
+                new_progress = 100
+
+            # Only update if progress actually changed
+            if new_progress != data['progress']:
+                data['progress'] = new_progress
+                data['last_update'] = current_time
+
+                # Update UI
+                self.download_progress.setValue(new_progress)
+                self.download_status_label.setText(f"Downloading {data['model_name']}... {new_progress}%")
+
+                logger.debug(f"Simulated progress updated to {new_progress}%")
+
+                # Check if download is complete
+                if new_progress >= 100:
+                    logger.info(f"Simulated download completed for {data['model_name']}")
+                    if hasattr(self, 'download_timer') and self.download_timer.isActive():
+                        self.download_timer.stop()
+                        logger.debug("Download simulation timer stopped")
+
+                    # Clean up progress data
+                    if hasattr(self, 'download_progress_data'):
+                        delattr(self, 'download_progress_data')
+
+                    # Update status in main thread
+                    QTimer.singleShot(0, lambda: self._update_download_complete(data['row'], data['model_name']))
+
+        except Exception as e:
+            logger.error(f"Error updating simulated progress: {str(e)}")
+            # Stop timer on error
+            if hasattr(self, 'download_timer') and self.download_timer.isActive():
+                self.download_timer.stop()
 
     def _update_download_complete(self, row, model_name):
         """Update UI when download is complete"""
@@ -5678,7 +6480,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         return any(kaggle_model in model_name for kaggle_model in kaggle_models)
 
     def _download_from_kaggle(self, row, model_name):
-        """Download model from Kaggle with progress tracking"""
+        """Download model from Kaggle with proper progress tracking"""
         try:
             import subprocess
             import threading
@@ -5710,10 +6512,21 @@ capabilities, training data, performance metrics, and usage instructions."""
                     models_dir = os.path.join(self.config.data_dir, "models")
                     os.makedirs(models_dir, exist_ok=True)
 
+                    # Initialize progress tracking
+                    self.download_progress_data = {
+                        'row': row,
+                        'model_name': model_name,
+                        'progress': 0,
+                        'start_time': time.time(),
+                        'download_path': os.path.join(models_dir, f"{dataset_path.split('/')[-1]}.zip"),
+                        'total_size': None,
+                        'downloaded_size': 0
+                    }
+
                     # Download command
                     cmd = ['kaggle', 'datasets', 'download', dataset_path, '-p', models_dir]
 
-                    # Run download with progress simulation
+                    # Run download with progress tracking
                     process = subprocess.Popen(
                         cmd,
                         stdout=subprocess.PIPE,
@@ -5721,13 +6534,45 @@ capabilities, training data, performance metrics, and usage instructions."""
                         text=True
                     )
 
-                    # Simulate progress updates during download
+                    # Monitor download progress
                     progress = 0
+                    last_size = 0
+
                     while process.poll() is None:
                         time.sleep(0.5)  # Check every 0.5 seconds
-                        if progress < 90:  # Leave room for final processing
-                            progress += 2  # Increment by 2% every 0.5 seconds
+
+                        # Check if download file exists and track its growth
+                        download_path = self.download_progress_data['download_path']
+                        if os.path.exists(download_path):
+                            current_size = os.path.getsize(download_path)
+
+                            # Update downloaded size
+                            self.download_progress_data['downloaded_size'] = current_size
+
+                            # Estimate total size if not known
+                            if self.download_progress_data['total_size'] is None and current_size > last_size:
+                                # Rough estimation based on growth rate
+                                self.download_progress_data['total_size'] = current_size * 8  # Conservative estimate
+
+                            total_size = self.download_progress_data['total_size']
+
+                            if total_size and total_size > 0:
+                                progress = min(95, int((current_size / total_size) * 100))
+                            else:
+                                # Time-based progress when size unknown
+                                elapsed = time.time() - self.download_progress_data['start_time']
+                                progress = min(90, int((elapsed / 30.0) * 100))  # Assume 30 seconds for download
+
+                            last_size = current_size
+
+                            # Update progress in main thread
                             QTimer.singleShot(0, lambda p=progress: self._update_kaggle_progress(row, model_name, p))
+                        else:
+                            # File not created yet, show initial progress
+                            elapsed = time.time() - self.download_progress_data['start_time']
+                            if elapsed < 5:  # First 5 seconds
+                                progress = min(10, int((elapsed / 5.0) * 10))
+                                QTimer.singleShot(0, lambda p=progress: self._update_kaggle_progress(row, model_name, p))
 
                     # Check final result
                     if process.returncode == 0:
@@ -5739,8 +6584,15 @@ capabilities, training data, performance metrics, and usage instructions."""
                         error_msg = f"Kaggle download failed: {stderr}"
                         QTimer.singleShot(0, lambda: self._download_error(row, model_name, error_msg))
 
+                    # Clean up progress data
+                    if hasattr(self, 'download_progress_data'):
+                        delattr(self, 'download_progress_data')
+
                 except Exception as e:
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+                    # Clean up progress data on error
+                    if hasattr(self, 'download_progress_data'):
+                        delattr(self, 'download_progress_data')
 
             # Start download in background thread
             threading.Thread(target=download_worker, daemon=True).start()
@@ -5749,9 +6601,9 @@ capabilities, training data, performance metrics, and usage instructions."""
             self._download_error(row, model_name, f"Failed to start Kaggle download: {str(e)}")
 
     def _download_from_huggingface(self, row, model_name):
-        """Download model from Hugging Face with progress tracking"""
+        """Download model from Hugging Face with proper progress tracking"""
         try:
-            from huggingface_hub import snapshot_download
+            from huggingface_hub import snapshot_download, HfApi
             import threading
 
             # Map model names to HuggingFace model IDs
@@ -5780,40 +6632,137 @@ capabilities, training data, performance metrics, and usage instructions."""
                     models_dir = os.path.join(self.config.data_dir, "models", model_name.replace(' ', '_'))
                     os.makedirs(models_dir, exist_ok=True)
 
-                    # Download with progress callback
-                    def progress_callback(size, total):
+                    # Initialize progress tracking
+                    self.download_progress_data = {
+                        'row': row,
+                        'model_name': model_name,
+                        'progress': 0,
+                        'start_time': time.time(),
+                        'models_dir': models_dir,
+                        'total_size': 0,
+                        'downloaded_size': 0,
+                        'initial_files': set()
+                    }
+
+                    # Get model info for size estimation
+                    api = HfApi()
+                    try:
+                        model_info = api.model_info(model_id)
+                        # Calculate total size from all files
+                        for file in model_info.siblings:
+                            if file.size:
+                                self.download_progress_data['total_size'] += file.size
+                        logger.info(f"HuggingFace model {model_id} total size: {self.download_progress_data['total_size']} bytes")
+                    except Exception as e:
+                        logger.warning(f"Could not get model info for size estimation: {str(e)}")
+
+                    # Track initial files
+                    if os.path.exists(models_dir):
+                        for root, dirs, files in os.walk(models_dir):
+                            for file in files:
+                                self.download_progress_data['initial_files'].add(os.path.join(root, file))
+
+                    # Define progress callback for HuggingFace downloads
+                    def hf_progress_callback(size, total):
+                        """Progress callback for HuggingFace downloads"""
                         if total > 0:
-                            progress = int((size / total) * 100)
-                            QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, progress))
+                            progress = min(95, int((size / total) * 100))
+                            QTimer.singleShot(0, lambda p=progress: self._update_hf_progress(row, model_name, p))
 
-                    # Download model with simulated progress updates
-                    # Since snapshot_download doesn't provide progress callbacks easily,
-                    # we'll simulate progress updates
+                    # Start download with progress tracking
+                    QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, 0))
+
+                    # Start download - HuggingFace Hub doesn't have built-in progress callbacks
+                    # We'll monitor file system changes for progress
+                    if model_id:
+                        snapshot_download(
+                            repo_id=model_id,
+                            local_dir=models_dir,
+                            local_dir_use_symlinks=False
+                        )
+                    else:
+                        QTimer.singleShot(0, lambda: self._download_error(row, model_name, "Invalid model ID"))
+                        return
+
+                    # Monitor download progress by checking file sizes
                     progress = 0
-                    QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, progress))
+                    stable_count = 0
 
-                    # Start download
-                    snapshot_download(
-                        repo_id=model_id,
-                        local_dir=models_dir,
-                        local_dir_use_symlinks=False
-                    )
-
-                    # Simulate progress completion
                     while progress < 100:
                         time.sleep(0.5)
-                        progress += 5  # Increment by 5% every 0.5 seconds
-                        if progress > 100:
-                            progress = 100
-                        QTimer.singleShot(0, lambda p=progress: self._update_hf_progress(row, model_name, p))
 
+                        if os.path.exists(models_dir):
+                            current_size = 0
+                            current_files = set()
+
+                            # Calculate current downloaded size
+                            for root, dirs, files in os.walk(models_dir):
+                                for file in files:
+                                    filepath = os.path.join(root, file)
+                                    current_files.add(filepath)
+                                    if os.path.exists(filepath):
+                                        try:
+                                            current_size += os.path.getsize(filepath)
+                                        except OSError:
+                                            pass  # File might be in use
+
+                            # Update progress data
+                            self.download_progress_data['downloaded_size'] = current_size
+
+                            total_size = self.download_progress_data['total_size']
+                            if total_size > 0:
+                                progress = min(95, int((current_size / total_size) * 100))
+                            else:
+                                # Estimate progress based on file count growth
+                                new_files = current_files - self.download_progress_data['initial_files']
+                                if new_files:
+                                    # Rough estimation: assume each model has ~10-50 files
+                                    estimated_total_files = max(50, len(new_files) * 2)
+                                    progress = min(90, int((len(new_files) / estimated_total_files) * 100))
+                                else:
+                                    # Time-based progress when no size info
+                                    elapsed = time.time() - self.download_progress_data['start_time']
+                                    progress = min(85, int((elapsed / 60.0) * 100))  # Assume 60 seconds for download
+
+                            # Update progress in main thread
+                            QTimer.singleShot(0, lambda p=progress: self._update_hf_progress(row, model_name, p))
+
+                            # Check if download is complete by monitoring stability
+                            if progress >= 85:
+                                time.sleep(1)  # Wait to check stability
+                                new_size = 0
+                                for root, dirs, files in os.walk(models_dir):
+                                    for file in files:
+                                        filepath = os.path.join(root, file)
+                                        if os.path.exists(filepath):
+                                            try:
+                                                new_size += os.path.getsize(filepath)
+                                            except OSError:
+                                                pass
+
+                                if abs(new_size - current_size) < 1024:  # Less than 1KB change
+                                    stable_count += 1
+                                    if stable_count >= 3:  # Stable for 3 checks
+                                        break  # Download likely complete
+                                else:
+                                    stable_count = 0
+
+                    # Complete the progress
+                    QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, 100))
                     QTimer.singleShot(0, lambda: self._download_success(row, model_name))
+
+                    # Clean up progress data
+                    if hasattr(self, 'download_progress_data'):
+                        delattr(self, 'download_progress_data')
 
                 except ImportError:
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name,
                         "HuggingFace Hub not installed. Install with: pip install huggingface-hub"))
                 except Exception as e:
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+                    # Clean up progress data on error
+                    if hasattr(self, 'download_progress_data'):
+                        delattr(self, 'download_progress_data')
 
             # Start download in background thread
             threading.Thread(target=download_worker, daemon=True).start()
@@ -5821,17 +6770,36 @@ capabilities, training data, performance metrics, and usage instructions."""
         except Exception as e:
             self._download_error(row, model_name, f"Failed to start HuggingFace download: {str(e)}")
 
+    def _update_progress_thread_safe(self, progress, status_text):
+        """Update progress in a thread-safe way"""
+        QTimer.singleShot(0, lambda: self._update_progress_ui(progress, status_text))
+
+    def _update_progress_ui(self, progress, status_text):
+        """Update progress UI elements"""
+        try:
+            self.download_progress.setValue(progress)
+            self.download_status_label.setText(status_text)
+            self.download_progress.repaint()
+            # Force UI update
+            QApplication.processEvents()
+            logger.debug(f"Progress updated to {progress}%: {status_text}")
+        except Exception as e:
+            logger.error(f"Error updating progress UI: {str(e)}")
+
+    def _update_download_progress(self, row, model_name, progress):
+        """Update download progress for any source"""
+        status_text = f"Downloading {model_name}... {progress}%"
+        self._update_progress_thread_safe(progress, status_text)
+
     def _update_kaggle_progress(self, row, model_name, progress):
         """Update Kaggle download progress"""
-        logger.debug(f"Updating Kaggle progress for {model_name} to {progress}%")
-        self.download_progress.setValue(progress)
-        self.download_status_label.setText(f"Downloading {model_name} from Kaggle... {progress}%")
+        status_text = f"Downloading {model_name} from Kaggle... {progress}%"
+        self._update_progress_thread_safe(progress, status_text)
 
     def _update_hf_progress(self, row, model_name, progress):
         """Update HuggingFace download progress"""
-        logger.debug(f"Updating HuggingFace progress for {model_name} to {progress}%")
-        self.download_progress.setValue(progress)
-        self.download_status_label.setText(f"Downloading {model_name} from HuggingFace... {progress}%")
+        status_text = f"Downloading {model_name} from HuggingFace... {progress}%"
+        self._update_progress_thread_safe(progress, status_text)
 
     def _download_success(self, row, model_name):
         """Handle successful download"""

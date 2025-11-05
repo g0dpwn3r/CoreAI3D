@@ -1519,6 +1519,11 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                     return createErrorResponse("output_size must be positive", 400);
                 }
 
+                // Check if data is loaded
+                if (trainingModule->numSamples == 0) {
+                    return createErrorResponse("No training data loaded. Please load dataset first.", 400);
+                }
+
                 try {
                     trainingModule->layers = layers;
                     trainingModule->neurons = neurons;

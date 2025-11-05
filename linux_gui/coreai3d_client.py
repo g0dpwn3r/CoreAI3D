@@ -386,6 +386,10 @@ class CoreAI3DClient:
             else:
                 self.message_handlers[event_type].clear()
 
+    def register_chat_handler(self, handler: Callable):
+        """Register a chat response handler"""
+        self.on('chat_response', handler)
+
     async def _make_request(self, method: str, endpoint: str, data: Optional[Any] = None) -> APIResponse:
         """Make HTTP request with retry logic"""
         # Ensure we have a session

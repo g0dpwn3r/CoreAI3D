@@ -1187,6 +1187,17 @@ bool Training::startTraining(double learningRate, int epochs) {
         }
     });
 
+    // Wait a short time to check if training started successfully
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Check if the training thread is still active (indicating it started)
+    if (!trainingActive.load()) {
+        if (verbose) {
+            std::cout << "[DEBUG] Training thread failed to start or completed immediately" << std::endl;
+        }
+        return false;
+    }
+
     return true;
 }
 
