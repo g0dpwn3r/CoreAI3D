@@ -4540,25 +4540,26 @@ capabilities, training data, performance metrics, and usage instructions."""
                     models_dir = os.path.join(self.config.data_dir, "models", model_name.replace(' ', '_'))
                     os.makedirs(models_dir, exist_ok=True)
 
-                    # Download with progress callback
-                    def progress_callback(size, total):
-                        if total > 0:
-                            progress = int((size / total) * 100)
-                            QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, progress))
+                    # Start progress monitoring timer
+                    self._start_hf_progress_monitor(row, model_name, models_dir)
 
-                    # Download model
+                    # Download model (snapshot_download doesn't support progress callbacks)
                     snapshot_download(
                         repo_id=model_id,
                         local_dir=models_dir,
                         local_dir_use_symlinks=False
                     )
 
+                    # Stop progress monitoring and mark as complete
+                    QTimer.singleShot(0, lambda: self._stop_hf_progress_monitor())
                     QTimer.singleShot(0, lambda: self._download_success(row, model_name))
 
                 except ImportError:
+                    QTimer.singleShot(0, lambda: self._stop_hf_progress_monitor())
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name,
                         "HuggingFace Hub not installed. Install with: pip install huggingface-hub"))
                 except Exception as e:
+                    QTimer.singleShot(0, lambda: self._stop_hf_progress_monitor())
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
 
             # Start download in background thread
@@ -4578,11 +4579,95 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.download_status_label.setText(f"Downloading {model_name} from Kaggle... {new_progress}%")
             logger.debug(f"Kaggle progress updated to {new_progress}%")
 
-    def _update_hf_progress(self, row, model_name, progress):
-        """Update HuggingFace download progress"""
-        logger.debug(f"Updating HuggingFace progress for {model_name} to {progress}%")
-        self.download_progress.setValue(progress)
-        self.download_status_label.setText(f"Downloading {model_name} from HuggingFace... {progress}%")
+    def _start_hf_progress_monitor(self, row, model_name, models_dir):
+        """Start monitoring HuggingFace download progress"""
+        self.hf_download_start_time = time.time()
+        self.hf_download_row = row
+        self.hf_download_model_name = model_name
+        self.hf_download_dir = models_dir
+        self.hf_download_initial_size = self._get_directory_size(models_dir)
+
+        # Start progress monitoring timer (update every 500ms)
+        self.hf_progress_timer = QTimer()
+        self.hf_progress_timer.timeout.connect(self._update_hf_progress_monitor)
+        self.hf_progress_timer.start(500)
+
+    def _stop_hf_progress_monitor(self):
+        """Stop HuggingFace download progress monitoring"""
+        if hasattr(self, 'hf_progress_timer') and self.hf_progress_timer.isActive():
+            self.hf_progress_timer.stop()
+
+    def _update_hf_progress_monitor(self):
+        """Update HuggingFace download progress by monitoring directory size"""
+        try:
+            current_size = self._get_directory_size(self.hf_download_dir)
+            downloaded_bytes = current_size - self.hf_download_initial_size
+
+            # Estimate progress based on time and download rate
+            elapsed_time = time.time() - self.hf_download_start_time
+
+            if elapsed_time > 0:
+                # Estimate download rate (bytes per second)
+                download_rate = downloaded_bytes / elapsed_time
+
+                # Estimate total size based on model type (rough estimates)
+                model_size_estimates = {
+                    "bert-base-uncased": 440 * 1024 * 1024,  # ~440MB
+                    "gpt2": 548 * 1024 * 1024,  # ~548MB
+                    "distilbert-base-uncased": 66 * 1024 * 1024,  # ~66MB
+                    "roberta-base": 476 * 1024 * 1024,  # ~476MB
+                    "albert-base-v2": 43 * 1024 * 1024,  # ~43MB
+                    "xlnet-base-cased": 446 * 1024 * 1024,  # ~446MB
+                    "google/electra-small-discriminator": 13 * 1024 * 1024,  # ~13MB
+                    "sentence-transformers/all-MiniLM-L6-v2": 218 * 1024 * 1024,  # ~218MB
+                }
+
+                # Get model ID for size estimate
+                hf_models = {
+                    "BERT-Base": "bert-base-uncased",
+                    "GPT-2 Small": "gpt2",
+                    "DistilBERT": "distilbert-base-uncased",
+                    "RoBERTa-Base": "roberta-base",
+                    "ALBERT-Base": "albert-base-v2",
+                    "XLNet-Base": "xlnet-base-cased",
+                    "ELECTRA-Small": "google/electra-small-discriminator",
+                    "Sentence-BERT": "sentence-transformers/all-MiniLM-L6-v2",
+                }
+
+                model_id = hf_models.get(self.hf_download_model_name, self.hf_download_model_name.lower().replace(' ', '-'))
+                estimated_total = model_size_estimates.get(model_id, 100 * 1024 * 1024)  # Default 100MB
+
+                # Calculate progress
+                if downloaded_bytes > 0 and estimated_total > 0:
+                    progress = min(95, int((downloaded_bytes / estimated_total) * 100))  # Cap at 95% until complete
+                    self.download_progress.setValue(progress)
+                    self.download_status_label.setText(f"Downloading {self.hf_download_model_name} from HuggingFace... {progress}%")
+
+                    # Format downloaded size
+                    if downloaded_bytes < 1024 * 1024:
+                        size_str = f"{downloaded_bytes / 1024:.1f} KB"
+                    else:
+                        size_str = f"{downloaded_bytes / (1024 * 1024):.1f} MB"
+
+                    logger.debug(f"HuggingFace download progress: {progress}% ({size_str})")
+
+        except Exception as e:
+            logger.error(f"Error updating HuggingFace progress monitor: {str(e)}")
+
+    def _get_directory_size(self, path):
+        """Get total size of directory in bytes"""
+        total_size = 0
+        try:
+            for dirpath, dirnames, filenames in os.walk(path):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    try:
+                        total_size += os.path.getsize(filepath)
+                    except (OSError, IOError):
+                        pass  # Skip files we can't access
+        except Exception as e:
+            logger.error(f"Error calculating directory size for {path}: {str(e)}")
+        return total_size
 
     def _download_success(self, row, model_name):
         """Handle successful download"""

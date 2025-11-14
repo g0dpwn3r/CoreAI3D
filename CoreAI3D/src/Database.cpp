@@ -51,6 +51,17 @@ Database::Database(const std::string& host, unsigned int port,
 
             tempSession.close();
             std::cout << "DEBUG: Temporary session closed" << std::endl;
+        } catch (const mysqlx::Error& mysqlEx) {
+            // Handle MySQL-specific errors more gracefully
+            std::string errorMsg = mysqlEx.what();
+            if (errorMsg.find("Broken pipe") != std::string::npos ||
+                errorMsg.find("unexpected message") != std::string::npos) {
+                std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl;
+                std::cerr << "DEBUG: Trying to continue with main connection attempt..." << std::endl;
+            } else {
+                std::cerr << "DEBUG: Temporary session creation failed: " << errorMsg << std::endl;
+                throw std::runtime_error("Failed to create temporary database session: " + errorMsg);
+            }
         } catch (const std::exception& tempEx) {
             std::cerr << "DEBUG: Temporary session creation failed: " << tempEx.what() << std::endl;
             throw std::runtime_error("Failed to create temporary database session: " + std::string(tempEx.what()));
@@ -62,6 +73,29 @@ Database::Database(const std::string& host, unsigned int port,
             session = new mysqlx::Session(host, port, user, password, schemaName);
             std::cout << "DEBUG: Main session created successfully" << std::endl;
             std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
+        } catch (const mysqlx::Error& mysqlEx) {
+            // Handle MySQL-specific errors more gracefully
+            std::string errorMsg = mysqlEx.what();
+            if (errorMsg.find("Broken pipe") != std::string::npos ||
+                errorMsg.find("unexpected message") != std::string::npos) {
+                std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl;
+                std::cerr << "DEBUG: Trying alternative connection method..." << std::endl;
+
+                // Try connecting without specifying schema first, then switch
+                try {
+                    mysqlx::Session tempSession(host, port, user, password);
+                    tempSession.sql("USE " + schemaName).execute();
+                    session = new mysqlx::Session(host, port, user, password, schemaName);
+                    std::cout << "DEBUG: Alternative connection method successful" << std::endl;
+                    std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
+                } catch (const std::exception& altEx) {
+                    std::cerr << "DEBUG: Alternative connection method also failed: " << altEx.what() << std::endl;
+                    throw std::runtime_error("Failed to create main database session: " + errorMsg);
+                }
+            } else {
+                std::cerr << "DEBUG: Main session creation failed: " << errorMsg << std::endl;
+                throw std::runtime_error("Failed to create main database session: " + errorMsg);
+            }
         } catch (const std::exception& sessionEx) {
             std::cerr << "DEBUG: Main session creation failed: " << sessionEx.what() << std::endl;
             throw std::runtime_error("Failed to create main database session: " + std::string(sessionEx.what()));

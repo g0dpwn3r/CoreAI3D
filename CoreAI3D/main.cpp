@@ -258,7 +258,7 @@ int main(int argc, char* argv[]) {
             isOfflineMode = true;
         } else if (arg == "--enable-websocket") {
             enableWebsocket = true;
-        } else if (arg == "--create-table") {
+        } else if (arg == "--create-table" || arg == "--create-tables") {
             createTableFlag = true;
         } else if (arg == "--db-host") {
             std::string value = extractValue(i, "--db-host", arg);

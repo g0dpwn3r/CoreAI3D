@@ -100,11 +100,14 @@ std::unordered_map<std::string, std::vector<float>> Language::loadWordEmbeddings
         {
             embedding.push_back(value);
         }
-        if (embedding.size() != (size_t)expectedDim) 
+        if (embedding.size() != (size_t)expectedDim)
         {
-            std::cerr << "[!] Warning: Skipping word '" << word
-                << "' due to mismatched dimensions: " << embedding.size()
-                << " vs " << expectedDim << std::endl;
+            // Only show warnings if verbose mode is enabled
+            if (trainer && trainer->verbose) {
+                std::cerr << "[!] Warning: Skipping word '" << word
+                    << "' due to mismatched dimensions: " << embedding.size()
+                    << " vs " << expectedDim << std::endl;
+            }
             continue;
         }
         wordEmbeddingMap[word] = std::move(embedding);
