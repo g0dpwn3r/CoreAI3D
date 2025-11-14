@@ -4584,8 +4584,34 @@ capabilities, training data, performance metrics, and usage instructions."""
         self.hf_download_start_time = time.time()
         self.hf_download_row = row
         self.hf_download_model_name = model_name
-        self.hf_download_dir = models_dir
-        self.hf_download_initial_size = self._get_directory_size(models_dir)
+
+        # Calculate estimated download time based on model size
+        model_size_estimates = {
+            "bert-base-uncased": 440 * 1024 * 1024,  # ~440MB
+            "gpt2": 548 * 1024 * 1024,  # ~548MB
+            "distilbert-base-uncased": 66 * 1024 * 1024,  # ~66MB
+            "roberta-base": 476 * 1024 * 1024,  # ~476MB
+            "albert-base-v2": 43 * 1024 * 1024,  # ~43MB
+            "xlnet-base-cased": 446 * 1024 * 1024,  # ~446MB
+            "google/electra-small-discriminator": 13 * 1024 * 1024,  # ~13MB
+            "sentence-transformers/all-MiniLM-L6-v2": 218 * 1024 * 1024,  # ~218MB
+        }
+
+        hf_models = {
+            "BERT-Base": "bert-base-uncased",
+            "GPT-2 Small": "gpt2",
+            "DistilBERT": "distilbert-base-uncased",
+            "RoBERTa-Base": "roberta-base",
+            "ALBERT-Base": "albert-base-v2",
+            "XLNet-Base": "xlnet-base-cased",
+            "ELECTRA-Small": "google/electra-small-discriminator",
+            "Sentence-BERT": "sentence-transformers/all-MiniLM-L6-v2",
+        }
+
+        model_id = hf_models.get(model_name, model_name.lower().replace(' ', '-'))
+        estimated_size = model_size_estimates.get(model_id, 100 * 1024 * 1024)  # Default 100MB
+        estimated_download_rate = 10 * 1024 * 1024  # Assume 10 MB/s
+        self.hf_estimated_total_time = max(10, estimated_size / estimated_download_rate)  # Minimum 10 seconds
 
         # Start progress monitoring timer (update every 500ms)
         self.hf_progress_timer = QTimer()
@@ -4598,58 +4624,21 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.hf_progress_timer.stop()
 
     def _update_hf_progress_monitor(self):
-        """Update HuggingFace download progress by monitoring directory size"""
+        """Update HuggingFace download progress using time-based estimation"""
         try:
-            current_size = self._get_directory_size(self.hf_download_dir)
-            downloaded_bytes = current_size - self.hf_download_initial_size
-
-            # Estimate progress based on time and download rate
             elapsed_time = time.time() - self.hf_download_start_time
 
-            if elapsed_time > 0:
-                # Estimate download rate (bytes per second)
-                download_rate = downloaded_bytes / elapsed_time
+            # Calculate progress based on elapsed time vs estimated total time
+            if elapsed_time > 0 and self.hf_estimated_total_time > 0:
+                progress = min(95, int((elapsed_time / self.hf_estimated_total_time) * 100))  # Cap at 95% until complete
 
-                # Estimate total size based on model type (rough estimates)
-                model_size_estimates = {
-                    "bert-base-uncased": 440 * 1024 * 1024,  # ~440MB
-                    "gpt2": 548 * 1024 * 1024,  # ~548MB
-                    "distilbert-base-uncased": 66 * 1024 * 1024,  # ~66MB
-                    "roberta-base": 476 * 1024 * 1024,  # ~476MB
-                    "albert-base-v2": 43 * 1024 * 1024,  # ~43MB
-                    "xlnet-base-cased": 446 * 1024 * 1024,  # ~446MB
-                    "google/electra-small-discriminator": 13 * 1024 * 1024,  # ~13MB
-                    "sentence-transformers/all-MiniLM-L6-v2": 218 * 1024 * 1024,  # ~218MB
-                }
-
-                # Get model ID for size estimate
-                hf_models = {
-                    "BERT-Base": "bert-base-uncased",
-                    "GPT-2 Small": "gpt2",
-                    "DistilBERT": "distilbert-base-uncased",
-                    "RoBERTa-Base": "roberta-base",
-                    "ALBERT-Base": "albert-base-v2",
-                    "XLNet-Base": "xlnet-base-cased",
-                    "ELECTRA-Small": "google/electra-small-discriminator",
-                    "Sentence-BERT": "sentence-transformers/all-MiniLM-L6-v2",
-                }
-
-                model_id = hf_models.get(self.hf_download_model_name, self.hf_download_model_name.lower().replace(' ', '-'))
-                estimated_total = model_size_estimates.get(model_id, 100 * 1024 * 1024)  # Default 100MB
-
-                # Calculate progress
-                if downloaded_bytes > 0 and estimated_total > 0:
-                    progress = min(95, int((downloaded_bytes / estimated_total) * 100))  # Cap at 95% until complete
+                # Ensure progress doesn't go backwards
+                current_progress = self.download_progress.value()
+                if progress > current_progress:
                     self.download_progress.setValue(progress)
                     self.download_status_label.setText(f"Downloading {self.hf_download_model_name} from HuggingFace... {progress}%")
 
-                    # Format downloaded size
-                    if downloaded_bytes < 1024 * 1024:
-                        size_str = f"{downloaded_bytes / 1024:.1f} KB"
-                    else:
-                        size_str = f"{downloaded_bytes / (1024 * 1024):.1f} MB"
-
-                    logger.debug(f"HuggingFace download progress: {progress}% ({size_str})")
+                    logger.debug(f"HuggingFace download progress: {progress}% (estimated)")
 
         except Exception as e:
             logger.error(f"Error updating HuggingFace progress monitor: {str(e)}")
