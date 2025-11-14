@@ -791,10 +791,11 @@ class CoreAI3DClient:
         }
         return await self.post('/models/load', data)
 
-    async def load_dataset(self, dataset_name: str, output_size: int = 1, has_header: bool = True,
+    async def load_dataset(self, filename: str, dataset_name: str, output_size: int = 1, has_header: bool = True,
                           contains_text: bool = False, min_range: float = -1.0, max_range: float = 1.0) -> APIResponse:
         """Load dataset for training with normalization parameters"""
         data = {
+            'filename': filename,
             'dataset_name': dataset_name,
             'output_size': output_size,
             'has_header': has_header,

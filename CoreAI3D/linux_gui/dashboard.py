@@ -4540,8 +4540,8 @@ capabilities, training data, performance metrics, and usage instructions."""
                     models_dir = os.path.join(self.config.data_dir, "models", model_name.replace(' ', '_'))
                     os.makedirs(models_dir, exist_ok=True)
 
-                    # Start progress monitoring timer
-                    self._start_hf_progress_monitor(row, model_name, models_dir)
+                    # Start progress monitoring
+                    QTimer.singleShot(0, lambda: self._start_hf_progress_monitoring(row, model_name, models_dir))
 
                     # Download model (snapshot_download doesn't support progress callbacks)
                     snapshot_download(
@@ -4550,20 +4550,18 @@ capabilities, training data, performance metrics, and usage instructions."""
                         local_dir_use_symlinks=False
                     )
 
-                    # Stop progress monitoring and mark as complete
-                    QTimer.singleShot(0, lambda: self._stop_hf_progress_monitor())
+                    # Mark as complete
                     QTimer.singleShot(0, lambda: self._download_success(row, model_name))
 
                 except ImportError:
-                    QTimer.singleShot(0, lambda: self._stop_hf_progress_monitor())
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name,
                         "HuggingFace Hub not installed. Install with: pip install huggingface-hub"))
                 except Exception as e:
-                    QTimer.singleShot(0, lambda: self._stop_hf_progress_monitor())
                     QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
 
             # Start download in background thread
-            threading.Thread(target=download_worker, daemon=True).start()
+            download_thread = threading.Thread(target=download_worker, daemon=True)
+            download_thread.start()
 
         except Exception as e:
             self._download_error(row, model_name, f"Failed to start HuggingFace download: {str(e)}")
@@ -4579,69 +4577,70 @@ capabilities, training data, performance metrics, and usage instructions."""
             self.download_status_label.setText(f"Downloading {model_name} from Kaggle... {new_progress}%")
             logger.debug(f"Kaggle progress updated to {new_progress}%")
 
-    def _start_hf_progress_monitor(self, row, model_name, models_dir):
-        """Start monitoring HuggingFace download progress"""
-        self.hf_download_start_time = time.time()
+    def _start_hf_progress_monitoring(self, row, model_name, models_dir):
+        """Start progress monitoring for HuggingFace download"""
         self.hf_download_row = row
         self.hf_download_model_name = model_name
+        self.hf_download_dir = models_dir
+        self.hf_download_start_time = time.time()
+        self.hf_download_initial_size = self._get_directory_size(models_dir)
 
-        # Calculate estimated download time based on model size
-        model_size_estimates = {
-            "bert-base-uncased": 440 * 1024 * 1024,  # ~440MB
-            "gpt2": 548 * 1024 * 1024,  # ~548MB
-            "distilbert-base-uncased": 66 * 1024 * 1024,  # ~66MB
-            "roberta-base": 476 * 1024 * 1024,  # ~476MB
-            "albert-base-v2": 43 * 1024 * 1024,  # ~43MB
-            "xlnet-base-cased": 446 * 1024 * 1024,  # ~446MB
-            "google/electra-small-discriminator": 13 * 1024 * 1024,  # ~13MB
-            "sentence-transformers/all-MiniLM-L6-v2": 218 * 1024 * 1024,  # ~218MB
-        }
+        # Set progress bar to indeterminate initially
+        self.download_progress.setRange(0, 0)  # Indeterminate progress
+        self.download_status_label.setText(f"Downloading {model_name} from HuggingFace...")
 
-        hf_models = {
-            "BERT-Base": "bert-base-uncased",
-            "GPT-2 Small": "gpt2",
-            "DistilBERT": "distilbert-base-uncased",
-            "RoBERTa-Base": "roberta-base",
-            "ALBERT-Base": "albert-base-v2",
-            "XLNet-Base": "xlnet-base-cased",
-            "ELECTRA-Small": "google/electra-small-discriminator",
-            "Sentence-BERT": "sentence-transformers/all-MiniLM-L6-v2",
-        }
-
-        model_id = hf_models.get(model_name, model_name.lower().replace(' ', '-'))
-        estimated_size = model_size_estimates.get(model_id, 100 * 1024 * 1024)  # Default 100MB
-        estimated_download_rate = 10 * 1024 * 1024  # Assume 10 MB/s
-        self.hf_estimated_total_time = max(10, estimated_size / estimated_download_rate)  # Minimum 10 seconds
-
-        # Start progress monitoring timer (update every 500ms)
+        # Start progress monitoring timer
         self.hf_progress_timer = QTimer()
         self.hf_progress_timer.timeout.connect(self._update_hf_progress_monitor)
-        self.hf_progress_timer.start(500)
+        self.hf_progress_timer.start(1000)  # Update every second
+
+        logger.debug(f"Started progress monitoring for {model_name}")
 
     def _stop_hf_progress_monitor(self):
         """Stop HuggingFace download progress monitoring"""
-        if hasattr(self, 'hf_progress_timer') and self.hf_progress_timer.isActive():
-            self.hf_progress_timer.stop()
+        try:
+            if hasattr(self, 'hf_progress_timer') and self.hf_progress_timer.isActive():
+                self.hf_progress_timer.stop()
+                logger.debug("HuggingFace progress timer stopped")
+
+            # Reset progress bar to determinate mode and show 100%
+            self.download_progress.setRange(0, 100)
+            self.download_progress.setValue(100)
+            logger.debug("HuggingFace download progress monitoring stopped")
+        except Exception as e:
+            logger.error(f"Error stopping HuggingFace progress monitor: {str(e)}")
 
     def _update_hf_progress_monitor(self):
-        """Update HuggingFace download progress using time-based estimation"""
+        """Update HuggingFace download progress by monitoring directory size"""
         try:
+            if not hasattr(self, 'hf_download_dir') or not hasattr(self, 'hf_download_start_time'):
+                return
+
+            current_size = self._get_directory_size(self.hf_download_dir)
+            initial_size = getattr(self, 'hf_download_initial_size', 0)
+            downloaded_bytes = current_size - initial_size
+
+            # Convert to MB for display
+            downloaded_mb = downloaded_bytes / (1024 * 1024)
+
+            # Update status with size information
             elapsed_time = time.time() - self.hf_download_start_time
+            if elapsed_time > 0:
+                speed_mbps = downloaded_mb / elapsed_time
+                self.download_status_label.setText(
+                    f"Downloading {self.hf_download_model_name}... "
+                    f"{downloaded_mb:.1f} MB downloaded ({speed_mbps:.1f} MB/s)"
+                )
+            else:
+                self.download_status_label.setText(
+                    f"Downloading {self.hf_download_model_name}... "
+                    f"{downloaded_mb:.1f} MB downloaded"
+                )
 
-            # Calculate progress based on elapsed time vs estimated total time
-            if elapsed_time > 0 and self.hf_estimated_total_time > 0:
-                progress = min(95, int((elapsed_time / self.hf_estimated_total_time) * 100))  # Cap at 95% until complete
-
-                # Ensure progress doesn't go backwards
-                current_progress = self.download_progress.value()
-                if progress > current_progress:
-                    self.download_progress.setValue(progress)
-                    self.download_status_label.setText(f"Downloading {self.hf_download_model_name} from HuggingFace... {progress}%")
-
-                    logger.debug(f"HuggingFace download progress: {progress}% (estimated)")
+            logger.debug(f"HuggingFace download progress: {downloaded_mb:.1f} MB")
 
         except Exception as e:
-            logger.error(f"Error updating HuggingFace progress monitor: {str(e)}")
+            logger.error(f"Error updating HuggingFace progress: {str(e)}")
 
     def _get_directory_size(self, path):
         """Get total size of directory in bytes"""
@@ -4662,6 +4661,9 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Handle successful download"""
         try:
             logger.info(f"Download success for {model_name}, updating UI in main thread")
+
+            # Stop progress monitoring if running
+            self._stop_hf_progress_monitor()
 
             # Update status
             status_item = QTableWidgetItem("Downloaded")
@@ -4686,6 +4688,9 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Handle download error"""
         try:
             logger.error(f"Download error for {model_name}: {error_msg}")
+
+            # Stop progress monitoring if running
+            self._stop_hf_progress_monitor()
 
             # Update status
             status_item = QTableWidgetItem("Error")

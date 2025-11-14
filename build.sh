@@ -8,7 +8,7 @@ set -e
 # Default build type
 BUILD_TYPE="debug"
 USE_MYSQL="ON"
-
+export CMAKE_LINKER=mold
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
