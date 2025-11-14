@@ -6962,7 +6962,7 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 # Load dataset with normalization parameters
                 result = await self._load_dataset_async(data_file, dataset_name)
-                self._handle_load_dataset_result_direct(result)
+                self._handle_load_dataset_result_direct(result, data_file)
 
                 # Enable training button if dataset loaded successfully
                 if result.success:
@@ -7077,12 +7077,66 @@ capabilities, training data, performance metrics, and usage instructions."""
                 max_range=max_range
             )
 
-    def _handle_load_dataset_result_direct(self, result):
+    def _handle_load_dataset_result_direct(self, result, data_file=None):
         """Handle dataset loading result directly"""
         try:
             self.training_progress.setVisible(False)
             if result.success:
                 data = result.data
+
+                # Compute input_size and output_size from dataset data instead of backend response
+                computed_input_size = 'N/A'
+                computed_output_size = 'N/A'
+                computed_samples = data.get('samples', 'N/A')
+
+                if data_file and os.path.exists(data_file):
+                    try:
+                        file_ext = os.path.splitext(data_file.lower())[1]
+
+                        if file_ext == '.csv':
+                            # Parse CSV to determine sizes
+                            parsed_data = self.parse_csv_file(data_file, self.learning_config.get('has_header', True), self.learning_config.get('contains_text', False))
+                            if 'error' not in parsed_data:
+                                column_count = parsed_data.get('column_count', 0)
+                                if column_count > 0:
+                                    # Assume last column is target for regression/classification
+                                    computed_input_size = column_count - 1
+                                    computed_output_size = 1
+                                    computed_samples = parsed_data.get('row_count', 0)
+                        elif file_ext in ['.json', '.txt']:
+                            # For text-based formats, try to estimate
+                            # This is a simplified approach - in practice, more complex parsing would be needed
+                            try:
+                                with open(data_file, 'r', encoding='utf-8') as f:
+                                    content = f.read(1024)  # Read first 1KB for analysis
+                                    # Simple heuristic: count commas or assume structured data
+                                    if ',' in content:
+                                        lines = content.split('\n')[:5]  # Check first few lines
+                                        if lines:
+                                            first_line = lines[0].strip()
+                                            if first_line:
+                                                column_count = first_line.count(',') + 1
+                                                computed_input_size = max(1, column_count - 1)
+                                                computed_output_size = 1
+                                                # Estimate samples from file size (rough approximation)
+                                                file_size = os.path.getsize(data_file)
+                                                computed_samples = max(1, file_size // 100)  # Rough estimate
+                            except Exception:
+                                pass
+                        # For other formats (images, audio, etc.), sizes would be format-specific
+                        # For now, keep as N/A for unsupported formats
+
+                    except Exception as e:
+                        logger.warning(f"Error computing dataset sizes from {data_file}: {str(e)}")
+
+                # Update the data dict with computed values
+                if computed_input_size != 'N/A':
+                    data['input_size'] = computed_input_size
+                if computed_output_size != 'N/A':
+                    data['output_size'] = computed_output_size
+                if computed_samples != 'N/A':
+                    data['samples'] = computed_samples
+
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
                 self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
                 self.training_log.appendPlainText(f"  - Input size: {data.get('input_size', 'N/A')}")
@@ -7418,7 +7472,7 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                     # Load the uploaded dataset
                     load_result = await self._load_dataset_async(file_path, dataset_name)
-                    self._handle_load_dataset_result_direct(load_result)
+                    self._handle_load_dataset_result_direct(load_result, file_path)
 
                     if load_result.success:
                         self.current_dataset_loaded = True

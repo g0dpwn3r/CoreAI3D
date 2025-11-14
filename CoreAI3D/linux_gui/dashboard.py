@@ -4511,7 +4511,7 @@ capabilities, training data, performance metrics, and usage instructions."""
     def _download_from_huggingface(self, row, model_name):
         """Download model from Hugging Face"""
         try:
-            from huggingface_hub import snapshot_download
+            from huggingface_hub import snapshot_download, HfApi
             import threading
 
             # Map model names to HuggingFace model IDs
@@ -4540,8 +4540,22 @@ capabilities, training data, performance metrics, and usage instructions."""
                     models_dir = os.path.join(self.config.data_dir, "models", model_name.replace(' ', '_'))
                     os.makedirs(models_dir, exist_ok=True)
 
-                    # Start progress monitoring
-                    QTimer.singleShot(0, lambda: self._start_hf_progress_monitoring(row, model_name, models_dir))
+                    # Initialize progress tracking
+                    QTimer.singleShot(0, lambda: self._init_hf_download_progress(row, model_name))
+
+                    # Get model info to estimate total size
+                    api = HfApi()
+                    try:
+                        model_info = api.model_info(model_id)
+                        total_size = sum(sibling.size for sibling in model_info.siblings if sibling.size) if model_info.siblings else 0
+                        logger.info(f"Estimated total size for {model_name}: {total_size} bytes")
+                    except Exception as e:
+                        logger.warning(f"Could not get model size info: {e}")
+                        total_size = 0
+
+                    # Start download with progress simulation
+                    download_start_time = time.time()
+                    QTimer.singleShot(0, lambda: self._start_hf_download_simulation(row, model_name, download_start_time))
 
                     # Download model (snapshot_download doesn't support progress callbacks)
                     snapshot_download(
