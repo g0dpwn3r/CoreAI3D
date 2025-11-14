@@ -31,6 +31,17 @@ const App = () => {
     const [message, setMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
+    // Progress tracking state
+    const [progress, setProgress] = useState({
+        show: false,
+        percentage: 0,
+        operation: '',
+        status: ''
+    });
+
+    // File upload state
+    const [uploadedFiles, setUploadedFiles] = useState({});
+
     // State for connection status and error handling
     const [connectionStatus, setConnectionStatus] = useState('disconnected');
     const [isOffline, setIsOffline] = useState(false);

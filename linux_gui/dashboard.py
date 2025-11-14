@@ -2947,7 +2947,7 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _generate_training_report_async(self, container: str):
         """Async part of training report generation"""
-        async with self.client_lock:
+        async with self.global_async_lock:
             result = await self.client.generate_training_report(container)
             return result
 
@@ -4790,7 +4790,7 @@ if __name__ == "__main__":
                 logger.debug("HTTP session not available during health check, skipping")
                 return
 
-            async with self.client_lock:
+            async with self.global_async_lock:
                 result = await self.client.health_check()
                 if not result.success:
                     self.status_bar.showMessage("System health check failed")
@@ -7452,101 +7452,10 @@ capabilities, training data, performance metrics, and usage instructions."""
 
     async def _upload_file_async(self, file_path: str, dataset_name: str):
         """Async part of file upload for various formats"""
-        # For now, we'll just validate the file and prepare it for loading
-        # The actual upload happens during load_dataset
-        # This method could be extended to upload to a file storage service if needed
-
-        # Basic validation
-        try:
-            # Check file size
-            file_size = os.path.getsize(file_path)
-            if file_size > 100 * 1024 * 1024:  # 100MB limit
-                return APIResponse(success=False, data={"error": "File too large (max 100MB)"})
-
-            # Get file extension for format-specific validation
-            file_ext = os.path.splitext(file_path)[1].lower()
-
-            # Supported formats list
-            supported_formats = {
-                '.csv': 'CSV (Comma-Separated Values)',
-                '.json': 'JSON (JavaScript Object Notation)',
-                '.xml': 'XML (Extensible Markup Language)',
-                '.pdf': 'PDF (Portable Document Format)',
-                '.docx': 'DOCX (Microsoft Word)',
-                '.doc': 'DOC (Microsoft Word)',
-                '.txt': 'TXT (Plain Text)',
-                '.mp4': 'MP4 (Video)',
-                '.avi': 'AVI (Video)',
-                '.mov': 'MOV (Video)',
-                '.mkv': 'MKV (Video)',
-                '.mp3': 'MP3 (Audio)',
-                '.wav': 'WAV (Audio)',
-                '.flac': 'FLAC (Audio)',
-                '.aac': 'AAC (Audio)',
-                '.jpg': 'JPG (Image)',
-                '.jpeg': 'JPEG (Image)',
-                '.png': 'PNG (Image)',
-                '.bmp': 'BMP (Image)',
-                '.gif': 'GIF (Image)'
-            }
-
-            if file_ext not in supported_formats:
-                format_list = ', '.join([f"{ext} ({desc})" for ext, desc in supported_formats.items()])
-                return APIResponse(success=False, data={"error": f"Unsupported file format: {file_ext}. Supported formats: {format_list}"})
-
-            # Format-specific validation
-            if file_ext == '.csv':
-                # Validate CSV format
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    first_line = f.readline().strip()
-                    if not first_line:
-                        return APIResponse(success=False, data={"error": "CSV file appears to be empty"})
-
-                    # Count columns
-                    reader = csv.reader([first_line])
-                    try:
-                        columns = next(reader)
-                        if len(columns) < 2:
-                            return APIResponse(success=False, data={"error": "CSV must have at least 2 columns (input and output)"})
-                    except csv.Error as e:
-                        return APIResponse(success=False, data={"error": f"Invalid CSV format: {str(e)}"})
-
-            elif file_ext in ['.json', '.xml', '.pdf', '.docx', '.doc', '.txt']:
-                # Basic text-based file validation
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read(1024)  # Read first 1KB
-                        if not content.strip():
-                            return APIResponse(success=False, data={"error": f"{file_ext.upper()} file appears to be empty"})
-                except UnicodeDecodeError:
-                    return APIResponse(success=False, data={"error": f"{file_ext.upper()} file contains invalid encoding. Please ensure UTF-8 encoding."})
-
-            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac']:
-                # For media files, check if file is readable and has reasonable size
-                if not os.access(file_path, os.R_OK):
-                    return APIResponse(success=False, data={"error": f"Cannot read {supported_formats[file_ext]} file"})
-                if file_size < 1024:  # Less than 1KB might be corrupted
-                    return APIResponse(success=False, data={"error": f"{supported_formats[file_ext]} file appears to be corrupted (too small)"})
-
-            elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
-                # For image files, check if file is readable and has reasonable size
-                if not os.access(file_path, os.R_OK):
-                    return APIResponse(success=False, data={"error": f"Cannot read {supported_formats[file_ext]} file"})
-                if file_size < 100:  # Less than 100 bytes might be corrupted
-                    return APIResponse(success=False, data={"error": f"{supported_formats[file_ext]} file appears to be corrupted (too small)"})
-
-            # Return success - file is valid for upload
-            return APIResponse(success=True, data={
-                "message": f"File '{os.path.basename(file_path)}' ({supported_formats[file_ext]}) validated successfully",
-                "file_path": file_path,
-                "dataset_name": dataset_name,
-                "file_size": file_size,
-                "file_type": file_ext[1:] if file_ext else "unknown",
-                "format_description": supported_formats[file_ext]
-            })
-
-        except Exception as e:
-            return APIResponse(success=False, data={"error": f"File validation failed: {str(e)}"})
+        # Call the client's upload_file method to actually upload the file
+        metadata = {'dataset_name': dataset_name}
+        result = await self.client.upload_file(file_path, metadata)
+        return result
 
     def _handle_upload_file_result_direct(self, result):
         """Handle file upload result directly"""
