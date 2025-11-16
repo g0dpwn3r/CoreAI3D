@@ -1559,6 +1559,9 @@ class CoreAI3DDashboard(QMainWindow):
         self.learning_rate = 0.01
         self.current_dataset_loaded = False
 
+        # Initialize training button to prevent AttributeError
+        self.training_button = None
+
         # Initialize learning config with default values
         self.learning_config = {
             'neurons_per_layer': self.neurons,
@@ -7094,8 +7097,8 @@ capabilities, training data, performance metrics, and usage instructions."""
                         file_ext = os.path.splitext(data_file.lower())[1]
 
                         if file_ext == '.csv':
-                            # Parse CSV to determine sizes
-                            parsed_data = self.parse_csv_file(data_file, self.learning_config.get('has_header', True), self.learning_config.get('contains_text', False))
+                            # Parse CSV to determine sizes - use auto-detection for headers
+                            parsed_data = self.parse_csv_file(data_file, None, self.learning_config.get('contains_text', False))
                             if 'error' not in parsed_data:
                                 column_count = parsed_data.get('column_count', 0)
                                 if column_count > 0:
@@ -7854,7 +7857,17 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 parsed_data['row_count'] = len(rows)
 
-                # Handle headers
+                # Handle headers - auto-detect if contains_header is None
+                if contains_header is None:
+                    # Auto-detect headers: check if first row looks like headers
+                    if rows and len(rows) > 1:
+                        first_row = rows[0]
+                        second_row = rows[1] if len(rows) > 1 else []
+                        contains_header = self._detect_headers(first_row, second_row)
+                        parsed_data['auto_detected_header'] = contains_header
+                    else:
+                        contains_header = False
+
                 if contains_header and rows:
                     parsed_data['headers'] = rows[0]
                     data_rows = rows[1:]
