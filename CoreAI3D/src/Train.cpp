@@ -1292,12 +1292,15 @@ bool Training::startTraining(double learningRate, int epochs) {
             }
 
             if (!trainingStopRequested.load()) {
-                // Always show final progress
+                // Only show 100% if we actually completed all epochs
                 if (trainingStatus != "completed_early_stopping") {
                     trainingStatus = "completed";
+                    // Show final progress bar at 100%
+                    printProgressBar("Training Progress", totalEpochs, totalEpochs, barWidth);
+                } else {
+                    // Early stopping - show progress at the epoch where it stopped
+                    printProgressBar("Training Progress", currentEpoch, totalEpochs, barWidth);
                 }
-                // Show final progress bar
-                printProgressBar("Training Progress", currentEpoch, totalEpochs, barWidth);
             }
 
             trainingActive = false;
@@ -1615,7 +1618,7 @@ bool Training::saveModel(int& datasetId) {
         return false;
     }
 
-    std::cout << "Saving AI model state to database (ID: " << datasetId << ")...\n";
+    std::cout << "Saving comprehensive AI model state to database (ID: " << datasetId << ")...\n";
 
     auto inputData = core->getInput();
     auto outputData = core->getOutput();
@@ -1648,12 +1651,77 @@ bool Training::saveModel(int& datasetId) {
 
 
     try {
+        // 1. Save AI model state to ai_model_states table
         dbManager->saveAIModelState(datasetId, inputData, outputData,
             hiddenData, hiddenOutputData, hiddenErrorData,
             weightsHiddenInput, weightsOutputHidden);
         std::cout << "AI model state saved successfully for dataset ID: " << datasetId << std::endl;
+
+        // 2. Save learning settings to learning_settings table
+        dbManager->saveLearningSettings(datasetId, learningRate, 1, totalEpochs, 0.0, 0.0, 0.0, "adam", "mse", "relu");
+        std::cout << "Learning settings saved successfully for dataset ID: " << datasetId << std::endl;
+
+        // 3. Save model state in JSON format to model_states table
+        nlohmann::json modelStateJson = getNetworkTopology();
+        modelStateJson["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+        modelStateJson["dataset_id"] = datasetId;
+        modelStateJson["training_status"] = trainingStatus;
+        modelStateJson["current_epoch"] = currentEpoch;
+        modelStateJson["current_loss"] = currentLoss;
+
+        // Save to model_states table (assuming sessionId = datasetId for now)
+        dbManager->saveModelState(datasetId, modelStateJson);
+        std::cout << "Model state (JSON) saved successfully for dataset ID: " << datasetId << std::endl;
+
+        // 4. Save prediction results to prediction_results table (if we have predictions)
+        if (!inputs.empty() && !targets.empty()) {
+            core->forward(inputs);
+            core->denormalizeOutput();
+            auto predictions = core->getResults();
+
+            // Denormalize targets for comparison
+            std::vector<std::vector<float>> denormalizedTargets = targets;
+            float target_range_min_val = this->min;
+            float target_range_max_val = this->max;
+            float target_range_diff = target_range_max_val - target_range_min_val;
+            float original_data_range_diff = original_data_global_max - original_data_global_min;
+
+            for (auto& row : denormalizedTargets) {
+                for (float& val : row) {
+                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                        val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                    }
+                    else {
+                        val = original_data_global_min;
+                    }
+                }
+            }
+
+            // Save prediction results for each sample
+            for (size_t i = 0; i < std::min(predictions.size(), denormalizedTargets.size()); ++i) {
+                if (i < inputs.size()) {
+                    // Denormalize inputs too for consistency
+                    std::vector<float> denormalizedInputs = inputs[i];
+                    for (float& val : denormalizedInputs) {
+                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                            val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                        }
+                        else {
+                            val = original_data_global_min;
+                        }
+                    }
+
+                    dbManager->savePredictionResults(datasetId, static_cast<int>(i),
+                        denormalizedInputs,
+                        denormalizedTargets[i],
+                        predictions[i]);
+                }
+            }
+            std::cout << "Prediction results saved successfully for dataset ID: " << datasetId << std::endl;
+        }
+
     } catch (const std::exception& e) {
-        std::cerr << "Error saving AI model state: " << e.what() << std::endl;
+        std::cerr << "Error saving comprehensive model state: " << e.what() << std::endl;
         return false;
     }
     return true;
@@ -2954,6 +3022,78 @@ bool Training::saveFileDataset(int& datasetId, const std::string& datasetName, c
         if (verbose) {
             std::cout << "All file dataset records added to database for dataset ID: " << datasetId << std::endl;
         }
+
+        // 1. Save learning settings for file-based datasets
+        dbManager->saveLearningSettings(datasetId, learningRate, 1, 100, 0.0, 0.0, 0.0, "adam", "mse", "relu");
+        if (verbose) {
+            std::cout << "Learning settings saved for file dataset ID: " << datasetId << std::endl;
+        }
+
+        // 2. Save model state in JSON format for file-based datasets
+        nlohmann::json modelStateJson = getNetworkTopology();
+        modelStateJson["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+        modelStateJson["dataset_id"] = datasetId;
+        modelStateJson["file_type"] = fileType;
+        modelStateJson["dataset_name"] = datasetName;
+        modelStateJson["training_status"] = "file_loaded";
+        modelStateJson["current_epoch"] = 0;
+        modelStateJson["current_loss"] = 0.0;
+
+        // Save to model_states table
+        dbManager->saveModelState(datasetId, modelStateJson);
+        if (verbose) {
+            std::cout << "Model state (JSON) saved for file dataset ID: " << datasetId << std::endl;
+        }
+
+        // 3. Save prediction results for file-based datasets (if we have data)
+        if (!inputs.empty() && !targets.empty() && core) {
+            core->forward(inputs);
+            core->denormalizeOutput();
+            auto predictions = core->getResults();
+
+            // Denormalize targets for comparison
+            std::vector<std::vector<float>> denormalizedTargets = targets;
+            float target_range_min_val = this->min;
+            float target_range_max_val = this->max;
+            float target_range_diff = target_range_max_val - target_range_min_val;
+            float original_data_range_diff = original_data_global_max - original_data_global_min;
+
+            for (auto& row : denormalizedTargets) {
+                for (float& val : row) {
+                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                        val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                    }
+                    else {
+                        val = original_data_global_min;
+                    }
+                }
+            }
+
+            // Save prediction results for each sample
+            for (size_t i = 0; i < std::min(predictions.size(), denormalizedTargets.size()); ++i) {
+                if (i < inputs.size()) {
+                    // Denormalize inputs too for consistency
+                    std::vector<float> denormalizedInputs = inputs[i];
+                    for (float& val : denormalizedInputs) {
+                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                            val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                        }
+                        else {
+                            val = original_data_global_min;
+                        }
+                    }
+
+                    dbManager->savePredictionResults(datasetId, static_cast<int>(i),
+                        denormalizedInputs,
+                        denormalizedTargets[i],
+                        predictions[i]);
+                }
+            }
+            if (verbose) {
+                std::cout << "Prediction results saved for file dataset ID: " << datasetId << std::endl;
+            }
+        }
+
         return true;
     } catch (const std::exception& err) {
         std::cerr << "Database error during file dataset saving: " << err.what() << std::endl;
@@ -4224,23 +4364,218 @@ catch (const std::exception& e) {
 }
 
 std::vector<float> Training::extractImageFeatures(const std::string& imagePath) {
-try {
-    // Initialize VisionModule if not already done
-    static std::unique_ptr<VisionModule> visionModule;
-    if (!visionModule) {
-        visionModule = std::make_unique<VisionModule>("ImageFeatureExtraction");
-        if (!visionModule->initialize()) {
-            std::cerr << "Error: Failed to initialize VisionModule for image feature extraction." << std::endl;
-            return {};
-        }
+	try {
+    	// Initialize VisionModule if not already done
+    	static std::unique_ptr<VisionModule> visionModule;
+    	if (!visionModule) {
+        	visionModule = std::make_unique<VisionModule>("ImageFeatureExtraction");
+        	if (!visionModule->initialize()) {
+            	std::cerr << "Error: Failed to initialize VisionModule for image feature extraction." << std::endl;
+            	return {};
+        	}
+    	}
+
+    	return visionModule->extractFeatures(imagePath);
+	}
+	catch (const std::exception& e) {
+    	std::cerr << "Error extracting image features: " << e.what() << std::endl;
+    	return {};
+	}
+}
+
+// Additional database saving methods for comprehensive data persistence
+
+#ifdef USE_MYSQL
+bool Training::saveLearningSettingsDuringTraining(int datasetId, double learningRate, int batchSize, int epochs,
+    float dropoutRate, float regularization, float momentum, const std::string& optimizer,
+    const std::string& lossFunction, const std::string& activationFunction) {
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot save learning settings to database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
     }
 
-    return visionModule->extractFeatures(imagePath);
+    try {
+        dbManager->saveLearningSettings(datasetId, learningRate, batchSize, epochs, dropoutRate,
+            regularization, momentum, optimizer, lossFunction, activationFunction);
+        if (verbose) {
+            std::cout << "Learning settings saved during training for dataset ID: " << datasetId << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving learning settings during training: " << e.what() << std::endl;
+        return false;
+    }
 }
-catch (const std::exception& e) {
-    std::cerr << "Error extracting image features: " << e.what() << std::endl;
-    return {};
+#endif
+
+#ifdef USE_MYSQL
+bool Training::savePredictionResultsAfterInference(int datasetId, const std::vector<std::vector<float>>& inputs,
+    const std::vector<std::vector<float>>& actualOutputs, const std::vector<std::vector<float>>& predictedOutputs) {
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot save prediction results to database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
+    }
+
+    try {
+        for (size_t i = 0; i < std::min({inputs.size(), actualOutputs.size(), predictedOutputs.size()}); ++i) {
+            dbManager->savePredictionResults(datasetId, static_cast<int>(i), inputs[i], actualOutputs[i], predictedOutputs[i]);
+        }
+        if (verbose) {
+            std::cout << "Prediction results saved after inference for dataset ID: " << datasetId << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving prediction results after inference: " << e.what() << std::endl;
+        return false;
+    }
 }
+#endif
+
+#ifdef USE_MYSQL
+bool Training::saveChatSession(int& sessionId, const std::string& sessionName, const std::string& userId,
+    const std::string& modelVersion, const std::string& status) {
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot save chat session to database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
+    }
+
+    try {
+        sessionId = dbManager->saveChatSession(sessionName, userId, modelVersion, status);
+        if (verbose) {
+            std::cout << "Chat session saved with ID: " << sessionId << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving chat session: " << e.what() << std::endl;
+        return false;
+    }
 }
+#endif
+
+#ifdef USE_MYSQL
+bool Training::saveChatMessage(int sessionId, const std::string& role, const std::string& content,
+    const std::string& messageType, float confidence, const std::string& metadata) {
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot save chat message to database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
+    }
+
+    try {
+        dbManager->saveChatMessage(sessionId, role, content, messageType, confidence, metadata);
+        if (verbose) {
+            std::cout << "Chat message saved for session ID: " << sessionId << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving chat message: " << e.what() << std::endl;
+        return false;
+    }
+}
+#endif
+
+#ifdef USE_MYSQL
+bool Training::saveModelStateJSON(int datasetId, const nlohmann::json& modelState) {
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot save model state to database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
+    }
+
+    try {
+        dbManager->saveModelState(datasetId, modelState);
+        if (verbose) {
+            std::cout << "Model state (JSON) saved for dataset ID: " << datasetId << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving model state JSON: " << e.what() << std::endl;
+        return false;
+    }
+}
+#endif
+
+#ifdef USE_MYSQL
+bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& datasetName) {
+    if (isOfflineMode || !dbManager) {
+        std::cerr << "Cannot save comprehensive training data to database in offline mode or if database manager is not initialized." << std::endl;
+        return false;
+    }
+
+    try {
+        // 1. Save dataset metadata
+        std::string description = "Comprehensive training dataset: " + datasetName;
+        int actualDatasetId = dbManager->addDataset(datasetName, description, this->numSamples, this->inputSize, this->outputSize);
+        currentDatasetId = actualDatasetId;
+        currentDatasetName = datasetName;
+
+        // 2. Save dataset records
+        long long datasetIdLong = static_cast<long long>(actualDatasetId);
+        dbManager->clearDatasetRecords(datasetIdLong);
+        for (size_t i = 0; i < inputs.size(); ++i) {
+            dbManager->addDatasetRecord(actualDatasetId, i, inputs[i], targets[i]);
+        }
+
+        // 3. Save learning settings
+        dbManager->saveLearningSettings(actualDatasetId, learningRate, 1, totalEpochs, 0.0, 0.0, 0.0, "adam", "mse", "relu");
+
+        // 4. Save model state
+        nlohmann::json modelStateJson = getNetworkTopology();
+        modelStateJson["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+        modelStateJson["dataset_id"] = actualDatasetId;
+        modelStateJson["training_status"] = trainingStatus;
+        modelStateJson["current_epoch"] = currentEpoch;
+        modelStateJson["current_loss"] = currentLoss;
+        dbManager->saveModelState(actualDatasetId, modelStateJson);
+
+        // 5. Save prediction results if available
+        if (!inputs.empty() && !targets.empty() && core) {
+            core->forward(inputs);
+            core->denormalizeOutput();
+            auto predictions = core->getResults();
+
+            std::vector<std::vector<float>> denormalizedTargets = targets;
+            float target_range_min_val = this->min;
+            float target_range_max_val = this->max;
+            float target_range_diff = target_range_max_val - target_range_min_val;
+            float original_data_range_diff = original_data_global_max - original_data_global_min;
+
+            for (auto& row : denormalizedTargets) {
+                for (float& val : row) {
+                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                        val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                    }
+                    else {
+                        val = original_data_global_min;
+                    }
+                }
+            }
+
+            for (size_t i = 0; i < std::min(predictions.size(), denormalizedTargets.size()); ++i) {
+                if (i < inputs.size()) {
+                    std::vector<float> denormalizedInputs = inputs[i];
+                    for (float& val : denormalizedInputs) {
+                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                            val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                        }
+                        else {
+                            val = original_data_global_min;
+                        }
+                    }
+
+                    dbManager->savePredictionResults(actualDatasetId, static_cast<int>(i),
+                        denormalizedInputs, denormalizedTargets[i], predictions[i]);
+                }
+            }
+        }
+
+        if (verbose) {
+            std::cout << "Comprehensive training data saved for dataset: " << datasetName << " (ID: " << actualDatasetId << ")" << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving comprehensive training data: " << e.what() << std::endl;
+        return false;
+    }
+}
+#endif
 
 

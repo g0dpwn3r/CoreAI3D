@@ -1384,17 +1384,58 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             // Handle chat message sending
             std::string message = parameters.value("message", "");
             std::string messageType = parameters.value("messageType", "text");
+            std::string sessionId = parameters.value("sessionId", "");
+            std::string clientId = parameters.value("clientId", "");
 
             if (message.empty()) {
                 return createErrorResponse("Message cannot be empty", 400);
             }
 
+            // Save chat message to database if available
+            if (database && !sessionId.empty()) {
+                try {
+                    std::string role = "user"; // Assume user message for now
+                    float confidence = 1.0f; // Default confidence
+                    std::string metadata = json({
+                        {"clientId", clientId},
+                        {"messageType", messageType},
+                        {"timestamp", getTimestampString()}
+                    }).dump();
+
+                    database->saveChatMessage(sessionId, role, message, messageType, confidence, metadata);
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to save chat message to database: " << dbError.what() << std::endl;
+                    // Continue with processing even if database save fails
+                }
+            }
+
             // For now, return a simple echo response
             // TODO: Integrate with Language class for actual AI chat processing
+            std::string responseMessage = "Echo: " + message;
+
+            // Save AI response to database if available
+            if (database && !sessionId.empty()) {
+                try {
+                    std::string role = "assistant";
+                    float confidence = 0.8f; // AI response confidence
+                    std::string metadata = json({
+                        {"clientId", clientId},
+                        {"messageType", "text"},
+                        {"timestamp", getTimestampString()},
+                        {"response_type", "echo"}
+                    }).dump();
+
+                    database->saveChatMessage(sessionId, role, responseMessage, "text", confidence, metadata);
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to save AI response to database: " << dbError.what() << std::endl;
+                }
+            }
+
             json response = {
                 {"message", message},
                 {"messageType", messageType},
-                {"response", "Echo: " + message},
+                {"response", responseMessage},
+                {"sessionId", sessionId},
                 {"timestamp", getTimestampString()},
                 {"status", "success"}
             };
@@ -1402,17 +1443,45 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
         }
         else if (action == "history" && method == "GET") {
             // Handle chat history retrieval
-            int limit = 50; // Default limit
-            if (parameters.contains("limit")) {
-                limit = parameters["limit"];
+            std::string sessionId = parameters.value("sessionId", "");
+            int limit = parameters.value("limit", 50);
+
+            if (sessionId.empty()) {
+                return createErrorResponse("Session ID is required for chat history", 400);
             }
 
-            // For now, return empty history
-            // TODO: Integrate with database to retrieve actual chat history
+            json history = json::array();
+            int count = 0;
+
+            // Retrieve chat history from database if available
+            if (database) {
+                try {
+                    auto messages = database->getChatMessages(sessionId, limit);
+                    for (const auto& msg : messages) {
+                        json messageJson = {
+                            {"id", msg.id},
+                            {"sessionId", msg.sessionId},
+                            {"role", msg.role},
+                            {"content", msg.content},
+                            {"messageType", msg.messageType},
+                            {"confidence", msg.confidence},
+                            {"timestamp", msg.timestamp},
+                            {"metadata", json::parse(msg.metadata)}
+                        };
+                        history.push_back(messageJson);
+                    }
+                    count = messages.size();
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to retrieve chat history from database: " << dbError.what() << std::endl;
+                    // Return empty history if database fails
+                }
+            }
+
             json response = {
-                {"history", json::array()},
+                {"history", history},
+                {"sessionId", sessionId},
                 {"limit", limit},
-                {"count", 0},
+                {"count", count},
                 {"timestamp", getTimestampString()},
                 {"status", "success"}
             };
@@ -1420,11 +1489,55 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
         }
         else if (action == "clear" && method == "POST") {
             // Handle chat history clearing
-            // TODO: Integrate with database to clear actual chat history
+            std::string sessionId = parameters.value("sessionId", "");
+
+            if (sessionId.empty()) {
+                return createErrorResponse("Session ID is required for clearing chat history", 400);
+            }
+
+            bool cleared = false;
+
+            // Clear chat history from database if available
+            if (database) {
+                try {
+                    cleared = database->clearChatMessages(sessionId);
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to clear chat history from database: " << dbError.what() << std::endl;
+                }
+            }
+
             json response = {
-                {"cleared", true},
+                {"cleared", cleared},
+                {"sessionId", sessionId},
                 {"timestamp", getTimestampString()},
                 {"status", "success"}
+            };
+            return response;
+        }
+        else if (action == "session" && method == "POST") {
+            // Create new chat session
+            std::string sessionName = parameters.value("sessionName", "New Chat Session");
+            std::string userId = parameters.value("userId", "anonymous");
+            std::string modelVersion = parameters.value("modelVersion", "default");
+
+            int sessionId = -1;
+
+            // Save chat session to database if available
+            if (database) {
+                try {
+                    sessionId = database->saveChatSession(sessionName, userId, modelVersion, "active");
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to save chat session to database: " << dbError.what() << std::endl;
+                }
+            }
+
+            json response = {
+                {"sessionId", sessionId},
+                {"sessionName", sessionName},
+                {"userId", userId},
+                {"modelVersion", modelVersion},
+                {"status", sessionId != -1 ? "created" : "failed"},
+                {"timestamp", getTimestampString()}
             };
             return response;
         }

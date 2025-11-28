@@ -285,6 +285,25 @@ void WebSocketSession::processChatMessage(const json& chatData) {
         std::string message = chatData["message"];
         std::string messageType = chatData.value("messageType", "text");
 
+        // Save user message to database if available
+        if (server_ && server_->database_) {
+            try {
+                std::string role = "user";
+                float confidence = 1.0f; // User input confidence
+                std::string metadata = json({
+                    {"clientId", clientId_},
+                    {"messageType", messageType},
+                    {"timestamp", getTimestampString()},
+                    {"source", "websocket"}
+                }).dump();
+
+                server_->database_->saveChatMessage(sessionId_, role, message, messageType, confidence, metadata);
+            } catch (const std::exception& dbError) {
+                std::cerr << "Warning: Failed to save user chat message to database: " << dbError.what() << std::endl;
+                // Continue with processing even if database save fails
+            }
+        }
+
         // Route to AI processing instead of simple echo
         // This will be handled by the orchestrator or language module
         json aiRequest = {
@@ -299,10 +318,31 @@ void WebSocketSession::processChatMessage(const json& chatData) {
         if (server_ && server_->orchestrator_) {
             json aiResponse = server_->orchestrator_->processChatMessage(aiRequest);
 
+            std::string aiMessage = aiResponse.value("response", "AI: " + message);
+
+            // Save AI response to database if available
+            if (server_ && server_->database_) {
+                try {
+                    std::string role = "assistant";
+                    float confidence = aiResponse.value("confidence", 0.8f);
+                    std::string metadata = json({
+                        {"clientId", clientId_},
+                        {"messageType", "text"},
+                        {"timestamp", getTimestampString()},
+                        {"source", "websocket"},
+                        {"ai_processed", true}
+                    }).dump();
+
+                    server_->database_->saveChatMessage(sessionId_, role, aiMessage, "text", confidence, metadata);
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to save AI response to database: " << dbError.what() << std::endl;
+                }
+            }
+
             // Create response with AI-generated content
             json response = {
                 {"type", "chat_response"},
-                {"message", aiResponse.value("response", "AI: " + message)},
+                {"message", aiMessage},
                 {"timestamp", getTimestampString()},
                 {"ai_processed", true}
             };
@@ -310,13 +350,35 @@ void WebSocketSession::processChatMessage(const json& chatData) {
             sendMessage(response);
         } else {
             // Fallback if no orchestrator available
+            std::string fallbackMessage = "AI: " + message;
+
+            // Save fallback response to database if available
+            if (server_ && server_->database_) {
+                try {
+                    std::string role = "assistant";
+                    float confidence = 0.5f; // Lower confidence for fallback
+                    std::string metadata = json({
+                        {"clientId", clientId_},
+                        {"messageType", "text"},
+                        {"timestamp", getTimestampString()},
+                        {"source", "websocket"},
+                        {"ai_processed", false},
+                        {"fallback", true}
+                    }).dump();
+
+                    server_->database_->saveChatMessage(sessionId_, role, fallbackMessage, "text", confidence, metadata);
+                } catch (const std::exception& dbError) {
+                    std::cerr << "Warning: Failed to save fallback response to database: " << dbError.what() << std::endl;
+                }
+            }
+
             json response = {
                 {"type", "chat_response"},
-                {"message", "AI: " + message},
+                {"message", fallbackMessage},
                 {"timestamp", getTimestampString()},
                 {"ai_processed", false}
             };
-            
+
             // DIAGNOSTIC LOG: WebSocket chat processing using fallback (orchestrator not available)
             std::cout << "[DIAGNOSTIC] WebSocketSession::processChatMessage: Using fallback echo (orchestrator not available)" << std::endl;
             sendMessage(response);

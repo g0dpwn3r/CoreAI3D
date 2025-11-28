@@ -268,6 +268,8 @@ def main():
 
     destinations = [
         Path('/mnt/hdd-archive/code/CoreAI3D'),
+        Path('/mnt/ext_hdd/code/CoreAI3D'),
+        Path('/home/carlon/tools/CoreAI3D')
         # Path('/mnt/ext-hdd/code/CoreAI3D')  # Commented out due to permission issues
     ]
 

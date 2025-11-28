@@ -148,22 +148,30 @@ bool Predict::initializeTrainer(const std::string& dbHost,
         bool hasDbParams = !dbHost.empty() && !dbUser.empty() && !dbSchema.empty() && !isOfflineMode;
 
         if (hasDbParams) {
-            // Online mode with database
-            trainer_ = new Training(dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, true, verbose_, webSocketServer_);
-            if (verbose_) {
-                std::cout << "[PREDICT] Trainer initialized in online mode with database." << std::endl;
-            }
-        } else {
-            // Offline mode
-            trainer_ = new Training(true, verbose_, webSocketServer_);
-            if (verbose_) {
-                std::cout << "[PREDICT] Trainer initialized in offline mode." << std::endl;
+            // Try online mode with database first
+            try {
+                trainer_ = new Training(dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, true, verbose_, webSocketServer_);
+                if (verbose_) {
+                    std::cout << "[PREDICT] Trainer initialized in online mode with database." << std::endl;
+                }
+                return true;
+            } catch (const std::exception& dbEx) {
+                std::cerr << "[PREDICT] Database connection failed: " << dbEx.what() << std::endl;
+                std::cerr << "[PREDICT] Falling back to offline mode." << std::endl;
+                // Fall through to offline mode
             }
         }
 
+        // Offline mode (fallback or when no database params provided)
+        trainer_ = new Training(true, verbose_, webSocketServer_);
+        if (verbose_) {
+            std::cout << "[PREDICT] Trainer initialized in offline mode." << std::endl;
+        }
         return true;
+
     } catch (const std::exception& e) {
-        std::cerr << "[PREDICT] Failed to initialize trainer: " << e.what() << std::endl;
+        std::cerr << "[PREDICT] Failed to initialize trainer in offline mode: " << e.what() << std::endl;
+        trainer_ = nullptr; // Ensure trainer_ is null on failure
         return false;
     }
 }

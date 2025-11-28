@@ -90,6 +90,7 @@ class WebSocketServer {
 private:
 public:
     std::unique_ptr<ModuleOrchestrator> orchestrator_; // Use unique_ptr for proper memory management
+    std::unique_ptr<Database> database_; // Database connection for saving chat messages and sessions
     std::string serverName_;
     bool isInitialized_;
     std::atomic<bool> isRunning_;
@@ -224,6 +225,7 @@ public:
     void reloadConfiguration();
     bool isHealthy();
     size_t getActiveConnections();
+    void setDatabase(std::unique_ptr<Database> database) { database_ = std::move(database); }
     size_t getTotalMessages();
 };
 
