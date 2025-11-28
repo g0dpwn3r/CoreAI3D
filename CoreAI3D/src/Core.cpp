@@ -293,9 +293,14 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         std::vector<float> output_errors(this->outputSize, 0.0f);
         for (int j = 0; j < this->outputSize; ++j)
         {
+            if (!safe2DIndex(this->results, sample, j) || !safe2DIndex(targets, sample, j)) {
+                throw std::out_of_range("CoreAI::train: Index out of range during backpropagation");
+            } 
+
             float output = this->results[sample][j];
             float target = targets[sample][j];
             output_errors[j] = (this->zTransform(this->x, this->y, target, this->neurons, this->hidden_error[j])) * this->xTransform(this->x, this->y, target, this->neurons, this->hidden_output[j]) * output * (1.0f - output); // Derivative of sigmoid
+        
         }
 
         // Hidden layer error
@@ -305,6 +310,9 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             float sum = 0.0f;
             for (int k = 0; k < this->outputSize; ++k)
             {
+                if (!safe2DIndex(this->weigth_output_hidden, k, j)) {
+                    throw std::out_of_range("CoreAI::train: Index out of range during hidden error calculation");
+                }
                 sum += this->zTransform(this->x, this->y, this->z, this->neurons, output_errors[k]) * this->yTransform(this->x, this->y, this->z, this->neurons, this->weigth_output_hidden[k][j]);
             }
             float hidden = this->hidden[sample][j];
@@ -316,6 +324,9 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         {
             for (int k = 0; k < this->neurons; ++k)
             {
+                if(!safe2DIndex(this->weigth_output_hidden, j, k)) {
+                    throw std::out_of_range("CoreAI::train: Index out of range during weight update");
+                }
                 this->weigth_output_hidden[j][k] += learningRate * this->xTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * this->yTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * this->xTransform(this->x, this->y, this->z, this->neurons, this->hidden[sample][k]);
             }
         }
@@ -325,6 +336,9 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         {
             for (size_t k = 0; k < inputs[sample].size(); ++k)
             {
+                if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
+                    throw std::out_of_range("CoreAI::train: Index out of range during weight update");
+                }
                 this->weigth_input_hidden[j][k] += learningRate * this->zTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * inputs[sample][k];
             }
         }

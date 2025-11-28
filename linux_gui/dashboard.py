@@ -3391,6 +3391,44 @@ def {self._extract_function_name(description)}('''
 
         return base_template
 
+    def browse_predict_input_file(self):
+        """Browse for prediction input file"""
+        import logging
+        logging.info("DEBUG: browse_predict_input_file method called")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Input File",
+            "", "All Files (*.*)"
+        )
+        if file_path:
+            self.predict_file_path_edit.setText(file_path)
+
+    async def run_prediction(self):
+        """Run prediction on input file"""
+        import logging
+        logging.info("DEBUG: run_prediction method called")
+        file_path = self.predict_file_path_edit.text().strip()
+        
+        if not file_path:
+            QMessageBox.warning(self, "Input Required", "Please select an input file first")
+            return
+        
+    def clear_prediction_results(self):
+        """Clear prediction results"""
+        self.predict_results_text.clear()
+        self.predict_file_path_edit.clear()
+        try:
+            # Add prediction logic here
+            QMessageBox.information(self, "Prediction Started", f"Running prediction on: {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Prediction Error", f"Error running prediction: {str(e)}")
+        logging.info("DEBUG: browse_predict_input_file method called")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Input File",
+            "", "All Files (*.*)"
+        )
+        if file_path:
+            self.predict_file_path_edit.setText(file_path)
+
     def _get_python_class_template(self, complexity: str, description: str) -> str:
         """Python class template"""
         class_name = self._extract_class_name(description)
@@ -8047,6 +8085,10 @@ def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Upload result handling error: {str(e)}")
             QMessageBox.warning(self, "Upload Error", str(e))
 
+    def clear_training_log(self):
+        """Clear training log"""
+        self.training_log.clear()
+
     def browse_predict_input_file(self):
         """Browse for prediction input file"""
         import logging
@@ -8057,10 +8099,6 @@ def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
         )
         if file_path:
             self.predict_file_path_edit.setText(file_path)
-
-    def clear_training_log(self):
-        """Clear training log"""
-        self.training_log.clear()
 
     @qasync.asyncSlot()
     async def run_prediction(self):
