@@ -1765,7 +1765,11 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
 
                 // Route to appropriate loading method based on file extension
                 if (extension == "csv") {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Calling loadCSV with filename=" << filename
+                              << ", outputSize=" << outputSize << ", hasHeader=" << hasHeader
+                              << ", containsText=" << containsText << std::endl;
                     loaded = trainingModule->loadCSV(filename, -1, outputSize, hasHeader, containsText, ',', datasetName);
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: loadCSV returned: " << loaded << std::endl;
                 }
                 else {
                     // Use the general loadFile method for all other formats
@@ -1791,6 +1795,23 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                     std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module reports 0 samples loaded" << std::endl;
                 } else {
                     std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module reports " << trainingModule->numSamples << " samples loaded" << std::endl;
+                }
+                
+                // Additional diagnostic: Check file existence and permissions
+                if (!filename.empty()) {
+                    std::filesystem::path filePath(filename);
+                    if (!std::filesystem::exists(filePath)) {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: File does not exist: " << filename << std::endl;
+                    } else {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: File exists, checking permissions..." << std::endl;
+                        std::ifstream testFile(filename);
+                        if (!testFile.is_open()) {
+                            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Cannot open file for reading: " << filename << std::endl;
+                        } else {
+                            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: File can be opened for reading" << std::endl;
+                            testFile.close();
+                        }
+                    }
                 }
                 
                 return createErrorResponse(errorMsg, 500);

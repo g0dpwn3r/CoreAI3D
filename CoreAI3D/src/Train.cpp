@@ -117,18 +117,26 @@ void Training::printProgressBar(const std::string& prefix, long long current, lo
 // long long Training::countLines(const std::string& filename, bool hasHeader) is already defined above
 
 bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, int outputSizeParam, bool hasHeader, bool containsText, const char& delimitor, const std::string& datasetName) {
-    if (verbose) {
-        std::cout << "[DEBUG] Starting CSV load: filename='" << filename << "', numSamplesToLoad=" << numSamplesToLoad
-                  << ", outputSizeParam=" << outputSizeParam << ", hasHeader=" << hasHeader
-                  << ", containsText=" << containsText << ", delimiter='" << delimitor << "'" << std::endl;
+    // DIAGNOSTIC LOG: Enhanced logging for debugging
+    std::cout << "[DIAGNOSTIC] Training::loadCSV START - filename='" << filename
+              << "', outputSizeParam=" << outputSizeParam << ", hasHeader=" << hasHeader
+              << ", containsText=" << containsText << ", delimiter='" << delimitor << "'" << std::endl;
+    
+    // Check if file exists
+    if (!std::filesystem::exists(filename)) {
+        std::cerr << "[DIAGNOSTIC] ERROR: File does not exist: " << filename << std::endl;
+        return false;
     }
+    std::cout << "[DIAGNOSTIC] File exists: " << filename << std::endl;
 
 
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "[DEBUG] Failed to open input CSV: " << filename << std::endl;
+        std::cerr << "[DIAGNOSTIC] ERROR: Failed to open input CSV: " << filename << std::endl;
+        std::cerr << "[DIAGNOSTIC] Current working directory: " << std::filesystem::current_path() << std::endl;
         return false;
     }
+    std::cout << "[DIAGNOSTIC] File opened successfully: " << filename << std::endl;
 
     std::string line;
     long long lineCounter = 0;
@@ -205,38 +213,27 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             std::vector<float> current_processed_values; // This will hold the converted floats/embeddings
 
             // 1. Read all cells as raw strings first using proper CSV parsing
-            if (verbose) {
-                std::cout << "[DEBUG] Parsing cells with delimiter '" << delimitor << "'" << std::endl;
-            }
+            std::cout << "[DIAGNOSTIC] Parsing line " << lineCounter << " with delimiter '" << delimitor << "'" << std::endl;
+            std::cout << "[DIAGNOSTIC] Original line: '" << line << "'" << std::endl;
+            
             current_raw_cells = parseCSVLine(line, delimitor);
-            if (verbose) {
-                for (size_t cell_index = 0; cell_index < current_raw_cells.size(); ++cell_index) {
-                    std::cout << "[DEBUG]   Raw cell " << cell_index << " before trim: '" << current_raw_cells[cell_index] << "'" << std::endl;
-                    // Trim whitespace from cell
-                    current_raw_cells[cell_index].erase(0, current_raw_cells[cell_index].find_first_not_of(" \t\r\n"));
-                    current_raw_cells[cell_index].erase(current_raw_cells[cell_index].find_last_not_of(" \t\r\n") + 1);
-                    std::cout << "[DEBUG]   Parsed cell " << cell_index << ": '" << current_raw_cells[cell_index] << "'" << std::endl;
-                }
-                std::cout << "[DEBUG] Total cells parsed: " << current_raw_cells.size() << std::endl;
-
-                std::cout << "[DEBUG] Parsed " << current_raw_cells.size() << " raw cells: ";
-                for (size_t i = 0; i < current_raw_cells.size(); ++i) {
-                    std::cout << "'" << current_raw_cells[i] << "'";
-                    if (i < current_raw_cells.size() - 1) std::cout << ", ";
-                }
-                std::cout << std::endl;
-            } else {
-                // Still trim even if not verbose
-                for (auto& cell : current_raw_cells) {
-                    cell.erase(0, cell.find_first_not_of(" \t\r\n"));
-                    cell.erase(cell.find_last_not_of(" \t\r\n") + 1);
-                }
+            
+            std::cout << "[DIAGNOSTIC] Parsed " << current_raw_cells.size() << " raw cells: ";
+            for (size_t i = 0; i < current_raw_cells.size(); ++i) {
+                std::cout << "'" << current_raw_cells[i] << "'";
+                if (i < current_raw_cells.size() - 1) std::cout << ", ";
+            }
+            std::cout << std::endl;
+            
+            // Trim whitespace from cells
+            for (auto& cell : current_raw_cells) {
+                cell.erase(0, cell.find_first_not_of(" \t\r\n"));
+                cell.erase(cell.find_last_not_of(" \t\r\n") + 1);
+                std::cout << "[DIAGNOSTIC] Trimmed cell: '" << cell << "'" << std::endl;
             }
 
             if (current_raw_cells.empty()) {
-                if (verbose) {
-                    std::cout << "[DEBUG] Skipping empty row at line " << lineCounter << " (no cells after parsing)" << std::endl;
-                }
+                std::cout << "[DIAGNOSTIC] WARNING: Skipping empty row at line " << lineCounter << " (no cells after parsing)" << std::endl;
                 continue; // Skip empty rows
             }
 
@@ -441,13 +438,11 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
             // Determine inputSize and outputSize from the first data row
             if (firstDataRow) {
-                if (verbose) {
-                    std::cout << "[DEBUG] First data row - determining sizes. Processed values: " << current_processed_values.size()
-                            << ", outputSizeParam: " << outputSizeParam << std::endl;
-                }
+                std::cout << "[DIAGNOSTIC] First data row - determining sizes. Processed values: " << current_processed_values.size()
+                        << ", outputSizeParam: " << outputSizeParam << std::endl;
 
                 if (outputSizeParam > 0 && current_processed_values.size() < (size_t)outputSizeParam) {
-                    std::cerr << "[DEBUG] ERROR: First data row has too few columns (" << current_processed_values.size() << ") for specified outputSize ("
+                    std::cerr << "[DIAGNOSTIC] ERROR: First data row has too few columns (" << current_processed_values.size() << ") for specified outputSize ("
                         << outputSizeParam << ") at file line " << lineCounter << ". Cannot proceed." << std::endl;
                     return false;
                 }
@@ -457,21 +452,15 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
                     this->outputSize = 1;
                     this->inputSize = current_processed_values.size() - 1;
-                    if (verbose) {
-                        std::cout << "[DEBUG] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
-                    }
+                    std::cout << "[DIAGNOSTIC] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
                 }
                 else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
                     this->outputSize = 0; // No target if only one column and not specified
                     this->inputSize = 1;
-                    if (verbose) {
-                        std::cout << "[DEBUG] Single column: outputSize=0, inputSize=1" << std::endl;
-                    }
+                    std::cout << "[DIAGNOSTIC] Single column: outputSize=0, inputSize=1" << std::endl;
                 }
                 firstDataRow = false;
-                if (verbose) {
-                    std::cout << "[DEBUG] Determined Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
-                }
+                std::cout << "[DIAGNOSTIC] Determined Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
             }
             else {
                 // Validate subsequent rows against determined sizes
@@ -522,13 +511,12 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
    
 
     if (inputs.empty()) {
-        std::cerr << "[DEBUG] Error: No valid data rows found in CSV or all rows were skipped due to errors." << std::endl;
+        std::cerr << "[DIAGNOSTIC] ERROR: No valid data rows found in CSV or all rows were skipped due to errors." << std::endl;
+        std::cerr << "[DIAGNOSTIC] Total lines processed: " << lineCounter << std::endl;
         return false;
     }
 
-    if (verbose) {
-        std::cout << "[DEBUG] Final validation - Total rows processed: " << inputs.size() << std::endl;
-    }
+    std::cout << "[DIAGNOSTIC] Final validation - Total rows processed: " << inputs.size() << std::endl;
 
     // Strict Validation
     for (size_t i = 0; i < inputs.size(); ++i) {
@@ -547,10 +535,8 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
     }
 
     this->numSamples = inputs.size();
-    if (verbose) {
-        std::cout << "[DEBUG] Successfully loaded CSV. Samples: " << this->numSamples
-                  << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
-    }
+    std::cout << "[DIAGNOSTIC] SUCCESS: Successfully loaded CSV. Samples: " << this->numSamples
+              << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
 
     // Database Integration - only if USE_MYSQL is defined
 #ifdef USE_MYSQL
