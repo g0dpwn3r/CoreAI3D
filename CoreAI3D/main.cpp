@@ -126,17 +126,28 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--help" || arg == "-h") {
             std::cout << R"(
-     ,     ,
-    (\____/)
-     (_oo_)
-       / \  Archangel Seraphim
-      /| |\
-     / \_/ \
-    /  ||  \
-   /   ||   \
-  /    ||    \
- /     ||     \
-/      ||      \
+        ,     ,
+       (\____/)
+        (_oo_)
+          / \     ╔══════════════════════════════╗
+         /| |\    ║     ARCHANGEL SERAPHIM      ║
+        / \_/ \   ║   Celestial AI Guardian     ║
+       /  ||  \   ╚══════════════════════════════╝
+      /   ||   \
+     /    ||    \
+    /     ||     \
+   /      ||      \
+  /       ||       \
+ /    /\   ||   /\   \
+/   //\\  ||  //\\   \
+   ///\\\ || ///\\\
+  ////\\\\||////\\\\
+ ||||||||| |||||||||
+ ||||||||| |||||||||
+ ||||||||| |||||||||
+ ||||||||| |||||||||
+ ||||||||| |||||||||
+ ||||||||| |||||||||
 )" << std::endl;
             std::cout << "CoreAI3D - Advanced AI Training and Prediction Tool\n";
             std::cout << "====================================================\n\n";
@@ -238,13 +249,38 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --create-table\n";
             std::cout << "    Dependencies: Requires database connection and appropriate permissions\n";
             std::cout << "    Example: ./CoreAI3D --create-table --db-host localhost\n\n";
-            std::cout << "MODEL OPTIONS:\n";
+            std::cout << "NEURAL NETWORK OPTIONS:\n";
+            std::cout << "  --layers, -l <number>\n";
+            std::cout << "    Set the number of hidden layers in the neural network.\n";
+            std::cout << "    Expected value: Integer (default: 3)\n";
+            std::cout << "    Usage: --layers <number> or -l <number>\n";
+            std::cout << "    Dependencies: Used in prediction/training mode\n";
+            std::cout << "    Example: --layers 5 or -l 5\n\n";
+            std::cout << "  --neurons, -n <number>\n";
+            std::cout << "    Set the number of neurons per hidden layer.\n";
+            std::cout << "    Expected value: Integer (default: 10)\n";
+            std::cout << "    Usage: --neurons <number> or -n <number>\n";
+            std::cout << "    Dependencies: Used in prediction/training mode\n";
+            std::cout << "    Example: --neurons 20 or -n 20\n\n";
+            std::cout << "  --epochs, -e <number>\n";
+            std::cout << "    Set the number of training epochs.\n";
+            std::cout << "    Expected value: Integer (default: 10)\n";
+            std::cout << "    Usage: --epochs <number> or -e <number>\n";
+            std::cout << "    Dependencies: Used in prediction/training mode\n";
+            std::cout << "    Example: --epochs 100 or -e 100\n\n";
+            std::cout << "  --samples, -s <number>\n";
+            std::cout << "    Set the number of training samples to use.\n";
+            std::cout << "    Expected value: Integer (default: 0 - use all available)\n";
+            std::cout << "    Usage: --samples <number> or -s <number>\n";
+            std::cout << "    Dependencies: Used in prediction/training mode\n";
+            std::cout << "    Example: --samples 1000 or -s 1000\n\n";
             std::cout << "  --learning-rate, -r <rate>\n";
             std::cout << "    Set the learning rate for neural network training.\n";
             std::cout << "    Expected value: Floating point number (default: 0.01)\n";
             std::cout << "    Usage: --learning-rate <rate> or -r <rate>\n";
             std::cout << "    Dependencies: Used in prediction/training mode\n";
             std::cout << "    Example: --learning-rate 0.001 or -r 0.001\n\n";
+            std::cout << "MODEL OPTIONS:\n";
             std::cout << "  --load-model <id_or_name>\n";
             std::cout << "    Load a pre-trained model from the database by ID or name.\n";
             std::cout << "    Expected value: Integer ID or string name of saved model\n";
