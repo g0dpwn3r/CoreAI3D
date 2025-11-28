@@ -3415,6 +3415,43 @@ def {self._extract_function_name(description)}('''
     def clear_prediction_results(self):
         """Clear prediction results"""
         self.predict_results_text.clear()
+    async def load_model(self):
+        """Load model for prediction"""
+        import logging
+        logging.info("DEBUG: load_model method called")
+        model_path = self.model_path_edit.text().strip()
+        
+        if not model_path:
+            QMessageBox.warning(self, "Model Required", "Please select a model file first")
+            return
+        
+    def clear_load_results(self):
+        """Clear load model results"""
+        self.load_results_text.clear()
+        self.model_path_edit.clear()
+    def download_fasttext_embeddings(self):
+        """Download FastText embeddings"""
+        import logging
+        logging.info("DEBUG: download_fasttext_embeddings method called")
+    async def refresh_neural_data(self):
+        """Refresh neural data display"""
+        import logging
+        logging.info("DEBUG: refresh_neural_data method called")
+        try:
+            # Add neural data refresh logic here
+            QMessageBox.information(self, "Refresh Started", "Refreshing neural data...")
+        except Exception as e:
+            QMessageBox.critical(self, "Refresh Error", f"Error refreshing neural data: {str(e)}")
+        try:
+            # Add FastText downloading logic here
+            QMessageBox.information(self, "Download Started", "Downloading FastText embeddings...")
+        except Exception as e:
+            QMessageBox.critical(self, "Download Error", f"Error downloading FastText: {str(e)}")
+        try:
+            # Add model loading logic here
+            QMessageBox.information(self, "Model Loading", f"Loading model: {model_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Error loading model: {str(e)}")
         self.predict_file_path_edit.clear()
         try:
             # Add prediction logic here

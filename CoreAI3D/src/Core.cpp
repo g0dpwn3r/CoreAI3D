@@ -3,13 +3,17 @@
 CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     float min_, float max_, bool verbose_)
     : inputSize(inputSize_), layers(layers_), neurons(neurons_),
-    outputSize(outputSize_), minVal(min_), maxVal(max_), verbose(verbose_)
+    outputSize(outputSize_), minVal(min_), maxVal(max_), verbose(verbose_),
+    x(1.0f), y(1.0f), z(1.0f)  // Initialize transform variables to meaningful values
 {
     if (verbose) {
         std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI constructor with params: "
                   << "inputSize=" << inputSize_ << ", layers=" << layers_
                   << ", neurons=" << neurons_ << ", outputSize=" << outputSize_
                   << ", min=" << min_ << ", max=" << max_ << std::endl;
+        
+        std::cout << "[DEBUG CONSTRUCTOR] Transform variables initialized - x: " << x
+                  << ", y: " << y << ", z: " << z << ", epsilon: " << epsilon << std::endl;
     }
 
     // Parameter validation
@@ -202,7 +206,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         std::vector<float> hiddenLayer(this->neurons, 0.0f);
         std::vector<float> outputLayer(this->outputSize, 0.0f);
 
-        // Input to hidden layer
+        // Input to hidden layer - use transform functions for x, y, z axes
         for (int j = 0; j < this->neurons; ++j)
         {
             float sum = 0.0f;
@@ -210,7 +214,19 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_input_hidden, j, k))
                 {
-                    sum += this->zTransform2(this->input[i][k], this->epsilon, this->neurons, this->weigth_input_hidden[j][k]) * this->xTransform2(this->input[i][k], this->epsilon, this->neurons, this->weigth_input_hidden[j][k]);
+                    // Apply transform functions to input values for x, y, z axes
+                    float input_val = this->input[i][k];
+                    float weight_val = this->weigth_input_hidden[j][k];
+                    
+                    // Use transform functions as specified: xTransform2 for x-axis, yTransform2 for y-axis, zTransform2 for z-axis
+                    // For 3D data, we assume input has x, y, z components
+                    if (k % 3 == 0) { // x-axis component
+                        sum += this->xTransform2(input_val, this->epsilon, this->neurons, weight_val);
+                    } else if (k % 3 == 1) { // y-axis component
+                        sum += this->yTransform2(input_val, this->epsilon, this->neurons, weight_val);
+                    } else { // z-axis component
+                        sum += this->zTransform2(input_val, this->epsilon, this->neurons, weight_val);
+                    }
                 }
             }
             hiddenLayer[j] = this->sigmoid(sum);
@@ -225,7 +241,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             std::cout << "..." << std::endl;
         }
 
-        // Hidden to output layer
+        // Hidden to output layer - use transform functions for x, y, z axes
         for (int j = 0; j < this->outputSize; ++j)
         {
             float sum = 0.0f;
@@ -233,7 +249,18 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_output_hidden, j, k))
                 {
-                    sum += this->zTransform2(hiddenLayer[k], this->epsilon, this->neurons, this->weigth_output_hidden[j][k]) * this->yTransform2(hiddenLayer[k], this->epsilon, this->neurons, this->weigth_output_hidden[j][k]);
+                    // Apply transform functions to hidden activations for x, y, z axes
+                    float hidden_val = hiddenLayer[k];
+                    float weight_val = this->weigth_output_hidden[j][k];
+                    
+                    // Use transform functions as specified for different axes
+                    if (k % 3 == 0) { // x-axis component
+                        sum += this->xTransform2(hidden_val, this->epsilon, this->neurons, weight_val);
+                    } else if (k % 3 == 1) { // y-axis component
+                        sum += this->yTransform2(hidden_val, this->epsilon, this->neurons, weight_val);
+                    } else { // z-axis component
+                        sum += this->zTransform2(hidden_val, this->epsilon, this->neurons, weight_val);
+                    }
                 }
             }
             outputLayer[j] = this->sigmoid(sum);
@@ -280,6 +307,16 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             throw std::invalid_argument("CoreAI::train: target sample size must match outputSize");
         }
     }
+    if (weigth_input_hidden.size() != this->neurons) {
+        throw std::runtime_error("Invalid weight_input_hidden row count!");
+    }
+
+    for (int j = 0; j < this->neurons; j++) {
+        if (weigth_input_hidden[j].size() != inputSize) {
+            throw std::runtime_error("Invalid weight_input_hidden column count!");
+        }
+    }
+    
 
     // Ensure forward pass has been run
     if (this->results.empty()) {
@@ -289,17 +326,40 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
     // Backpropagation
     for (size_t sample = 0; sample < inputs.size(); ++sample)
     {
+        if (inputs[sample].size() != inputSize) {
+            std::cerr << "Invalid row at sample " << sample
+                    << ": expected " << inputSize
+                    << " columns but got " << inputs[sample].size()
+                    << std::endl;
+            continue; // Skip invalid row
+        }
+        
+        // DEBUG: Log transform function inputs
+        if (verbose && sample == 0) {
+            std::cout << "[DEBUG TRAIN] Transform function inputs - x: " << this->x
+                      << ", y: " << this->y << ", z: " << this->z
+                      << ", epsilon: " << this->epsilon << std::endl;
+        }
+        
         // Output layer error
         std::vector<float> output_errors(this->outputSize, 0.0f);
         for (int j = 0; j < this->outputSize; ++j)
         {
             if (!safe2DIndex(this->results, sample, j) || !safe2DIndex(targets, sample, j)) {
                 throw std::out_of_range("CoreAI::train: Index out of range during backpropagation");
-            } 
+            }
 
             float output = this->results[sample][j];
             float target = targets[sample][j];
-            output_errors[j] = (this->zTransform(this->x, this->y, target, this->neurons, this->hidden_error[j])) * this->xTransform(this->x, this->y, target, this->neurons, this->hidden_output[j]) * output * (1.0f - output); // Derivative of sigmoid
+            
+            // DEBUG: Log error calculation components
+            if (verbose && sample == 0 && j == 0) {
+                std::cout << "[DEBUG TRAIN] Sample 0, Output 0 - output: " << output
+                          << ", target: " << target << std::endl;
+            }
+            
+            // Standard backpropagation: error = (target - output) * derivative
+            output_errors[j] = (target - output) * output * (1.0f - output); // Derivative of sigmoid
         
         }
 
@@ -313,10 +373,18 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if (!safe2DIndex(this->weigth_output_hidden, k, j)) {
                     throw std::out_of_range("CoreAI::train: Index out of range during hidden error calculation");
                 }
-                sum += this->zTransform(this->x, this->y, this->z, this->neurons, output_errors[k]) * this->yTransform(this->x, this->y, this->z, this->neurons, this->weigth_output_hidden[k][j]);
+                // Standard backpropagation: sum += output_errors[k] * weight
+                sum += output_errors[k] * this->weigth_output_hidden[k][j];
             }
             float hidden = this->hidden[sample][j];
             hidden_errors[j] = sum * hidden * (1.0f - hidden); // Derivative of sigmoid
+            
+            // DEBUG: Log hidden error calculation
+            if (verbose && sample == 0 && j == 0) {
+                std::cout << "[DEBUG TRAIN] Sample 0, Hidden 0 - sum: " << sum
+                          << ", hidden activation: " << hidden
+                          << ", hidden error: " << hidden_errors[j] << std::endl;
+            }
         }
 
         // Update weights output to hidden
@@ -327,7 +395,8 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if(!safe2DIndex(this->weigth_output_hidden, j, k)) {
                     throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                 }
-                this->weigth_output_hidden[j][k] += learningRate * this->xTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * this->yTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * this->xTransform(this->x, this->y, this->z, this->neurons, this->hidden[sample][k]);
+                // Standard backpropagation: delta_w = learningRate * output_error * hidden_activation
+                this->weigth_output_hidden[j][k] += learningRate * output_errors[j] * this->hidden[sample][k];
             }
         }
 
@@ -339,7 +408,8 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
                     throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                 }
-                this->weigth_input_hidden[j][k] += learningRate * this->zTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * inputs[sample][k];
+                // Standard backpropagation: delta_w = learningRate * hidden_error * input
+                this->weigth_input_hidden[j][k] += learningRate * hidden_errors[j] * inputs[sample][k];
             }
         }
     }
@@ -424,42 +494,36 @@ void CoreAI::denormalizeOutput()
 
 float CoreAI::xTransform(float x, float y, float z, float n, float m)
 {
-    if (n <= 1) {
-        if (y == 0.0f || m == 0.0f) {
-            return this->epsilon;
-        }
-
-        double denom = static_cast<double>(y) * std::pow(static_cast<double>(m), 3.0);
-        double num = std::pow(static_cast<double>(x), 3.0) * static_cast<double>(n) + static_cast<double>(z);
-        
-        float result = this->epsilon * (static_cast<float>(num / denom));
-
-        return std::isnan(result) ? this->epsilon : result;
+    // Remove restrictive conditions and simplify for meaningful transformations
+    if (y == 0.0f || m == 0.0f) {
+        return std::abs(x) + this->epsilon; // Return meaningful value instead of just epsilon
     }
-    return this->epsilon;
+
+    double denom = static_cast<double>(y) * std::pow(static_cast<double>(m), 2.0) + this->epsilon;
+    double num = std::pow(static_cast<double>(x), 2.0) * static_cast<double>(n) + static_cast<double>(z);
+    
+    float result = static_cast<float>(num / denom);
+
+    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
 }
 
 float CoreAI::yTransform(float x, float y, float z, float n, float m)
 {
-    if (m <= 1) {
-        float denom = std::pow(x, 3.0f) * n;    
-        if (std::abs(denom) < this->epsilon) {
-            denom = this->epsilon; 
-        }
-        float result = this->epsilon * ((std::pow(y, 5.0f) * 2.0f + std::pow(x, n)) / denom);
-        return std::isnan(result) ? this->epsilon : result;
-    } else {
-        return this->epsilon;
+    float denom = std::pow(x, 2.0f) * n + this->epsilon;
+    if (std::abs(denom) < this->epsilon) {
+        denom = this->epsilon;
     }
+    float result = (std::pow(y, 3.0f) + std::pow(x, n) + std::pow(z, 2.0f)) / denom;
+    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
 }
 
 float CoreAI::zTransform(float x, float y, float z, float n, float m)
 {
-   if (std::abs(y) < this->epsilon) { 
-        y = this->epsilon; 
+   if (std::abs(y) < this->epsilon) {
+        y = this->epsilon;
     }
-    float result = this->epsilon * (std::pow(z, 3.0f) * std::pow(std::abs(y), n));
-    return std::isnan(result) ? this->epsilon : result;
+    float result = std::pow(z, 2.0f) * std::pow(std::abs(y), n) + m;
+    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
 }
 
 float CoreAI::xTransform2(float x, float e, float n, float m)
