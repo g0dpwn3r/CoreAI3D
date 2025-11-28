@@ -1708,11 +1708,29 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             // FILE PATH VALIDATION: Check if requested files exist, fallback to available test data
             if (!filename.empty()) {
                 std::filesystem::path filePath(filename);
-                if (!std::filesystem::exists(filePath)) {
+                
+                // If path is relative, try to resolve it relative to the project root
+                if (filePath.is_relative()) {
+                    std::filesystem::path projectRoot = std::filesystem::current_path();
+                    std::filesystem::path absolutePath = projectRoot / filePath;
+                    
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Relative path detected: " << filename
+                              << ", trying absolute path: " << absolutePath << std::endl;
+                    
+                    if (std::filesystem::exists(absolutePath)) {
+                        filename = absolutePath.string();
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Resolved relative path to: " << filename << std::endl;
+                    } else {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Absolute path also not found: " << absolutePath << std::endl;
+                    }
+                }
+                
+                if (!std::filesystem::exists(filename)) {
                     std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: File not found: " << filename << std::endl;
                     
-                    // Fallback to available test data
-                    std::string testDataPath = "training_data/sample_dataset/test_data.csv";
+                    // Fallback to available test data with absolute path
+                    std::filesystem::path projectRoot = std::filesystem::current_path();
+                    std::string testDataPath = (projectRoot / "training_data/sample_dataset/test_data.csv").string();
                     if (std::filesystem::exists(testDataPath)) {
                         std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Using fallback test data: " << testDataPath << std::endl;
                         filename = testDataPath;
