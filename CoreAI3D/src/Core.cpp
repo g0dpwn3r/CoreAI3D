@@ -34,25 +34,63 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
         std::cout << "[DEBUG CONSTRUCTOR] Parameter validation passed" << std::endl;
     }
 
-    // Initialize weights and biases with better distribution for learning
-    std::mt19937 gen(42);
+    // Initialize random number generator with time-based seed for better randomness
+    std::random_device rd;
+    std::mt19937 gen(rd());  // Use random seed instead of fixed seed for true randomness
+    
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Initializing weights with random values" << std::endl;
+    }
+
+    // Initialize vectors (these should be zero, not random)
+    initializeVector(this->hidden_error, neurons);
+    std::fill(this->hidden_error.begin(), this->hidden_error.end(), 0.0f);
+
+    initializeVector(this->hidden_output, neurons);
+    std::fill(this->hidden_output.begin(), this->hidden_output.end(), 0.0f);
+
+    // CRITICAL: Initialize weight matrices with random values
     // Use Xavier/Glorot initialization for better gradient flow
     float scale = std::sqrt(2.0f / (inputSize + neurons));
     std::uniform_real_distribution<float> weight_dist(-scale, scale);
 
-    // Initialize vectors with small random values
-    initializeVector(this->hidden_error, neurons);
-    fillVectorWithTransform(this->hidden_error, [&]() { return weight_dist(gen); });
-
-    initializeVector(this->hidden_output, neurons);
-    fillVectorWithTransform(this->hidden_output, [&]() { return weight_dist(gen); });
-
-    // Initialize weight matrices with uniform random distribution between -0.1 and 0.1
+    // Initialize hidden-to-output weights with explicit random values
     initializeMatrix(this->weigth_output_hidden, outputSize, neurons);
-    fillMatrixWithTransform(this->weigth_output_hidden, [&]() { return weight_dist(gen); });
+    for (int i = 0; i < outputSize; ++i) {
+        for (int j = 0; j < neurons; ++j) {
+            this->weigth_output_hidden[i][j] = weight_dist(gen);
+        }
+    }
 
+    // Initialize input-to-hidden weights with explicit random values
     initializeMatrix(this->weigth_input_hidden, neurons, inputSize);
-    fillMatrixWithTransform(this->weigth_input_hidden, [&]() { return weight_dist(gen); });
+    for (int i = 0; i < neurons; ++i) {
+        for (int j = 0; j < inputSize; ++j) {
+            this->weigth_input_hidden[i][j] = weight_dist(gen);
+        }
+    }
+
+    // DEBUG: Verify weight initialization
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Weight initialization complete:" << std::endl;
+        std::cout << "[DEBUG CONSTRUCTOR] Input-Hidden weights sample (first 5x5):" << std::endl;
+        for (int i = 0; i < std::min(5, neurons); ++i) {
+            std::cout << "  Row " << i << ": ";
+            for (int j = 0; j < std::min(5, inputSize); ++j) {
+                std::cout << this->weigth_input_hidden[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "[DEBUG CONSTRUCTOR] Hidden-Output weights sample (first 5x5):" << std::endl;
+        for (int i = 0; i < std::min(5, outputSize); ++i) {
+            std::cout << "  Row " << i << ": ";
+            for (int j = 0; j < std::min(5, neurons); ++j) {
+                std::cout << this->weigth_output_hidden[i][j] << " ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "[DEBUG CONSTRUCTOR] Weight range: [" << -scale << ", " << scale << "]" << std::endl;
+    }
 
     // Initialize trainer pointer to nullptr
     this->trainer = nullptr;
@@ -825,15 +863,35 @@ void CoreAI::setOutputSize(int size)
 
 void CoreAI::resizeWeights()
 {
-    std::mt19937 gen(42);
+    // Use random seed for weight re-initialization
+    std::random_device rd;
+    std::mt19937 gen(rd());
     
-    // Resize weight matrices with better initialization
+    if (verbose) {
+        std::cout << "[DEBUG RESIZE] Resizing and re-initializing weights" << std::endl;
+    }
+    
+    // Resize weight matrices with Xavier/Glorot initialization
     float scale = std::sqrt(2.0f / (inputSize + neurons));
     std::uniform_real_distribution<float> weight_dist(-scale, scale);
 
+    // Resize and initialize hidden-to-output weights with explicit random values
     initializeMatrix(this->weigth_output_hidden, outputSize, neurons);
-    fillMatrixWithTransform(this->weigth_output_hidden, [&]() { return weight_dist(gen); });
+    for (int i = 0; i < outputSize; ++i) {
+        for (int j = 0; j < neurons; ++j) {
+            this->weigth_output_hidden[i][j] = weight_dist(gen);
+        }
+    }
 
+    // Resize and initialize input-to-hidden weights with explicit random values
     initializeMatrix(this->weigth_input_hidden, neurons, inputSize);
-    fillMatrixWithTransform(this->weigth_input_hidden, [&]() { return weight_dist(gen); });
+    for (int i = 0; i < neurons; ++i) {
+        for (int j = 0; j < inputSize; ++j) {
+            this->weigth_input_hidden[i][j] = weight_dist(gen);
+        }
+    }
+    
+    if (verbose) {
+        std::cout << "[DEBUG RESIZE] Weight re-initialization complete" << std::endl;
+    }
 }
