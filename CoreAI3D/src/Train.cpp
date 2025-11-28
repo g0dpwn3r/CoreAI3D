@@ -1081,11 +1081,13 @@ void Training::train(double learningRate, int epochs) {
     }
     const int barWidth = 70;
 
-    // Early stopping variables - made less aggressive
+    // Early stopping variables - more lenient to allow proper learning
     float previous_loss = std::numeric_limits<float>::max();
-    int patience = 50; // Increased from 10 to 50 - allow more epochs without improvement
+    int patience = 100; // Increased to 100 - allow many epochs without improvement
     int patience_counter = 0;
-    float min_improvement = 1e-4f; // Increased from 1e-6f to 1e-4f - require more significant improvement
+    float min_improvement = 1e-5f; // Very small improvement threshold
+    float best_loss = std::numeric_limits<float>::max();
+    int epochs_since_best = 0;
 
     for (int i = 0; i < epochs; ++i) {
         printProgressBar("Training Progress", i + 1, epochs, barWidth);
@@ -1094,18 +1096,45 @@ void Training::train(double learningRate, int epochs) {
 
         // Calculate current loss for convergence monitoring
         float current_loss = calculateMSE();
-        if (verbose && i % 10 == 0) { // Log every 10 epochs
-            std::cout << "Epoch " << i << " - MSE: " << current_loss << std::endl;
+        
+        // Track best loss
+        if (current_loss < best_loss) {
+            best_loss = current_loss;
+            epochs_since_best = 0;
+        } else {
+            epochs_since_best++;
+        }
+        
+        // Verbose logging every 10 epochs
+        if (verbose && i % 10 == 0) {
+            std::cout << "\nEpoch " << (i + 1) << "/" << epochs
+                      << " - MSE: " << current_loss
+                      << " (Best: " << best_loss << ")" << std::endl;
         }
 
-        // Early stopping check
-        if (previous_loss - current_loss > min_improvement) {
+        // Early stopping check - only if loss improvement is stagnant
+        float loss_improvement = previous_loss - current_loss;
+        if (loss_improvement > min_improvement) {
             patience_counter = 0;
         } else {
             patience_counter++;
             if (patience_counter >= patience) {
                 if (verbose) {
-                    std::cout << "\nEarly stopping at epoch " << i + 1 << " due to lack of improvement." << std::endl;
+                    std::cout << "\n[EARLY STOPPING] Triggered at epoch " << (i + 1) << "/" << epochs << std::endl;
+                    std::cout << "  Reason: No improvement for " << patience << " consecutive epochs" << std::endl;
+                    std::cout << "  Current Loss: " << current_loss << std::endl;
+                    std::cout << "  Best Loss: " << best_loss << std::endl;
+                    std::cout << "  Epochs since best: " << epochs_since_best << std::endl;
+                    std::cout << "  Loss improvement threshold: " << min_improvement << std::endl;
+                    
+                    // Check if this might be a problem
+                    if (i < epochs / 10) {
+                        std::cout << "  WARNING: Early stopping triggered very early (before 10% of total epochs)" << std::endl;
+                        std::cout << "  This may indicate:" << std::endl;
+                        std::cout << "    - Learning rate too low" << std::endl;
+                        std::cout << "    - Initial weights saturated" << std::endl;
+                        std::cout << "    - Data normalization issues" << std::endl;
+                    }
                 }
                 break;
             }
@@ -1157,11 +1186,13 @@ bool Training::startTraining(double learningRate, int epochs) {
             trainingStatus = "running";
             const int barWidth = 70;
 
-            // Early stopping variables - made less aggressive
+            // Early stopping variables - more lenient to allow proper learning
             float previous_loss = std::numeric_limits<float>::max();
-            int patience = 50; // Increased from 10 to 50 - allow more epochs without improvement
+            int patience = 100; // Increased to 100 - allow many epochs without improvement
             int patience_counter = 0;
-            float min_improvement = 1e-4f; // Increased from 1e-6f to 1e-4f - require more significant improvement
+            float min_improvement = 1e-5f; // Very small improvement threshold
+            float best_loss = std::numeric_limits<float>::max();
+            int epochs_since_best = 0;
 
             for (int i = 0; i < epochs; ++i) {
                 if (trainingStopRequested.load()) {
@@ -1176,6 +1207,14 @@ bool Training::startTraining(double learningRate, int epochs) {
 
                 // Calculate current loss
                 currentLoss = calculateMSE();
+                
+                // Track best loss
+                if (currentLoss < best_loss) {
+                    best_loss = currentLoss;
+                    epochs_since_best = 0;
+                } else {
+                    epochs_since_best++;
+                }
 
                 // Broadcast progress via WebSocket
                 if (webSocketServer) {
@@ -1184,23 +1223,43 @@ bool Training::startTraining(double learningRate, int epochs) {
                         {"epoch", currentEpoch},
                         {"total_epochs", totalEpochs},
                         {"loss", currentLoss},
+                        {"best_loss", best_loss},
                         {"percentage", (currentEpoch * 100) / totalEpochs}
                     };
                     webSocketServer->broadcastToGroup("training", progressUpdate.dump());
                 }
+                
+                // Verbose logging every 10 epochs
                 if (verbose && i % 10 == 0) {
-                    std::cout << "Epoch " << i << " - MSE: " << currentLoss << std::endl;
+                    std::cout << "\nEpoch " << (i + 1) << "/" << epochs
+                              << " - MSE: " << currentLoss
+                              << " (Best: " << best_loss << ")" << std::endl;
                 }
 
-                // Early stopping check
-                if (previous_loss - currentLoss > min_improvement) {
+                // Early stopping check - only if loss improvement is stagnant
+                float loss_improvement = previous_loss - currentLoss;
+                if (loss_improvement > min_improvement) {
                     patience_counter = 0;
                 } else {
                     patience_counter++;
                     if (patience_counter >= patience) {
                         trainingStatus = "completed_early_stopping";
                         if (verbose) {
-                             std::cout << "\nEarly stopping triggered at epoch " << i + 1 << std::endl;
+                            std::cout << "\n[EARLY STOPPING] Triggered at epoch " << (i + 1) << "/" << epochs << std::endl;
+                            std::cout << "  Reason: No improvement for " << patience << " consecutive epochs" << std::endl;
+                            std::cout << "  Current Loss: " << currentLoss << std::endl;
+                            std::cout << "  Best Loss: " << best_loss << std::endl;
+                            std::cout << "  Epochs since best: " << epochs_since_best << std::endl;
+                            std::cout << "  Loss improvement threshold: " << min_improvement << std::endl;
+                            
+                            // Check if this might be a problem
+                            if (i < epochs / 10) {
+                                std::cout << "  WARNING: Early stopping triggered very early (before 10% of total epochs)" << std::endl;
+                                std::cout << "  This may indicate:" << std::endl;
+                                std::cout << "    - Learning rate too low" << std::endl;
+                                std::cout << "    - Initial weights saturated" << std::endl;
+                                std::cout << "    - Data normalization issues" << std::endl;
+                            }
                         }
                         break;
                     }
