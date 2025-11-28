@@ -194,12 +194,6 @@ def perform_git_operations(branch, remotes):
         # Set up Git LFS first
         setup_git_lfs()
 
-        # Check if there are any changes to commit
-        result = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=True)
-        if not result.stdout.strip():
-            logging.info("No changes to commit, skipping git operations")
-            return
-
         logging.info("Performing git add -A")
         subprocess.run(['git', 'add', '-A'], check=True)
 
