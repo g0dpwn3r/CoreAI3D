@@ -15,7 +15,38 @@
 // External library headers (Boost, cURL, MySQL, etc.)
 // Include specific Boost headers as needed for their functionality.
 namespace po = boost::program_options; // Alias for convenience
+#include <getopt.h>
 
+// Define long options
+struct option long_options[] = {
+    {"help", no_argument, 0, 'h'},
+    {"verbose", no_argument, 0, 'v'},
+    {"input-file", required_argument, 0, 'i'},
+    {"output-csv", required_argument, 0, 'o'},
+    {"target", required_argument, 0, 't'},
+    {"layers", required_argument, 0, 'l'},
+    {"samples", required_argument, 0, 's'},
+    {"epochs", required_argument, 0, 'e'},
+    {"neurons", required_argument, 0, 'n'},
+    {"min", required_argument, 0, 'm'},
+    {"max", required_argument, 0, 'M'},
+    {"inputsize", required_argument, 0, 'z'},
+    {"outputsize", required_argument, 0, 'Z'},
+    {"api-port", required_argument, 0, 'A'},
+    {"start-predict", no_argument, 0, 'P'},
+    {"start-chat", no_argument, 0, 'C'},
+    {"load-model", required_argument, 0, 'L'},
+    {"embedding-file", required_argument, 0, 'E'},
+    {"offline", no_argument, 0, 'O'},
+    {"enable-websocket", no_argument, 0, 'W'},
+    {"create-table", no_argument, 0, 'T'},
+    {"db-host", required_argument, 0, 'H'},
+    {"db-user", required_argument, 0, 'U'},
+    {"db-password", required_argument, 0, 'D'},
+    {"db-port", required_argument, 0, 'R'},
+    {"db-schema", required_argument, 0, 'S'},
+    {0, 0, 0, 0}
+};
 int main(int argc, char* argv[]) {
     // Simple argument parsing without Boost
     bool verbose = false;
@@ -275,6 +306,33 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--db-schema") {
             std::string value = extractValue(i, "--db-schema", arg);
             if (!value.empty()) dbSchema = value;
+} else if (arg == "-t") {
+    std::string value = extractValue(i, "-t", arg);
+    if (!value.empty()) targetFile = value;
+} else if (arg == "-l") {
+    std::string value = extractValue(i, "-l", arg);
+    if (!value.empty()) layers = value;
+} else if (arg == "-s") {
+    std::string value = extractValue(i, "-s", arg);
+    if (!value.empty()) samples = value;
+} else if (arg == "-e") {
+    std::string value = extractValue(i, "-e", arg);
+    if (!value.empty()) epochs = value;
+} else if (arg == "-n") {
+    std::string value = extractValue(i, "-n", arg);
+    if (!value.empty()) neurons = value;
+} else if (arg == "--min") {
+    std::string value = extractValue(i, "--min", arg);
+    if (!value.empty()) minRange = value;
+} else if (arg == "--max") {
+    std::string value = extractValue(i, "--max", arg);
+    if (!value.empty()) maxRange = value;
+} else if (arg == "--inputsize") {
+    std::string value = extractValue(i, "--inputsize", arg);
+    if (!value.empty()) inputSize = value;
+} else if (arg == "--outputsize") {
+    std::string value = extractValue(i, "--outputsize", arg);
+    if (!value.empty()) outputSize = value;
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
@@ -495,6 +553,14 @@ int main(int argc, char* argv[]) {
             trainer->inputSize = inputSize_val; // Ensure inputSize is set for CoreAI
             trainer->numSamples = numSamples_val;
 
+            // Set embedding dimension for language processor
+            int embeddingDimension = 300; // Default embedding dimension
+            try {
+                embeddingDimension = std::stoi(inputSize); // Use inputSize as embedding dimension if provided
+            } catch (...) {
+                embeddingDimension = 300; // Fallback
+            }
+
             // Initialize CoreAI via trainer's preprocess if you want it managed there
             // Or create it directly here if API server doesn't use the full training pipeline.
             // Assuming the API server will need a CoreAI instance.
@@ -512,6 +578,24 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             std::cout << "[API MODE] API Server initialized.\n";
+
+            // Initialize language processor for text processing
+            std::cout << "[API MODE] Initializing Language Processor...\n";
+            std::cout << "[API MODE] Parameters: embeddingFile=" << embeddingFile
+                      << ", embeddingDimension=" << embeddingDimension
+                      << ", language=" << language << std::endl;
+            
+            trainer->initializeLanguageProcessor(embeddingFile, embeddingDimension, dbHost, dbPort_val,
+                                               dbUser, dbPassword, dbSchema, 0, language,
+                                               inputSize_val, outputSize_val, layers_val, neurons_val);
+            
+            // Verify language processor initialization
+            if (trainer->getLanguage() != nullptr) {
+                std::cout << "[API MODE] Language Processor initialized successfully.\n";
+            } else {
+                std::cerr << "[API MODE] ERROR: Language Processor initialization failed!\n";
+                return 1;
+            }
 
             // Set training module for neural API endpoints
             apiServer.setTrainingModule(std::move(trainer));

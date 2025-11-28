@@ -3466,6 +3466,123 @@ def {self._extract_function_name(description)}('''
         if file_path:
             self.predict_file_path_edit.setText(file_path)
 
+    def _handle_load_dataset_result_direct(self, result, data_file=None):
+        """Handle dataset loading result directly"""
+        try:
+            self.training_progress.setVisible(False)
+            if result.success:
+                data = result.data
+
+                # Compute input_size and output_size from dataset data instead of backend response
+                computed_sizes = {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+                if data_file and os.path.exists(data_file):
+                    # Calculate sizes based on file analysis
+                    computed_sizes = self.calculate_dataset_sizes(data_file)
+
+                # Update the data dict with computed values
+                if computed_sizes['inputsize'] != 'N/A':
+                    data['input_size'] = computed_sizes['inputsize']
+                if computed_sizes['outputsize'] != 'N/A':
+                    data['output_size'] = computed_sizes['outputsize']
+                if computed_sizes['samplesize'] != 'N/A':
+                    data['samples'] = computed_sizes['samplesize']
+
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
+                self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Input size: {data.get('input_size', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Output size: {data.get('output_size', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
+
+                QMessageBox.information(self, "Dataset Loaded",
+                                    f"Dataset loaded successfully!\n\n"
+                                    f"Samples: {data.get('samples', 'N/A')}\n"
+                                    f"Input Size: {data.get('input_size', 'N/A')}\n"
+                                    f"Output Size: {data.get('output_size', 'N/A')}")
+
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
+                QMessageBox.warning(self, "Dataset Loading Failed", error_msg)
+        except Exception as e:
+            self.training_progress.setVisible(False)
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
+            QMessageBox.warning(self, "Dataset Loading Error", str(e))
+
+    @qasync.asyncSlot()
+    async def start_training(self):
+        """Start training with current configuration and proper locking"""
+        task_id = f"training_{id(asyncio.current_task())}"
+
+        # Use global async lock to prevent concurrent operations
+        async with self.global_async_lock:
+            try:
+                # Check if training already in progress (double-check with lock)
+                if self.training_in_progress:
+                    QMessageBox.warning(self, "Training in Progress",
+                                      "Training is already running. Please wait for it to complete or stop it first.")
+                    return
+
+                # Register task
+                with self.task_lock:
+                    if task_id in self.active_tasks:
+                        logger.warning(f"Training task {task_id} already active")
+                        return
+                    self.active_tasks.add(task_id)
+
+                # Track the current task for cancellation
+                self.current_async_task = asyncio.current_task()
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.add(self.current_async_task)
+
+                self.training_in_progress = True
+
+                if not self.client:
+                    if not self.initialize_client():
+                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        return
+
+                # Check if dataset is loaded first
+                if not hasattr(self, 'current_dataset_loaded') or not self.current_dataset_loaded:
+                    QMessageBox.warning(self, "No Dataset Loaded",
+                                      "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button")
+                    return
+
+                # Show progress with actual range
+                self.training_progress.setVisible(True)
+                self.training_progress.setRange(0, 100)
+                self.training_progress.setValue(0)
+
+                # Log training start
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
+                self.training_log.appendPlainText(json.dumps(self.learning_config, indent=2))
+
+                # Start training directly with qasync
+                result = await self._start_training_async()
+                self._handle_training_result_direct(result)
+
+            except asyncio.CancelledError:
+                logger.info("Training cancelled")
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training cancelled")
+                raise  # Re-raise to ensure proper cleanup
+            except Exception as e:
+                self.training_progress.setVisible(False)
+                self.training_progress.setValue(0)  # Reset progress on error
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
+                QMessageBox.warning(self, "Training Error", str(e))
+            finally:
+                self.training_in_progress = False
+                self.training_progress.setVisible(False)
+
+                # Clean up task
+                with self.task_lock:
+                    self.active_tasks.discard(task_id)
+
+                # Remove from pending tasks
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.discard(self.current_async_task)
+                    self.current_async_task = None
+
     def _get_python_class_template(self, complexity: str, description: str) -> str:
         """Python class template"""
         class_name = self._extract_class_name(description)
@@ -3477,6 +3594,113 @@ Generated as {complexity.lower()} level implementation
 
 class {class_name}:
     """{description}"""
+
+        try:
+            self.training_progress.setVisible(False)
+            if result.success:
+                data = result.data
+
+                # Compute input_size and output_size from dataset data instead of backend response
+                computed_sizes = {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+                if data_file and os.path.exists(data_file):
+                    # Calculate sizes based on file analysis
+                    computed_sizes = self.calculate_dataset_sizes(data_file)
+
+                # Update the data dict with computed values
+                if computed_sizes['inputsize'] != 'N/A':
+                    data['input_size'] = computed_sizes['inputsize']
+                if computed_sizes['outputsize'] != 'N/A':
+                    data['output_size'] = computed_sizes['outputsize']
+                if computed_sizes['samplesize'] != 'N/A':
+                    data['samples'] = computed_sizes['samplesize']
+
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
+                self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Input size: {data.get('input_size', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Output size: {data.get('output_size', 'N/A')}")
+                self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
+
+
+            else:
+                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
+                QMessageBox.warning(self, "Dataset Loading Failed", error_msg)
+        except Exception as e:
+            self.training_progress.setVisible(False)
+            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
+            QMessageBox.warning(self, "Dataset Loading Error", str(e))
+
+        task_id = f"training_{id(asyncio.current_task())}"
+
+        # Use global async lock to prevent concurrent operations
+        async with self.global_async_lock:
+            try:
+                # Check if training already in progress (double-check with lock)
+                if self.training_in_progress:
+                    QMessageBox.warning(self, "Training in Progress",
+                                      "Training is already running. Please wait for it to complete or stop it first.")
+                    return
+
+                # Register task
+                with self.task_lock:
+                    if task_id in self.active_tasks:
+                        logger.warning(f"Training task {task_id} already active")
+                        return
+                    self.active_tasks.add(task_id)
+
+                # Track the current task for cancellation
+                self.current_async_task = asyncio.current_task()
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.add(self.current_async_task)
+
+                self.training_in_progress = True
+
+                if not self.client:
+                    if not self.initialize_client():
+                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        return
+
+                # Check if dataset is loaded first
+                if not hasattr(self, 'current_dataset_loaded') or not self.current_dataset_loaded:
+                    QMessageBox.warning(self, "No Dataset Loaded",
+                                      "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button")
+                    return
+
+                # Show progress with actual range
+                self.training_progress.setVisible(True)
+                self.training_progress.setRange(0, 100)
+                self.training_progress.setValue(0)
+
+                # Log training start
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
+                self.training_log.appendPlainText(json.dumps(self.learning_config, indent=2))
+
+                # Start training directly with qasync
+                result = await self._start_training_async()
+                self._handle_training_result_direct(result)
+
+            except asyncio.CancelledError:
+                logger.info("Training cancelled")
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training cancelled")
+                raise  # Re-raise to ensure proper cleanup
+            except Exception as e:
+                self.training_progress.setVisible(False)
+                self.training_progress.setValue(0)  # Reset progress on error
+                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
+                QMessageBox.warning(self, "Training Error", str(e))
+            finally:
+                self.training_in_progress = False
+                self.training_progress.setVisible(False)
+
+                # Clean up task
+                with self.task_lock:
+                    self.active_tasks.discard(task_id)
+
+                # Remove from pending tasks
+                async with self.task_cleanup_lock:
+                    self.pending_tasks.discard(self.current_async_task)
+                    self.current_async_task = None
 
     def __init__('''
 
@@ -7633,122 +7857,6 @@ def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
         logger.error(f"Error calculating video sizes: {str(e)}")
         return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
 
-    def _handle_load_dataset_result_direct(self, result, data_file=None):
-        """Handle dataset loading result directly"""
-        try:
-            self.training_progress.setVisible(False)
-            if result.success:
-                data = result.data
-
-                # Compute input_size and output_size from dataset data instead of backend response
-                computed_sizes = {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-                if data_file and os.path.exists(data_file):
-                    # Calculate sizes based on file analysis
-                    computed_sizes = self.calculate_dataset_sizes(data_file)
-
-                # Update the data dict with computed values
-                if computed_sizes['inputsize'] != 'N/A':
-                    data['input_size'] = computed_sizes['inputsize']
-                if computed_sizes['outputsize'] != 'N/A':
-                    data['output_size'] = computed_sizes['outputsize']
-                if computed_sizes['samplesize'] != 'N/A':
-                    data['samples'] = computed_sizes['samplesize']
-
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
-                self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
-                self.training_log.appendPlainText(f"  - Input size: {data.get('input_size', 'N/A')}")
-                self.training_log.appendPlainText(f"  - Output size: {data.get('output_size', 'N/A')}")
-                self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
-
-                QMessageBox.information(self, "Dataset Loaded",
-                                    f"Dataset loaded successfully!\n\n"
-                                    f"Samples: {data.get('samples', 'N/A')}\n"
-                                    f"Input Size: {data.get('input_size', 'N/A')}\n"
-                                    f"Output Size: {data.get('output_size', 'N/A')}")
-
-            else:
-                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
-                QMessageBox.warning(self, "Dataset Loading Failed", error_msg)
-        except Exception as e:
-            self.training_progress.setVisible(False)
-            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
-            QMessageBox.warning(self, "Dataset Loading Error", str(e))
-
-    @qasync.asyncSlot()
-    async def start_training(self):
-        """Start training with current configuration and proper locking"""
-        task_id = f"training_{id(asyncio.current_task())}"
-
-        # Use global async lock to prevent concurrent operations
-        async with self.global_async_lock:
-            try:
-                # Check if training already in progress (double-check with lock)
-                if self.training_in_progress:
-                    QMessageBox.warning(self, "Training in Progress",
-                                      "Training is already running. Please wait for it to complete or stop it first.")
-                    return
-
-                # Register task
-                with self.task_lock:
-                    if task_id in self.active_tasks:
-                        logger.warning(f"Training task {task_id} already active")
-                        return
-                    self.active_tasks.add(task_id)
-
-                # Track the current task for cancellation
-                self.current_async_task = asyncio.current_task()
-                async with self.task_cleanup_lock:
-                    self.pending_tasks.add(self.current_async_task)
-
-                self.training_in_progress = True
-
-                if not self.client:
-                    if not self.initialize_client():
-                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
-                        return
-
-                # Check if dataset is loaded first
-                if not hasattr(self, 'current_dataset_loaded') or not self.current_dataset_loaded:
-                    QMessageBox.warning(self, "No Dataset Loaded",
-                                      "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button")
-                    return
-
-                # Show progress with actual range
-                self.training_progress.setVisible(True)
-                self.training_progress.setRange(0, 100)
-                self.training_progress.setValue(0)
-
-                # Log training start
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
-                self.training_log.appendPlainText(json.dumps(self.learning_config, indent=2))
-
-                # Start training directly with qasync
-                result = await self._start_training_async()
-                self._handle_training_result_direct(result)
-
-            except asyncio.CancelledError:
-                logger.info("Training cancelled")
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training cancelled")
-                raise  # Re-raise to ensure proper cleanup
-            except Exception as e:
-                self.training_progress.setVisible(False)
-                self.training_progress.setValue(0)  # Reset progress on error
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
-                QMessageBox.warning(self, "Training Error", str(e))
-            finally:
-                self.training_in_progress = False
-                self.training_progress.setVisible(False)
-
-                # Clean up task
-                with self.task_lock:
-                    self.active_tasks.discard(task_id)
-
-                # Remove from pending tasks
-                async with self.task_cleanup_lock:
-                    self.pending_tasks.discard(self.current_async_task)
-                    self.current_async_task = None
                     
     def closeEvent(self, event):
         """Handle application close event with proper async cleanup"""

@@ -53,6 +53,10 @@ private:
     float xTransform2(float x, float e, float n, float m);
     float yTransform2(float y, float e, float n, float m);
     float zTransform2(float z, float e, float n, float m);
+    float xTransform2_derivative_m(float x, float e, float n, float m);
+    float yTransform2_derivative_m(float y, float e, float n, float m);
+    float zTransform2_derivative_m(float z, float e, float n, float m);
+    void computeMinMax(const std::vector<std::vector<float>>& data, float& min_val, float& max_val);
 
 public:
     CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
