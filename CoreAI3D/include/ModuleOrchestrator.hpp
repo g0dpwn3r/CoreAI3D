@@ -8,6 +8,7 @@
 #include "SystemModule.hpp"
 #include "WebModule.hpp"
 #include "MathModule.hpp"
+#include <nlohmann/json.hpp>
 #include <vector>
 #include <string>
 #include <memory>
@@ -17,6 +18,8 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+
+using json = nlohmann::json;
 
 // Forward declarations for module types
 class VisionModule;

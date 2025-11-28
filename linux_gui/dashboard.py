@@ -28,6 +28,9 @@ from typing import Dict, List, Any, Optional, Tuple, Set
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
+# WebSocket client import
+import websocket
+
 # PyQt6 imports
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -1601,6 +1604,10 @@ class CoreAI3DDashboard(QMainWindow):
         self.training_manager = TrainingDataManager(self.config)
         self.debugger: Optional[CodeDebugger] = None
 
+        # Initialize WebSocket client
+        self.ws: Optional[websocket.WebSocketApp] = None
+        self.ws_thread: Optional[threading.Thread] = None
+
         # Chat response handler
         self.chat_response_handler = None
 
@@ -1675,6 +1682,9 @@ class CoreAI3DDashboard(QMainWindow):
         self.setup_ui()
         self.setup_connections()
         self.setup_timers()
+
+        # Initialize WebSocket connection
+        self._setup_websocket_connection()
 
         # Load initial data
         self.load_datasets()
@@ -9240,6 +9250,102 @@ def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
 
         except Exception as e:
             logger.error(f"Error cancelling tasks: {str(e)}")
+
+    def _setup_websocket_connection(self):
+        """Setup WebSocket connection to CoreAI3D server"""
+        try:
+            # Extract port from API URL (default to 8080 if not specified)
+            api_url = self.config.api_url
+            port = 8080  # Default port
+            if "localhost:" in api_url:
+                try:
+                    port = int(api_url.split("localhost:")[1].split("/")[0])
+                except (ValueError, IndexError):
+                    port = 8080
+
+            ws_url = f"ws://localhost:{port}/ws"
+            logger.info(f"Setting up WebSocket connection to: {ws_url}")
+
+            # Create WebSocket client
+            self.ws = websocket.WebSocketApp(
+                ws_url,
+                on_message=self._on_websocket_message,
+                on_error=self._on_websocket_error,
+                on_close=self._on_websocket_close
+            )
+
+            # Start WebSocket in background thread
+            self.ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
+            self.ws_thread.start()
+
+            logger.info("WebSocket connection setup completed")
+
+        except Exception as e:
+            logger.error(f"Failed to setup WebSocket connection: {str(e)}")
+
+    def _on_websocket_message(self, ws, message):
+        """Handle incoming WebSocket messages"""
+        try:
+            data = json.loads(message)
+            message_type = data.get('type')
+
+            if message_type == 'training_progress':
+                # Update training progress bar and status
+                percentage = data.get('percentage', 0)
+                epoch = data.get('epoch', 0)
+                total_epochs = data.get('total_epochs', 0)
+                loss = data.get('loss', 0.0)
+
+                # Update progress bar
+                if hasattr(self, 'training_progress'):
+                    self.training_progress.setValue(int(percentage))
+                    self.training_progress.setVisible(True)
+
+                # Update status label (assuming there's a status label in training tab)
+                status_text = f"Epoch {epoch}/{total_epochs} - Loss: {loss:.4f}"
+                if hasattr(self, 'status_label'):
+                    self.status_label.setText(status_text)
+                elif hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage(status_text)
+
+                logger.debug(f"Training progress: {percentage}% - {status_text}")
+
+            elif message_type == 'prediction_progress':
+                # Update prediction progress bar and status
+                percentage = data.get('percentage', 0)
+                current = data.get('current', 0)
+                total = data.get('total', 0)
+
+                # Update progress bar
+                if hasattr(self, 'prediction_progress'):
+                    self.prediction_progress.setValue(int(percentage))
+                    self.prediction_progress.setVisible(True)
+
+                # Update status label for prediction
+                status_text = f"Prediction Progress: {current}/{total} ({percentage:.1f}%)"
+                if hasattr(self, 'prediction_status_label'):
+                    self.prediction_status_label.setText(status_text)
+                elif hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage(status_text)
+
+                logger.debug(f"Prediction progress: {percentage}% - {status_text}")
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse WebSocket message: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error handling WebSocket message: {str(e)}")
+
+    def _on_websocket_error(self, ws, error):
+        """Handle WebSocket errors"""
+        logger.error(f"WebSocket error: {str(error)}")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("WebSocket connection error")
+
+    def _on_websocket_close(self, ws, close_status_code, close_msg):
+        """Handle WebSocket connection close"""
+        logger.info(f"WebSocket connection closed: {close_status_code} - {close_msg}")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("WebSocket connection closed")
 
     def closeEvent(self, event):
         """Handle application close event with proper async cleanup"""

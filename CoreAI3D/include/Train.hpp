@@ -7,6 +7,7 @@
 #include "Language.hpp"
 #include "Database.hpp"
 #include "VisionModule.hpp"
+#include "WebSocketServer.hpp"
 #include <nlohmann/json.hpp>
 
 class Language;
@@ -19,11 +20,11 @@ public:
     // Constructor for online mode (with database) - only if USE_MYSQL is defined
 #ifdef USE_MYSQL
     Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
-        const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose = true);
+        const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose = true, WebSocketServer* wsServer = nullptr);
 #endif
 
     // Constructor for offline mode (no database) - always available
-    Training(bool isOffline, bool verbose = true);
+    Training(bool isOffline, bool verbose = true, WebSocketServer* wsServer = nullptr);
 
     void initializeLanguageProcessor(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort, std::string& dbUser, std::string& dbPassword, std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons);
 
@@ -101,6 +102,7 @@ public:
 
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Language> langProc;
+    WebSocketServer* webSocketServer;
 
     // Training state for async operations
     std::atomic<bool> trainingActive;

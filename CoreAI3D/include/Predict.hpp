@@ -5,9 +5,11 @@
 #include <string>
 #include <vector>
 
+class WebSocketServer;
+
 class Predict {
 public:
-    Predict(bool verbose = false);
+    Predict(bool verbose = false, WebSocketServer* wsServer = nullptr);
     ~Predict();
 
     // Main prediction execution method
@@ -41,6 +43,7 @@ public:
 private:
     bool verbose_;
     Training* trainer_;
+    WebSocketServer* webSocketServer_;
 
     // Evaluation results
     float rmse_;

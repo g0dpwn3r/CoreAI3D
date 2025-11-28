@@ -21,3 +21,4 @@ scikit-learn
 tensorflow
 torch
 transformers
+websocket-client

@@ -210,8 +210,8 @@ target_include_directories(CoreAI3DLib PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Add USE_MYSQL preprocessor definition conditionally (default OFF for offline mode)
-option(USE_MYSQL "Enable MySQL support" OFF)
+# Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
+option(USE_MYSQL "Enable MySQL support" ON)
 if(USE_MYSQL)
     if(MYSQLCPP_FOUND)
         target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)

@@ -306,34 +306,36 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--db-schema") {
             std::string value = extractValue(i, "--db-schema", arg);
             if (!value.empty()) dbSchema = value;
-} else if (arg == "-t") {
-    std::string value = extractValue(i, "-t", arg);
-    if (!value.empty()) targetFile = value;
-} else if (arg == "-l") {
-    std::string value = extractValue(i, "-l", arg);
-    if (!value.empty()) layers = value;
-} else if (arg == "-s") {
-    std::string value = extractValue(i, "-s", arg);
-    if (!value.empty()) samples = value;
-} else if (arg == "-e") {
-    std::string value = extractValue(i, "-e", arg);
-    if (!value.empty()) epochs = value;
-} else if (arg == "-n") {
-    std::string value = extractValue(i, "-n", arg);
-    if (!value.empty()) neurons = value;
-} else if (arg == "--min") {
-    std::string value = extractValue(i, "--min", arg);
-    if (!value.empty()) minRange = value;
-} else if (arg == "--max") {
+        } else if (arg == "--db-schema") {
+            std::string value = extractValue(i, "--db-schema", arg);
+            if (!value.empty()) dbSchema = value;
+        } else if (arg == "--target" || arg == "-t") {
+            std::string value = extractValue(i, "--target", arg);
+            if (!value.empty()) targetFile = value;
+        } else if (arg == "--layers" || arg == "-l") {
+            std::string value = extractValue(i, "--layers", arg);
+            if (!value.empty()) layers = value;
+        } else if (arg == "--samples" || arg == "-s") {
+            std::string value = extractValue(i, "--samples", arg);
+            if (!value.empty()) samples = value;
+        } else if (arg == "--epochs" || arg == "-e") {
+            std::string value = extractValue(i, "--epochs", arg);
+            if (!value.empty()) epochs = value;
+        } else if (arg == "--neurons" || arg == "-n") {
+            std::string value = extractValue(i, "--neurons", arg);
+            if (!value.empty()) neurons = value;
+        } else if (arg == "--min") {
+            std::string value = extractValue(i, "--min", arg);
+            if (!value.empty()) minRange = value;
+        } else if (arg == "--max") {
+            std::string value = extractValue(i, "--max", arg);
+            if (!value.empty()) maxRange = value;
         } else if (arg == "--inputsize") {
             std::string value = extractValue(i, "--inputsize", arg);
             if (!value.empty()) inputSize = value;
         } else if (arg == "--outputsize") {
             std::string value = extractValue(i, "--outputsize", arg);
             if (!value.empty()) outputSize = value;
-    std::string value = extractValue(i, "--max", arg);
-    if (!value.empty()) maxRange = value;
-}
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
@@ -509,7 +511,7 @@ int main(int argc, char* argv[]) {
             }
 
             // Create Predict instance and run prediction
-            Predict predictor(verbose);
+            Predict predictor(verbose, nullptr);
             bool success = predictor.runPrediction(
                 inputFile, outputCsvFile, targetFile, loadModelId, datasetId_val,
                 layers_val, neurons_val, minRange_val, maxRange_val,
@@ -537,10 +539,32 @@ int main(int argc, char* argv[]) {
 
             std::cout << "Starting API server mode...\n";
 
+            // Initialize WebSocket Server if enabled (before Training to pass it to constructor)
+            std::unique_ptr<WebSocketServer> wsServerPtr;
+            if (enableWebsocket) {
+                std::cout << "[API MODE] Initializing WebSocket Server...\n";
+                wsServerPtr = std::make_unique<WebSocketServer>("CoreAI3D_WebSocket", "0.0.0.0");
+                if (!wsServerPtr->initialize()) {
+                    std::cerr << "Failed to initialize WebSocket server\n";
+                    return 1;
+                }
+                std::cout << "[API MODE] WebSocket Server initialized.\n";
+
+                // Start WebSocket Server
+                std::cout << "[API MODE] Starting WebSocket Server...\n";
+                if (!wsServerPtr->start()) {
+                    std::cerr << "Failed to start WebSocket server\n";
+                    return 1;
+                }
+                std::cout << "[API MODE] WebSocket Server started.\n";
+            } else {
+                std::cout << "[API MODE] WebSocket Server disabled (use --enable-websocket to enable).\n";
+            }
+
             // Initialize Training object
             std::cout << "[API MODE] Initializing Training object...\n";
             std::unique_ptr<Training> trainer;
-            trainer = std::make_unique<Training>(true, verbose); // Always offline for API mode to avoid MySQL issues
+            trainer = std::make_unique<Training>(true, verbose, wsServerPtr.get()); // Always offline for API mode to avoid MySQL issues
             std::cout << "[API MODE] Training object initialized.\n";
 
 
@@ -591,7 +615,7 @@ int main(int argc, char* argv[]) {
                                                inputSize_val, outputSize_val, layers_val, neurons_val);
             
             // Verify language processor initialization
-            if (trainer->getLanguageProcessor() != nullptr) {
+            if (trainer->getLanguage() != nullptr) {
                 std::cout << "[API MODE] Language Processor initialized successfully.\n";
             } else {
                 std::cerr << "[API MODE] ERROR: Language Processor initialization failed!\n";
@@ -614,28 +638,6 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             std::cout << "[API MODE] API Server started.\n";
-
-            // Initialize WebSocket Server if enabled
-            std::unique_ptr<WebSocketServer> wsServerPtr;
-            if (enableWebsocket) {
-                std::cout << "[API MODE] Initializing WebSocket Server...\n";
-                wsServerPtr = std::make_unique<WebSocketServer>("CoreAI3D_WebSocket", "0.0.0.0");
-                if (!wsServerPtr->initialize()) {
-                    std::cerr << "Failed to initialize WebSocket server\n";
-                    return 1;
-                }
-                std::cout << "[API MODE] WebSocket Server initialized.\n";
-
-                // Start WebSocket Server
-                std::cout << "[API MODE] Starting WebSocket Server...\n";
-                if (!wsServerPtr->start()) {
-                    std::cerr << "Failed to start WebSocket server\n";
-                    return 1;
-                }
-                std::cout << "[API MODE] WebSocket Server started.\n";
-            } else {
-                std::cout << "[API MODE] WebSocket Server disabled (use --enable-websocket to enable).\n";
-            }
 
             // Wait for servers to finish (they handle their own signals)
             bool wsRunning = wsServerPtr && wsServerPtr->isServerRunning();

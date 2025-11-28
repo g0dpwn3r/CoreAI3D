@@ -4,8 +4,8 @@
 #include <chrono>
 #include <stdexcept>
 
-Predict::Predict(bool verbose)
-    : verbose_(verbose), trainer_(nullptr),
+Predict::Predict(bool verbose, WebSocketServer* wsServer)
+    : verbose_(verbose), trainer_(nullptr), webSocketServer_(wsServer),
       rmse_(0.0f), mse_(0.0f), accuracy_(0.0f), trainingTime_(0.0) {
 }
 

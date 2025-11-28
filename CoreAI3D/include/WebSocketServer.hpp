@@ -3,7 +3,15 @@
 
 #include "CoreAI3DCommon.hpp"
 
-#include "ModuleOrchestrator.hpp"
+// Forward declarations for module types to avoid circular dependencies
+class VisionModule;
+class AudioModule;
+class SystemModule;
+class WebModule;
+class MathModule;
+
+// Forward declaration to break circular dependency
+class ModuleOrchestrator;
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
@@ -81,7 +89,7 @@ private:
 class WebSocketServer {
 private:
 public:
-    std::unique_ptr<ModuleOrchestrator> orchestrator_;
+    ModuleOrchestrator* orchestrator_; // Use pointer instead of unique_ptr to avoid destruction issues
     std::string serverName_;
     bool isInitialized_;
     std::atomic<bool> isRunning_;
@@ -102,27 +110,9 @@ public:
     std::vector<std::unique_ptr<std::thread>> serverThreads_;
 
     // Message broadcasting
-    std::map<std::string, std::vector<std::string>> broadcastGroups_;
-    std::map<std::string, std::vector<json>> broadcastQueues_;
-    std::mutex broadcastMutex_;
-
-protected:
-    // Core WebSocket processing
-    virtual void processWebSocketMessage(const std::string& sessionId, const json& message);
-    virtual json handleChatMessage(const std::string& sessionId, const json& chatData);
-    virtual json handleCommand(const std::string& sessionId, const json& commandData);
-    virtual json handleFileUpload(const std::string& sessionId, const json& fileData);
-    virtual json handleRealTimeRequest(const std::string& sessionId, const json& requestData);
-
-    // Session management
-    virtual std::string createWebSocketSession(const std::string& clientId = "");
-    virtual void destroyWebSocketSession(const std::string& sessionId);
-    virtual std::shared_ptr<WebSocketSession> getWebSocketSession(const std::string& sessionId);
-
-    // Message broadcasting
     virtual void broadcastToGroup(const std::string& groupName, const json& message);
-    virtual void broadcastToAll(const json& message);
     virtual void broadcastToClient(const std::string& clientId, const json& message);
+    virtual void broadcastToAll(const json& message);
 
     // Real-time processing
     virtual void startRealTimeUpdates(const std::string& sessionId, const std::string& updateType, int intervalMs = 1000);
@@ -149,12 +139,13 @@ public:
     void setPort(int port);
     void setNumThreads(int threads);
 
-    // Module integration
-    bool addVisionModule(const std::string& name, std::unique_ptr<VisionModule> module);
-    bool addAudioModule(const std::string& name, std::unique_ptr<AudioModule> module);
-    bool addSystemModule(const std::string& name, std::unique_ptr<SystemModule> module);
-    bool addWebModule(const std::string& name, std::unique_ptr<WebModule> module);
-    bool addMathModule(const std::string& name, std::unique_ptr<MathModule> module);
+    // Module integration (implemented in separate source files)
+    // Note: These methods are commented out to avoid circular dependency issues
+    // bool addVisionModule(const std::string& name, std::unique_ptr<VisionModule> module);
+    // bool addAudioModule(const std::string& name, std::unique_ptr<AudioModule> module);
+    // bool addSystemModule(const std::string& name, std::unique_ptr<SystemModule> module);
+    // bool addWebModule(const std::string& name, std::unique_ptr<WebModule> module);
+    // bool addMathModule(const std::string& name, std::unique_ptr<MathModule> module);
 
     // WebSocket endpoints
     struct WSEndpoint {
@@ -212,6 +203,9 @@ public:
     json getSessionInfo(const std::string& sessionId);
     json getServerMetrics();
     json getRealTimeStats();
+    
+    // Session management methods
+    std::shared_ptr<WebSocketSession> getWebSocketSession(const std::string& sessionId);
 
     // Event handling
     void registerEventHandler(const std::string& eventType, std::function<void(const std::string&, const json&)> handler);
