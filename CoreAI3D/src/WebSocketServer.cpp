@@ -1,4 +1,11 @@
 #include "WebSocketServer.hpp"
+#include "ModuleOrchestrator.hpp"
+#include "VisionModule.hpp"
+#include "AudioModule.hpp"
+#include "SystemModule.hpp"
+#include "WebModule.hpp"
+#include "MathModule.hpp"
+#include "LinuxModule.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -288,20 +295,20 @@ void WebSocketSession::processChatMessage(const json& chatData) {
             {"clientId", clientId_}
         };
 
-        // Send to orchestrator for processing (commented out to avoid compilation issues)
-        // if (server_ && server_->orchestrator_) {
-        //     json aiResponse = server_->orchestrator_->processChatMessage(aiRequest);
-        //
-        //     // Create response with AI-generated content
-        //     json response = {
-        //         {"type", "chat_response"},
-        //         {"message", aiResponse.value("response", "AI: " + message)},
-        //         {"timestamp", getTimestampString()},
-        //         {"ai_processed", true}
-        //     };
-        //
-        //     sendMessage(response);
-        // } else {
+        // Send to orchestrator for processing
+        if (server_ && server_->orchestrator_) {
+            json aiResponse = server_->orchestrator_->processChatMessage(aiRequest);
+
+            // Create response with AI-generated content
+            json response = {
+                {"type", "chat_response"},
+                {"message", aiResponse.value("response", "AI: " + message)},
+                {"timestamp", getTimestampString()},
+                {"ai_processed", true}
+            };
+
+            sendMessage(response);
+        } else {
             // Fallback if no orchestrator available
             json response = {
                 {"type", "chat_response"},
@@ -313,7 +320,7 @@ void WebSocketSession::processChatMessage(const json& chatData) {
             // DIAGNOSTIC LOG: WebSocket chat processing using fallback (orchestrator not available)
             std::cout << "[DIAGNOSTIC] WebSocketSession::processChatMessage: Using fallback echo (orchestrator not available)" << std::endl;
             sendMessage(response);
-        // }
+        }
     }
     catch (const std::exception& e) {
         sendError("Error processing chat message", 500);
@@ -428,11 +435,21 @@ bool WebSocketServer::initialize(const std::string& configPath) {
         acceptor_.bind(endpoint);
         acceptor_.listen(net::socket_base::max_listen_connections);
 
-        // Create orchestrator (initialized to nullptr to avoid compilation issues)
-        orchestrator_ = nullptr;
-        
-        // DIAGNOSTIC LOG: WebSocketServer orchestrator initialized to nullptr
-        std::cout << "[DIAGNOSTIC] WebSocketServer::initialize: orchestrator_ set to nullptr (module integration disabled)" << std::endl;
+        // Create orchestrator with module integration enabled
+        orchestrator_ = std::make_unique<ModuleOrchestrator>("WebSocketOrchestrator");
+        if (orchestrator_) {
+            // Register all available modules with proper names
+            orchestrator_->addVisionModule("vision", std::make_unique<VisionModule>("vision", 224, 224, 3));
+            orchestrator_->addAudioModule("audio", std::make_unique<AudioModule>("audio", 44100, 1, 1024));
+            orchestrator_->addSystemModule("system", std::make_unique<SystemModule>("system"));
+            orchestrator_->addWebModule("web", std::make_unique<WebModule>("web"));
+            orchestrator_->addMathModule("math", std::make_unique<MathModule>("math"));
+            
+            std::cout << "[FIXED] WebSocketServer::initialize: orchestrator_ initialized with modules" << std::endl;
+        } else {
+            std::cerr << "ERROR: Failed to create ModuleOrchestrator" << std::endl;
+            return false;
+        }
 
         // Load configuration if provided
         if (!configPath.empty()) {

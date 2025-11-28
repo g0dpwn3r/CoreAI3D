@@ -89,7 +89,7 @@ private:
 class WebSocketServer {
 private:
 public:
-    ModuleOrchestrator* orchestrator_; // Use pointer instead of unique_ptr to avoid destruction issues
+    std::unique_ptr<ModuleOrchestrator> orchestrator_; // Use unique_ptr for proper memory management
     std::string serverName_;
     bool isInitialized_;
     std::atomic<bool> isRunning_;
