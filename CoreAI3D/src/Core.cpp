@@ -34,9 +34,8 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
         std::cout << "[DEBUG CONSTRUCTOR] Parameter validation passed" << std::endl;
     }
 
-    // Initialize random number generator with time-based seed for better randomness
-    std::random_device rd;
-    std::mt19937 gen(rd());  // Use random seed instead of fixed seed for true randomness
+    // Initialize random number generator with fixed seed for reproducible results
+    std::mt19937 gen(42);  // Use fixed seed for reproducible results
     
     if (verbose) {
         std::cout << "[DEBUG CONSTRUCTOR] Initializing weights with random values" << std::endl;
@@ -50,8 +49,8 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     std::fill(this->hidden_output.begin(), this->hidden_output.end(), 0.0f);
 
     // CRITICAL: Initialize weight matrices with random values
-    // Use Xavier/Glorot initialization for better gradient flow
-    float scale = std::sqrt(2.0f / (inputSize + neurons));
+    // Use improved Xavier/Glorot initialization for 3D spatial data
+    float scale = std::sqrt(6.0f / (inputSize + neurons));
     std::uniform_real_distribution<float> weight_dist(-scale, scale);
 
     // Initialize hidden-to-output weights with explicit random values
@@ -275,7 +274,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         std::vector<float> hiddenLayer(this->neurons, 0.0f);
         std::vector<float> outputLayer(this->outputSize, 0.0f);
 
-        // Input to hidden layer - 3D neural network computation with transforms
+        // Input to hidden layer - 3D neural network computation with stable transforms
         for (int j = 0; j < this->neurons; ++j)
         {
             float sum = 0.0f;
@@ -283,26 +282,34 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_input_hidden, j, k))
                 {
-                    // Apply 3D transforms to create spatial features
-                    // Use different transforms for different dimensions
+                    // Apply stable 3D transforms with spatial awareness
                     float input_val = this->input[i][k];
                     float weight_val = this->weigth_input_hidden[j][k];
-                    
-                    // Apply 3D transformation based on position in feature space
+
+                    // Get triplet coordinates for spatial context
+                    size_t triplet_base = (k / 3) * 3;
+                    float x = (triplet_base < this->input[i].size()) ? this->input[i][triplet_base] : 0.0f;
+                    float y = (triplet_base + 1 < this->input[i].size()) ? this->input[i][triplet_base + 1] : 0.0f;
+                    float z = (triplet_base + 2 < this->input[i].size()) ? this->input[i][triplet_base + 2] : 0.0f;
+
+                    // Compute spatial features
+                    float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
+
+                    // Apply stable transformation based on coordinate type
                     float transformed;
-                    int transform_type = k % 3; // Cycle through x, y, z transforms
-                    
-                    if (transform_type == 0) {
-                        // X-dimension: tanh-based transform
-                        transformed = xTransform2(input_val, epsilon, 0.0f, weight_val);
-                    } else if (transform_type == 1) {
-                        // Y-dimension: sine-based transform
-                        transformed = yTransform2(input_val, epsilon, 0.0f, weight_val);
+                    int coord_type = k % 3;
+
+                    if (coord_type == 0) {
+                        // X-coordinate: linear transform with distance context
+                        transformed = x * weight_val + distance * 0.1f;
+                    } else if (coord_type == 1) {
+                        // Y-coordinate: linear transform with distance context
+                        transformed = y * weight_val + distance * 0.1f;
                     } else {
-                        // Z-dimension: sigmoid-based transform
-                        transformed = zTransform2(input_val, epsilon, 0.0f, weight_val);
+                        // Z-coordinate: linear transform with quadratic spatial context
+                        transformed = z * weight_val + (x*x + y*y + z*z) * 0.01f;
                     }
-                    
+
                     sum += transformed;
                 }
             }
@@ -384,22 +391,51 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         }
     }
 
-    // Normalize inputs and targets
-    float input_min, input_max, target_min, target_max;
-    computeMinMax(inputs, input_min, input_max);
-    computeMinMax(targets, target_min, target_max);
-
+    // Normalize inputs and targets for 3D spatial coordinates
     std::vector<std::vector<float>> normalized_inputs = inputs;
     std::vector<std::vector<float>> normalized_targets = targets;
 
-    // Normalize inputs to [0,1]
-    for (auto& row : normalized_inputs) {
-        for (float& val : row) {
-            val = (val - input_min) / (input_max - input_min);
+    // For 3D coordinates, normalize each dimension separately
+    if (!inputs.empty() && inputs[0].size() % 3 == 0) {
+        // Per-dimension normalization for spatial coordinates
+        for (size_t dim = 0; dim < 3; ++dim) {
+            float dim_min = std::numeric_limits<float>::max();
+            float dim_max = std::numeric_limits<float>::lowest();
+
+            // Find min/max for this dimension across all samples
+            for (const auto& sample : inputs) {
+                for (size_t k = dim; k < sample.size(); k += 3) {
+                    if (sample[k] < dim_min) dim_min = sample[k];
+                    if (sample[k] > dim_max) dim_max = sample[k];
+                }
+            }
+
+            // Avoid division by zero
+            if (dim_min == dim_max) {
+                dim_max = dim_min + 1.0f;
+            }
+
+            // Normalize this dimension in all samples
+            for (auto& sample : normalized_inputs) {
+                for (size_t k = dim; k < sample.size(); k += 3) {
+                    sample[k] = (sample[k] - dim_min) / (dim_max - dim_min);
+                }
+            }
+        }
+    } else {
+        // Fallback to global normalization if not 3D
+        float input_min, input_max;
+        computeMinMax(inputs, input_min, input_max);
+        for (auto& row : normalized_inputs) {
+            for (float& val : row) {
+                val = (val - input_min) / (input_max - input_min);
+            }
         }
     }
 
-    // Normalize targets to [0,1]
+    // Normalize targets globally to [0,1]
+    float target_min, target_max;
+    computeMinMax(targets, target_min, target_max);
     for (auto& row : normalized_targets) {
         for (float& val : row) {
             val = (val - target_min) / (target_max - target_min);
@@ -493,7 +529,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             }
         }
 
-        // Update weights input to hidden with 3D transforms
+        // Update weights input to hidden with stable 3D transforms
         for (int j = 0; j < this->neurons; ++j)
         {
             for (size_t k = 0; k < normalized_inputs[sample].size(); ++k)
@@ -501,28 +537,31 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
                     throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                 }
-                
-                // Apply 3D transform derivatives based on position in feature space
-                float input_val = normalized_inputs[sample][k];
-                float weight_val = this->weigth_input_hidden[j][k];
-                
-                int transform_type = k % 3; // Match the transform used in forward pass
+
+                // Get triplet coordinates for spatial context
+                size_t triplet_base = (k / 3) * 3;
+                float x = (triplet_base < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base] : 0.0f;
+                float y = (triplet_base + 1 < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base + 1] : 0.0f;
+                float z = (triplet_base + 2 < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base + 2] : 0.0f;
+
+                // Derivative of stable transform w.r.t weight is the coordinate value
+                int coord_type = k % 3;
                 float transform_derivative;
-                
-                if (transform_type == 0) {
-                    // X-dimension: tanh derivative
-                    transform_derivative = xTransform2_derivative_m(input_val, epsilon, 0.0f, weight_val);
-                } else if (transform_type == 1) {
-                    // Y-dimension: sine derivative
-                    transform_derivative = yTransform2_derivative_m(input_val, epsilon, 0.0f, weight_val);
+
+                if (coord_type == 0) {
+                    // d/dw (x * w + distance * 0.1) = x
+                    transform_derivative = x;
+                } else if (coord_type == 1) {
+                    // d/dw (y * w + distance * 0.1) = y
+                    transform_derivative = y;
                 } else {
-                    // Z-dimension: sigmoid derivative
-                    transform_derivative = zTransform2_derivative_m(input_val, epsilon, 0.0f, weight_val);
+                    // d/dw (z * w + (x² + y² + z²) * 0.01) = z
+                    transform_derivative = z;
                 }
-                
-                // Backpropagation with 3D transform: gradient = error * transform_derivative
+
+                // Backpropagation with stable 3D transform: gradient = error * transform_derivative
                 float gradient = hidden_errors[j] * transform_derivative;
-                
+
                 // Gradient clipping to prevent exploding gradients
                 if (gradient > 1.0f) gradient = 1.0f;
                 if (gradient < -1.0f) gradient = -1.0f;
@@ -610,303 +649,6 @@ void CoreAI::denormalizeOutput()
     }
 }
 
-float CoreAI::xTransform(float x, float y, float z, float n, float m)
-{
-    // Remove restrictive conditions and simplify for meaningful transformations
-    if (y == 0.0f || m == 0.0f) {
-        return std::abs(x) + this->epsilon; // Return meaningful value instead of just epsilon
-    }
-
-    double denom = static_cast<double>(y) * std::pow(static_cast<double>(m), 2.0) + this->epsilon;
-    double num = std::pow(static_cast<double>(x), 2.0) * static_cast<double>(n) + static_cast<double>(z);
-    
-    float result = static_cast<float>(num / denom);
-
-    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
-}
-
-float CoreAI::yTransform(float x, float y, float z, float n, float m)
-{
-    float denom = std::pow(x, 2.0f) * n + this->epsilon;
-    if (std::abs(denom) < this->epsilon) {
-        denom = this->epsilon;
-    }
-    float result = (std::pow(y, 3.0f) + std::pow(x, n) + std::pow(z, 2.0f)) / denom;
-    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
-}
-
-float CoreAI::zTransform(float x, float y, float z, float n, float m)
-{
-   if (std::abs(y) < this->epsilon) {
-        y = this->epsilon;
-    }
-    float result = std::pow(z, 2.0f) * std::pow(std::abs(y), n) + m;
-    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
-}
-
-float CoreAI::xTransform2(float x, float e, float n, float m)
-{
-    // User's custom X-axis transform: f(x) = Σ(x³ⁿ + z)/(3^(n²))
-    // where z is represented by parameter 'n' from training data
-    // Summation from n=1 to 5 terms
-    float result = 0.0f;
-    const int max_terms = 5;
-    
-    for (int i = 1; i <= max_terms; ++i) {
-        float power_term = std::pow(std::abs(x), 3.0f * i);  // x^(3n) - use abs to prevent NaN
-        float denominator = std::pow(3.0f, i * i);  // 3^(n²)
-        
-        // Add epsilon to prevent division by zero
-        if (std::abs(denominator) < this->epsilon) {
-            denominator = this->epsilon;
-        }
-        
-        result += (power_term + n) / denominator;
-    }
-    
-    // Additional term: x^m/Ly * e^(e^m) - THIS IS THE OVERFLOW ISSUE
-    // CRITICAL FIX: Clamp e^m to prevent overflow before computing e^(e^m)
-    float ly = std::abs(m) + 1.0f;  // Ly factor (avoid zero)
-    float clamped_em = std::min(std::abs(m), 5.0f);  // Clamp m to prevent e^m overflow
-    float exp_em = std::exp(clamped_em);  // e^m (clamped)
-    float clamped_exp_em = std::min(exp_em, 10.0f);  // Clamp again to prevent e^(e^m) overflow
-    float safe_exp_exp = std::exp(clamped_exp_em);  // e^(e^m) with clamping
-    
-    // Further clamp to reasonable range
-    if (safe_exp_exp > 1000.0f) safe_exp_exp = 1000.0f;
-    
-    float exp_term = std::pow(std::abs(x), std::abs(m)) / ly * safe_exp_exp;
-    
-    // Clamp exp_term to prevent it from dominating
-    if (exp_term > 100.0f) exp_term = 100.0f;
-    if (exp_term < -100.0f) exp_term = -100.0f;
-    
-    result += exp_term;
-    
-    // Clamp result to prevent numerical instability
-    if (std::isnan(result) || std::isinf(result)) {
-        return this->epsilon;
-    }
-    
-    // Final clamping to safe range
-    if (result > 1000.0f) result = 1000.0f;
-    if (result < -1000.0f) result = -1000.0f;
-    
-    return result;
-}
-
-float CoreAI::yTransform2(float y, float e, float n, float m)
-{
-    // User's custom Y-axis transform: f(y) = Σ(y^(z+x^n))/(x³ N)
-    // where z is parameter 'n', x is parameter 'm', and N is the iteration count
-    // Summation from n=1 to 5 terms
-    float result = 0.0f;
-    const int max_terms = 5;
-    
-    for (int i = 1; i <= max_terms; ++i) {
-        // Clamp exponent to prevent overflow
-        float m_power = std::pow(std::abs(m), static_cast<float>(i));
-        if (m_power > 20.0f) m_power = 20.0f;  // Prevent extreme exponents
-        
-        float exponent = n + m_power;  // z + x^n
-        // Clamp exponent to safe range
-        if (exponent > 20.0f) exponent = 20.0f;
-        if (exponent < -20.0f) exponent = -20.0f;
-        
-        float numerator = std::pow(std::abs(y) + this->epsilon, exponent);  // y^(z+x^n)
-        float denominator = std::pow(std::abs(m) + this->epsilon, 3.0f) * i;  // x³ * N
-        
-        // Add epsilon to prevent division by zero
-        if (std::abs(denominator) < this->epsilon) {
-            denominator = this->epsilon;
-        }
-        
-        float term = numerator / denominator;
-        // Clamp term to prevent it from dominating
-        if (term > 100.0f) term = 100.0f;
-        if (term < -100.0f) term = -100.0f;
-        
-        result += term;
-    }
-    
-    // Additional term: y^n/Ly * e^(e^(S/N)) - THIS IS ALSO AN OVERFLOW ISSUE
-    // CRITICAL FIX: Clamp all exponentials
-    float ly = std::abs(n) + 1.0f;  // Ly factor (avoid zero)
-    float s_over_n = m / (std::abs(n) + this->epsilon);
-    
-    // Clamp s_over_n to prevent overflow
-    if (s_over_n > 5.0f) s_over_n = 5.0f;
-    if (s_over_n < -5.0f) s_over_n = -5.0f;
-    
-    float exp_s_n = std::exp(s_over_n);  // e^(S/N)
-    // Clamp again
-    if (exp_s_n > 10.0f) exp_s_n = 10.0f;
-    
-    float safe_exp_exp = std::exp(exp_s_n);  // e^(e^(S/N))
-    // Final clamp
-    if (safe_exp_exp > 1000.0f) safe_exp_exp = 1000.0f;
-    
-    // Clamp n to prevent y^n overflow
-    float safe_n = n;
-    if (safe_n > 10.0f) safe_n = 10.0f;
-    if (safe_n < -10.0f) safe_n = -10.0f;
-    
-    float exp_term = std::pow(std::abs(y) + this->epsilon, safe_n) / ly * safe_exp_exp;
-    
-    // Clamp exp_term
-    if (exp_term > 100.0f) exp_term = 100.0f;
-    if (exp_term < -100.0f) exp_term = -100.0f;
-    
-    result += exp_term;
-    
-    // Clamp result to prevent numerical instability
-    if (std::isnan(result) || std::isinf(result)) {
-        return this->epsilon;
-    }
-    
-    // Final clamping to safe range
-    if (result > 1000.0f) result = 1000.0f;
-    if (result < -1000.0f) result = -1000.0f;
-    
-    return result;
-}
-
-float CoreAI::zTransform2(float z, float e, float n, float m)
-{
-    // User's custom Z-axis transform: f(z) = Σ z³ * y^n
-    // where y is parameter 'm' and n is the iteration count
-    // Summation from n=1 to 5 terms
-    float result = 0.0f;
-    const int max_terms = 5;
-    
-    for (int i = 1; i <= max_terms; ++i) {
-        float z_cubed = std::pow(z, 3.0f);  // z³
-        float y_power = std::pow(std::abs(m), static_cast<float>(i));  // y^n
-        result += z_cubed * y_power;
-    }
-    
-    // Additional term: z^n * a/(3*b³*n)
-    // Using n as exponent, m as 'a', and e as 'b'
-    float a = m;
-    float b = std::abs(e) + this->epsilon;  // Avoid zero
-    float denominator = 3.0f * std::pow(b, 3.0f) * std::abs(n + this->epsilon);
-    
-    if (std::abs(denominator) < this->epsilon) {
-        denominator = this->epsilon;
-    }
-    
-    float extra_term = std::pow(z, n) * a / denominator;
-    result += extra_term;
-    
-    // Clamp result to prevent numerical instability
-    if (std::isnan(result) || std::isinf(result)) {
-        return this->epsilon;
-    }
-    return result;
-}
-
-float CoreAI::xTransform2_derivative_m(float x, float e_arg, float n, float m)
-{
-    // Derivative of custom X-axis transform with respect to m
-    // d/dm[Σ(x³ⁿ + z)/(3^(n²)) + x^m/Ly * e^(e^m)]
-    
-    float derivative = 0.0f;
-    
-    // Derivative of the exponential term: x^m/Ly * e^(e^m)
-    // d/dm[x^m * e^(e^m)] = x^m * ln(x) * e^(e^m) + x^m * e^(e^m) * e^m * ln(e)
-    float ly = std::abs(m) + 1.0f;
-    if (x > 0) {
-        float x_m = std::pow(x, m);
-        float exp_em = std::exp(std::pow(e_arg, m));
-        float ln_x = std::log(x);
-        
-        // Simplified derivative approximation for stability
-        derivative = x_m * ln_x * exp_em / ly;
-    }
-    
-    // Clamp to prevent numerical instability
-    if (std::isnan(derivative) || std::isinf(derivative)) {
-        return this->epsilon;
-    }
-    
-    // Limit gradient magnitude
-    if (derivative > 10.0f) derivative = 10.0f;
-    if (derivative < -10.0f) derivative = -10.0f;
-    
-    return derivative;
-}
-
-float CoreAI::yTransform2_derivative_m(float y, float e_arg, float n, float m)
-{
-    // Derivative of custom Y-axis transform with respect to m
-    // d/dm[Σ(y^(z+x^n))/(x³ N)]
-    
-    float derivative = 0.0f;
-    const int max_terms = 5;
-    
-    for (int i = 1; i <= max_terms; ++i) {
-        float exponent = n + std::pow(m, static_cast<float>(i));
-        float denominator = std::pow(std::abs(m), 3.0f) * i;
-        
-        if (std::abs(denominator) > this->epsilon && std::abs(y) > this->epsilon) {
-            // Derivative of y^(n+m^i) / (m³*i) with respect to m
-            float y_power = std::pow(std::abs(y), exponent);
-            float ln_y = std::log(std::abs(y) + this->epsilon);
-            
-            // Chain rule: derivative of exponent * y^exponent * ln(y) / denominator
-            derivative += i * std::pow(m, i - 1.0f) * y_power * ln_y / denominator;
-            
-            // Also account for derivative of denominator
-            derivative -= 3.0f * y_power / (std::pow(m, 4.0f) * i + this->epsilon);
-        }
-    }
-    
-    // Clamp to prevent numerical instability
-    if (std::isnan(derivative) || std::isinf(derivative)) {
-        return this->epsilon;
-    }
-    
-    // Limit gradient magnitude
-    if (derivative > 10.0f) derivative = 10.0f;
-    if (derivative < -10.0f) derivative = -10.0f;
-    
-    return derivative;
-}
-
-float CoreAI::zTransform2_derivative_m(float z, float e_arg, float n, float m)
-{
-    // Derivative of custom Z-axis transform with respect to m
-    // d/dm[Σ z³ * y^n + z^n * a/(3*b³*n)]
-    
-    float derivative = 0.0f;
-    const int max_terms = 5;
-    
-    // Derivative of Σ z³ * m^n with respect to m
-    for (int i = 1; i <= max_terms; ++i) {
-        float z_cubed = std::pow(z, 3.0f);
-        // d/dm[m^n] = n * m^(n-1)
-        derivative += z_cubed * i * std::pow(std::abs(m), i - 1.0f);
-    }
-    
-    // Derivative of z^n * m/(3*e³*n) with respect to m is: z^n/(3*e³*n)
-    float b = std::abs(e_arg) + this->epsilon;
-    float denominator = 3.0f * std::pow(b, 3.0f) * std::abs(n + this->epsilon);
-    
-    if (std::abs(denominator) > this->epsilon) {
-        derivative += std::pow(z, n) / denominator;
-    }
-    
-    // Clamp to prevent numerical instability
-    if (std::isnan(derivative) || std::isinf(derivative)) {
-        return this->epsilon;
-    }
-    
-    // Limit gradient magnitude
-    if (derivative > 10.0f) derivative = 10.0f;
-    if (derivative < -10.0f) derivative = -10.0f;
-    
-    return derivative;
-}
 
 void CoreAI::setInputSize(int size)
 {
@@ -922,16 +664,15 @@ void CoreAI::setOutputSize(int size)
 
 void CoreAI::resizeWeights()
 {
-    // Use random seed for weight re-initialization
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    
+    // Use fixed seed for reproducible weight re-initialization
+    std::mt19937 gen(42);
+
     if (verbose) {
         std::cout << "[DEBUG RESIZE] Resizing and re-initializing weights" << std::endl;
     }
-    
-    // Resize weight matrices with Xavier/Glorot initialization
-    float scale = std::sqrt(2.0f / (inputSize + neurons));
+
+    // Resize weight matrices with improved Xavier/Glorot initialization for 3D spatial data
+    float scale = std::sqrt(6.0f / (inputSize + neurons));
     std::uniform_real_distribution<float> weight_dist(-scale, scale);
 
     // Resize and initialize hidden-to-output weights with explicit random values

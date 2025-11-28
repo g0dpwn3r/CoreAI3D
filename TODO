@@ -1,5 +1,4 @@
 ## v1.0 - Core Setup and Basic Features
-- Add offline mode
 - Add loading datasets from database
 - Linux_gui should change the docker sanbox centos to kali
 - linux_gui should have datanormalization networkarchitecture and training parameters under one tab in the dashboard

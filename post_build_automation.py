@@ -279,7 +279,9 @@ def main():
                 if str(dest) == '/home/carlon/tools/CoreAI3D':
                     logging.info(f"Copying executable to tools directory: {target_executable} to {dest}")
                     # Clear the directory first
-                    if dest.exists() or dest != '/home/carlon/tools/CoreAI3D':
+                    tools_dir = Path('/home/carlon/tools/CoreAI3D').resolve()
+                    dest_dir = Path(dest).resolve()
+                    if dest.exists() or tools_dir != dest_dir:
                         logging.info(f"Clearing tools directory: {dest}")
                         delete_directory(dest)
                     dest.mkdir(parents=True, exist_ok=True)

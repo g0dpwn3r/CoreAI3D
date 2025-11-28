@@ -146,6 +146,7 @@ bool Predict::initializeTrainer(const std::string& dbHost,
                                 bool isOfflineMode) {
     try {
         bool hasDbParams = !dbHost.empty() && !dbUser.empty() && !dbSchema.empty() && !isOfflineMode;
+#ifdef USE_MYSQL
 
         if (hasDbParams) {
             // Try online mode with database first
@@ -161,6 +162,7 @@ bool Predict::initializeTrainer(const std::string& dbHost,
                 // Fall through to offline mode
             }
         }
+#endif
 
         // Offline mode (fallback or when no database params provided)
         trainer_ = new Training(true, verbose_, webSocketServer_);

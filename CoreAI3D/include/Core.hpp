@@ -18,6 +18,7 @@ private:
     int neurons;
     float epsilon = std::numeric_limits<float>::epsilon();
     double e = std::exp(1.0);
+    double defaultLearningRate = 0.001; // Default learning rate for stable convergence
     // Member variables for the transform functions (added for compilation)
     float x;
     float y;
