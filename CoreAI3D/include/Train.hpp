@@ -8,6 +8,7 @@
 #include "Database.hpp"
 #include "VisionModule.hpp"
 #include "WebSocketServer.hpp"
+#include "DataAugmentation.hpp"
 #include <nlohmann/json.hpp>
 
 class Language;
@@ -91,6 +92,19 @@ public:
     bool stopTraining();
     void resetTrainingState();
 
+    // Data augmentation methods
+    void initializeDataAugmentation(const DataAugmentation::AugmentationConfig& config = DataAugmentation::AugmentationConfig());
+    void enableRotation(bool enable);
+    void enableScaling(bool enable);
+    void enableNoise(bool enable);
+    void enableSymmetry(bool enable);
+    void setRotationMaxAngle(float angle);
+    void setScalingRange(float minScale, float maxScale);
+    void setNoiseStdDev(float stdDev);
+    void setSymmetryProbability(float probability);
+    const DataAugmentation::AugmentationConfig& getAugmentationConfig() const;
+    void applyDataAugmentation();
+
  private:
     std::mt19937 gen;
     std::vector<std::vector<float>> raw_data; // Might be less used now
@@ -102,6 +116,7 @@ public:
 
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Language> langProc;
+    std::unique_ptr<DataAugmentation> dataAugmentation;
     WebSocketServer* webSocketServer;
 
     // Training state for async operations

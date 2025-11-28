@@ -190,6 +190,8 @@ set(SOURCE_FILES
     src/WebSocketServer.cpp
     src/VisionModule.cpp
     src/Gemini.cpp
+    src/Optimizer.cpp
+    src/LearningRateScheduler.cpp
 )
 
 # Add Linux-specific modules only on Linux
@@ -385,13 +387,13 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $HOME/tools/CoreAI3D
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:CoreAI3D> $HOME/tools/CoreAI3D/CoreAI3D
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/config.json $HOME/tools/CoreAI3D/config.json
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/linux_gui $HOME/tools/CoreAI3D/linux_gui
+    # COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/linux_gui $HOME/tools/CoreAI3D/linux_gui
     COMMENT "Copying CoreAI3D executable to $HOME/tools/CoreAI3D"
     VERBATIM)
 
 # Add post-build automation script (disabled for now due to path issues)
 add_custom_command(TARGET CoreAI3D POST_BUILD
-    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${CMAKE_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
+    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${PROJECT_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
     COMMENT "Running post-build automation script"
     VERBATIM
 )

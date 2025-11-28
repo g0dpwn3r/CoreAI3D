@@ -71,7 +71,7 @@ def copy_source_to_destination(src, dest):
         dest_dir = Path(dest).resolve()
                    
         # Delete destination if it exists
-        if dest.exists() and tools_dir == dest_dir:
+        if dest.exists() and str(dest) != str(tools_dir):
             logging.info(f"Destination {dest} exists, deleting it first")
             delete_directory(dest)
 

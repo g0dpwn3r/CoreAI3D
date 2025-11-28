@@ -14,6 +14,38 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
         
         std::cout << "[DEBUG CONSTRUCTOR] Transform variables initialized - x: " << x
                   << ", y: " << y << ", z: " << z << ", epsilon: " << epsilon << std::endl;
+    // Initialize advanced 3D transform parameters
+    this->enable_polynomial = true;
+    this->enable_trigonometric = true;
+    this->enable_log_exp = true;
+    this->enable_rbf = true;
+    this->polynomial_weight = 1.0f;
+    this->trig_weight = 1.0f;
+    this->log_exp_weight = 1.0f;
+    this->rbf_weight = 1.0f;
+    this->rbf_center = {0.0f, 0.0f, 0.0f};
+    this->rbf_sigma = 1.0f;
+
+    // Initialize new 3D feature engineering parameters
+    this->enable_angular = true;
+    this->enable_projections = true;
+    this->enable_ratios = true;
+    this->enable_transformations = true;
+    this->angular_weight = 1.0f;
+    this->projections_weight = 1.0f;
+    this->ratios_weight = 1.0f;
+    this->transformations_weight = 1.0f;
+
+    // Initialize transformation parameters
+    this->rotation_angle_x = 0.0f;
+    this->rotation_angle_y = 0.0f;
+    this->rotation_angle_z = 0.0f;
+    this->scale_x = 1.0f;
+    this->scale_y = 1.0f;
+    this->scale_z = 1.0f;
+    this->translation_x = 0.0f;
+    this->translation_y = 0.0f;
+    this->translation_z = 0.0f;
     }
 
     // Parameter validation
@@ -93,6 +125,51 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
 
     // Initialize trainer pointer to nullptr
     this->trainer = nullptr;
+
+    // Initialize optimizer and scheduler to nullptr (will be set via configuration)
+    this->optimizer = nullptr;
+    this->lrScheduler = nullptr;
+    this->currentEpoch = 0;
+
+    // Initialize regularization and stability parameters with defaults
+    this->l2_lambda = 0.01f;
+    this->dropout_rate = 0.2f;
+    this->bn_momentum = 0.1f;
+    this->grad_clip_threshold = 1.0f;
+
+    this->use_dropout = true;
+    this->use_batch_norm = true;
+    this->use_l2_reg = true;
+    this->use_grad_clip = true;
+
+    // Initialize batch normalization parameters
+    initializeVector(this->bn_running_mean, neurons);
+    std::fill(this->bn_running_mean.begin(), this->bn_running_mean.end(), 0.0f);
+    initializeVector(this->bn_running_var, neurons);
+    std::fill(this->bn_running_var.begin(), this->bn_running_var.end(), 1.0f);
+    initializeVector(this->bn_gamma, neurons);
+    std::fill(this->bn_gamma.begin(), this->bn_gamma.end(), 1.0f);
+    initializeVector(this->bn_beta, neurons);
+    // Initialize multi-layer architecture (default to single hidden layer for backward compatibility)
+    this->layer_sizes = {inputSize_, neurons_, outputSize_}; // input, hidden, output
+    this->enable_residual = false;
+    this->enable_attention = false;
+    this->attention_temperature = 1.0f;
+    this->attention_weight = 1.0f;
+
+    // Initialize layer weights for multi-layer network
+    initializeMultiLayerWeights();
+
+    // Initialize attention weights if enabled
+    if (enable_attention) {
+        initializeAttentionWeights();
+    }
+    std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
+
+    // Initialize activation configurations (default to sigmoid for backward compatibility)
+    layer_activations.resize(layer_sizes.size(), {ActivationType::SIGMOID, 1.0f, 0.1f, 1.0f});
+}
+    std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
 }
 std::vector<std::vector<float>>& CoreAI::getInput()
 {
@@ -145,6 +222,162 @@ float CoreAI::sigmoid(float x)
 {
     return 1.0f / (1.0f + std::exp(-x));
 }
+float CoreAI::sigmoid(float x)
+{
+    return 1.0f / (1.0f + std::exp(-x));
+}
+
+// Modern activation functions
+
+float CoreAI::elu(float x, float alpha)
+{
+    return x >= 0.0f ? x : alpha * (std::exp(x) - 1.0f);
+}
+
+float CoreAI::elu_derivative(float x, float alpha)
+{
+    return x >= 0.0f ? 1.0f : alpha * std::exp(x);
+}
+
+float CoreAI::leaky_relu(float x, float alpha)
+{
+    return x >= 0.0f ? x : alpha * x;
+}
+
+float CoreAI::leaky_relu_derivative(float x, float alpha)
+{
+    return x >= 0.0f ? 1.0f : alpha;
+}
+
+float CoreAI::parametric_relu(float x, float beta)
+{
+    return x >= 0.0f ? x : beta * x;
+}
+
+float CoreAI::parametric_relu_derivative(float x, float beta)
+{
+    return x >= 0.0f ? 1.0f : beta;
+}
+
+float CoreAI::swish(float x)
+{
+    return x * sigmoid(x);
+}
+
+float CoreAI::swish_derivative(float x)
+{
+    float s = sigmoid(x);
+    return s + x * s * (1.0f - s);
+}
+
+float CoreAI::gelu(float x)
+{
+    // GELU approximation: x * Φ(x) where Φ(x) is the CDF of standard normal
+    // Using tanh approximation for numerical stability
+    float sqrt_2_over_pi = std::sqrt(2.0f / M_PI);
+    float x_cubed = x * x * x;
+    return 0.5f * x * (1.0f + std::tanh(sqrt_2_over_pi * (x + 0.044715f * x_cubed)));
+}
+
+float CoreAI::gelu_derivative(float x)
+{
+    // Derivative of GELU approximation
+    float sqrt_2_over_pi = std::sqrt(2.0f / M_PI);
+    float x_cubed = x * x * x;
+    float tanh_arg = sqrt_2_over_pi * (x + 0.044715f * x_cubed);
+    float sech_sq = 1.0f / (std::cosh(tanh_arg) * std::cosh(tanh_arg));
+
+    float phi_prime = sqrt_2_over_pi * (1.0f + 3.0f * 0.044715f * x * x) * sech_sq;
+    float phi = 0.5f * (1.0f + std::tanh(tanh_arg));
+
+    return 0.5f * (phi + x * phi_prime);
+}
+
+float CoreAI::spatial_elu(float x, float distance, float alpha, float spatial_weight)
+{
+    // Spatial-aware ELU: combines standard ELU with distance-based modulation
+    float base_activation = elu(x, alpha);
+    float spatial_factor = 1.0f + spatial_weight * std::exp(-distance * distance);
+    return base_activation * spatial_factor;
+}
+
+float CoreAI::spatial_elu_derivative(float x, float distance, float alpha, float spatial_weight)
+{
+    // Derivative of spatial ELU
+    float base_derivative = elu_derivative(x, alpha);
+    float spatial_factor = 1.0f + spatial_weight * std::exp(-distance * distance);
+    float spatial_factor_derivative = -2.0f * distance * spatial_weight * std::exp(-distance * distance);
+
+    // Chain rule: d/dx[elu(x) * f(distance)] = elu'(x) * f(distance) + elu(x) * f'(distance)
+    // But f'(distance) depends on distance, not x, so second term is 0 for derivative w.r.t. x
+    return base_derivative * spatial_factor;
+}
+
+float CoreAI::spatial_leaky_relu(float x, float distance, float alpha, float spatial_weight)
+{
+    // Spatial-aware Leaky ReLU: combines standard Leaky ReLU with distance-based modulation
+    float base_activation = leaky_relu(x, alpha);
+    float spatial_factor = 1.0f + spatial_weight * (1.0f / (1.0f + distance));
+    return base_activation * spatial_factor;
+}
+
+float CoreAI::spatial_leaky_relu_derivative(float x, float distance, float alpha, float spatial_weight)
+{
+    // Derivative of spatial Leaky ReLU
+    float base_derivative = leaky_relu_derivative(x, alpha);
+    float spatial_factor = 1.0f + spatial_weight * (1.0f / (1.0f + distance));
+    return base_derivative * spatial_factor;
+}
+
+// Unified activation function interface
+float CoreAI::activate(float x, const ActivationConfig& config, float distance)
+{
+    switch (config.type) {
+        case ActivationType::SIGMOID:
+            return sigmoid(x);
+        case ActivationType::ELU:
+            return elu(x, config.alpha);
+        case ActivationType::LEAKY_RELU:
+            return leaky_relu(x, config.alpha);
+        case ActivationType::PARAMETRIC_RELU:
+            return parametric_relu(x, config.beta);
+        case ActivationType::SWISH:
+            return swish(x);
+        case ActivationType::GELU:
+            return gelu(x);
+        case ActivationType::SPATIAL_ELU:
+            return spatial_elu(x, distance, config.alpha, config.spatial_weight);
+        case ActivationType::SPATIAL_LEAKY_RELU:
+            return spatial_leaky_relu(x, distance, config.alpha, config.spatial_weight);
+        default:
+            return sigmoid(x); // fallback
+    }
+}
+
+float CoreAI::activate_derivative(float x, const ActivationConfig& config, float distance)
+{
+    switch (config.type) {
+        case ActivationType::SIGMOID:
+            return x * (1.0f - x); // sigmoid derivative
+        case ActivationType::ELU:
+            return elu_derivative(x, config.alpha);
+        case ActivationType::LEAKY_RELU:
+            return leaky_relu_derivative(x, config.alpha);
+        case ActivationType::PARAMETRIC_RELU:
+            return parametric_relu_derivative(x, config.beta);
+        case ActivationType::SWISH:
+            return swish_derivative(x);
+        case ActivationType::GELU:
+            return gelu_derivative(x);
+        case ActivationType::SPATIAL_ELU:
+            return spatial_elu_derivative(x, distance, config.alpha, config.spatial_weight);
+        case ActivationType::SPATIAL_LEAKY_RELU:
+            return spatial_leaky_relu_derivative(x, distance, config.alpha, config.spatial_weight);
+        default:
+            return x * (1.0f - x); // sigmoid derivative fallback
+    }
+}
+
 
 void CoreAI::setTarget(const std::vector<std::vector<float> >& data)
 {
@@ -241,7 +474,7 @@ bool CoreAI::safe2DIndex(const std::vector<std::vector<float> >& matrix, int i,
     return i >= 0 && i < matrix.size() && j >= 0 && j < matrix[i].size();
 }
 
-std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<float> >& inputvalue)
+std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<float> >& inputvalue, bool training)
 {
     // Parameter validation
     if (inputvalue.empty()) {
@@ -257,6 +490,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
     this->results.clear();
     this->hidden.clear();
     this->output.clear();
+    this->dropout_masks.clear();
 
     // DEBUG: Log input statistics
     if (verbose && !inputvalue.empty() && !inputvalue[0].empty()) {
@@ -269,10 +503,11 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         std::cout << "..." << std::endl;
     }
 
+    // First pass: compute all hidden layer activations before batch normalization
+    std::vector<std::vector<float>> raw_hidden_activations;
     for (size_t i = 0; i < this->input.size(); ++i)
     {
         std::vector<float> hiddenLayer(this->neurons, 0.0f);
-        std::vector<float> outputLayer(this->outputSize, 0.0f);
 
         // Input to hidden layer - 3D neural network computation with stable transforms
         for (int j = 0; j < this->neurons; ++j)
@@ -292,28 +527,202 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
                     float y = (triplet_base + 1 < this->input[i].size()) ? this->input[i][triplet_base + 1] : 0.0f;
                     float z = (triplet_base + 2 < this->input[i].size()) ? this->input[i][triplet_base + 2] : 0.0f;
 
+                    // Apply coordinate transformations if enabled
+                    if (enable_transformations) {
+                        // Apply scaling
+                        x = x * scale_x;
+                        y = y * scale_y;
+                        z = z * scale_z;
+
+                        // Apply translation
+                        x += translation_x;
+                        y += translation_y;
+                        z += translation_z;
+
+                        // Apply rotations (order: Z, Y, X)
+                        // Rotation around Z-axis
+                        float cos_z = std::cos(rotation_angle_z);
+                        float sin_z = std::sin(rotation_angle_z);
+                        float temp_x = x * cos_z - y * sin_z;
+                        float temp_y = x * sin_z + y * cos_z;
+                        x = temp_x;
+                        y = temp_y;
+
+                        // Rotation around Y-axis
+                        float cos_y = std::cos(rotation_angle_y);
+                        float sin_y = std::sin(rotation_angle_y);
+                        float temp_x2 = x * cos_y + z * sin_y;
+                        float temp_z = -x * sin_y + z * cos_y;
+                        x = temp_x2;
+                        z = temp_z;
+
+                        // Rotation around X-axis
+                        float cos_x = std::cos(rotation_angle_x);
+                        float sin_x = std::sin(rotation_angle_x);
+                        float temp_y2 = y * cos_x - z * sin_x;
+                        float temp_z2 = y * sin_x + z * cos_x;
+                        y = temp_y2;
+                        z = temp_z2;
+                    }
+
                     // Compute spatial features
                     float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
-                    // Apply stable transformation based on coordinate type
-                    float transformed;
+                    // Apply advanced 3D transformations
+                    float transformed = 0.0f;
                     int coord_type = k % 3;
 
+                    // Original linear transforms
                     if (coord_type == 0) {
-                        // X-coordinate: linear transform with distance context
-                        transformed = x * weight_val + distance * 0.1f;
+                        transformed += x * weight_val;
                     } else if (coord_type == 1) {
-                        // Y-coordinate: linear transform with distance context
-                        transformed = y * weight_val + distance * 0.1f;
+                        transformed += y * weight_val;
                     } else {
-                        // Z-coordinate: linear transform with quadratic spatial context
-                        transformed = z * weight_val + (x*x + y*y + z*z) * 0.01f;
+                        transformed += z * weight_val;
+                    }
+
+                    // Distance weighting
+                    transformed += distance * 0.1f;
+
+                    // Polynomial transforms
+                    if (enable_polynomial) {
+                        if (coord_type == 0) {
+                            transformed += polynomial_weight * (x*x + x*y + x*z);
+                        } else if (coord_type == 1) {
+                            transformed += polynomial_weight * (y*y + x*y + y*z);
+                        } else {
+                            transformed += polynomial_weight * (z*z + x*z + y*z);
+                        }
+                    }
+
+                    // Trigonometric transforms
+                    if (enable_trigonometric) {
+                        if (coord_type == 0) {
+                            transformed += trig_weight * std::sin(x);
+                        } else if (coord_type == 1) {
+                            transformed += trig_weight * std::cos(y);
+                        } else {
+                            float z_clamped = std::max(-std::acos(-1.0f)/2 + 0.01f, std::min(std::acos(-1.0f)/2 - 0.01f, z));
+                            transformed += trig_weight * std::tan(z_clamped);
+                        }
+                    }
+
+                    // Logarithmic/exponential transforms
+                    if (enable_log_exp) {
+                        if (coord_type == 0) {
+                            transformed += log_exp_weight * std::log(1.0f + std::abs(x));
+                        } else if (coord_type == 1) {
+                            transformed += log_exp_weight * std::exp(-distance);
+                        } else {
+                            transformed += log_exp_weight * std::log(1.0f + std::abs(z));
+                        }
+                    }
+
+                    // Radial basis function
+                    if (enable_rbf) {
+                        float dx = x - rbf_center[0];
+                        float dy = y - rbf_center[1];
+                        float dz = z - rbf_center[2];
+                        float dist_sq = dx*dx + dy*dy + dz*dz;
+                        transformed += rbf_weight * std::exp(-dist_sq / (rbf_sigma * rbf_sigma));
+                    }
+
+                    // Angular features (spherical coordinates θ, φ)
+                    if (enable_angular) {
+                        float r = distance;
+                        float theta = (r > this->epsilon) ? std::acos(std::max(-1.0f, std::min(1.0f, z / r))) : 0.0f;
+                        float phi = std::atan2(y, x);
+                        transformed += angular_weight * theta;
+                        transformed += angular_weight * phi;
+                    }
+
+                    // Projection features (plane distances)
+                    if (enable_projections) {
+                        float proj_xy = std::sqrt(x*x + y*y + this->epsilon);
+                        float proj_xz = std::sqrt(x*x + z*z + this->epsilon);
+                        float proj_yz = std::sqrt(y*y + z*z + this->epsilon);
+                        transformed += projections_weight * proj_xy;
+                        transformed += projections_weight * proj_xz;
+                        transformed += projections_weight * proj_yz;
+                    }
+
+                    // Distance ratios
+                    if (enable_ratios) {
+                        float ratio_xy = (std::abs(y) > this->epsilon) ? x / y : 0.0f;
+                        float ratio_yz = (std::abs(z) > this->epsilon) ? y / z : 0.0f;
+                        float ratio_xz = (std::abs(z) > this->epsilon) ? x / z : 0.0f;
+                        transformed += ratios_weight * ratio_xy;
+                        transformed += ratios_weight * ratio_yz;
+                        transformed += ratios_weight * ratio_xz;
                     }
 
                     sum += transformed;
                 }
             }
             hiddenLayer[j] = this->sigmoid(sum);
+        }
+        raw_hidden_activations.push_back(hiddenLayer);
+    }
+
+    // Apply batch normalization if enabled
+    if (use_batch_norm) {
+        size_t batch_size = raw_hidden_activations.size();
+        for (int j = 0; j < this->neurons; ++j) {
+            // Compute batch mean and variance
+            float batch_mean = 0.0f;
+            float batch_var = 0.0f;
+
+            for (size_t i = 0; i < batch_size; ++i) {
+                batch_mean += raw_hidden_activations[i][j];
+            }
+            batch_mean /= batch_size;
+
+            for (size_t i = 0; i < batch_size; ++i) {
+                float diff = raw_hidden_activations[i][j] - batch_mean;
+                batch_var += diff * diff;
+            }
+            batch_var /= batch_size;
+
+            // Update running statistics
+            if (training) {
+                bn_running_mean[j] = bn_momentum * batch_mean + (1 - bn_momentum) * bn_running_mean[j];
+                bn_running_var[j] = bn_momentum * batch_var + (1 - bn_momentum) * bn_running_var[j];
+            }
+
+            // Use batch stats during training, running stats during inference
+            float mean = training ? batch_mean : bn_running_mean[j];
+            float var = training ? batch_var : bn_running_var[j];
+
+            // Normalize and scale
+            for (size_t i = 0; i < batch_size; ++i) {
+                float normalized = (raw_hidden_activations[i][j] - mean) / std::sqrt(var + epsilon);
+                raw_hidden_activations[i][j] = bn_gamma[j] * normalized + bn_beta[j];
+            }
+        }
+    }
+
+    // Now process each sample with dropout and output computation
+    for (size_t i = 0; i < this->input.size(); ++i)
+    {
+        std::vector<float> hiddenLayer = raw_hidden_activations[i];
+        std::vector<float> outputLayer(this->outputSize, 0.0f);
+
+        // Apply dropout to hidden layer if enabled and training
+        std::vector<float> dropout_mask(neurons, 1.0f);
+        if (use_dropout && training) {
+            std::mt19937 gen(42 + i); // Different seed per sample
+            std::bernoulli_distribution dist(1.0f - dropout_rate);
+            float scale = 1.0f / (1.0f - dropout_rate);
+
+            for (int j = 0; j < neurons; ++j) {
+                dropout_mask[j] = dist(gen) ? scale : 0.0f;
+                hiddenLayer[j] *= dropout_mask[j];
+            }
+        }
+
+        // Store dropout mask for backpropagation
+        if (training) {
+            dropout_masks.push_back(dropout_mask);
         }
 
         // DEBUG: Log hidden layer activation for first sample
@@ -450,20 +859,33 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
 
     // Ensure forward pass has been run
     if (this->results.empty()) {
-        this->forward(normalized_inputs);
+        this->forward(normalized_inputs, true); // training = true
     }
 
-    // Backpropagation
+    // Initialize gradient accumulators for batch update
+    std::vector<std::vector<float>> output_hidden_gradients(this->outputSize, std::vector<float>(this->neurons, 0.0f));
+    std::vector<std::vector<float>> input_hidden_gradients(this->neurons, std::vector<float>(this->inputSize, 0.0f));
+
+    // Get current learning rate from scheduler if available
+    float currentLearningRate = learningRate;
+    if (lrScheduler) {
+        currentLearningRate = lrScheduler->getLearningRate(currentEpoch);
+        if (verbose) {
+            std::cout << "[DEBUG TRAIN] Epoch " << currentEpoch << ", Learning rate: " << currentLearningRate << std::endl;
+        }
+    }
+
+    // Backpropagation - accumulate gradients over all samples
     for (size_t sample = 0; sample < normalized_inputs.size(); ++sample)
     {
-        
+
         // DEBUG: Log transform function inputs
         if (verbose && sample == 0) {
             std::cout << "[DEBUG TRAIN] Transform function inputs - x: " << this->x
                       << ", y: " << this->y << ", z: " << this->z
                       << ", epsilon: " << this->epsilon << std::endl;
         }
-        
+
         // Output layer error
         std::vector<float> output_errors(this->outputSize, 0.0f);
         for (int j = 0; j < this->outputSize; ++j)
@@ -474,16 +896,16 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
 
             float output = this->results[sample][j];
             float target = normalized_targets[sample][j];
-            
+
             // DEBUG: Log error calculation components
             if (verbose && sample == 0 && j == 0) {
                 std::cout << "[DEBUG TRAIN] Sample 0, Output 0 - output: " << output
                           << ", target: " << target << std::endl;
             }
-            
+
             // Standard backpropagation: error = (target - output) * derivative
             output_errors[j] = (target - output) * output * (1.0f - output); // Derivative of sigmoid
-        
+
         }
 
         // Hidden layer error
@@ -501,7 +923,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             }
             float hidden = this->hidden[sample][j];
             hidden_errors[j] = sum * hidden * (1.0f - hidden); // Derivative of sigmoid
-            
+
             // DEBUG: Log hidden error calculation
             if (verbose && sample == 0 && j == 0) {
                 std::cout << "[DEBUG TRAIN] Sample 0, Hidden 0 - sum: " << sum
@@ -510,7 +932,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             }
         }
 
-        // Update weights output to hidden
+        // Accumulate gradients for output to hidden weights
         for (int j = 0; j < this->outputSize; ++j)
         {
             for (int k = 0; k < this->neurons; ++k)
@@ -520,16 +942,22 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 }
                 // Standard backpropagation: gradient = error * activation
                 float gradient = output_errors[j] * hidden[sample][k];
-                
-                // Gradient clipping to prevent exploding gradients
-                if (gradient > 1.0f) gradient = 1.0f;
-                if (gradient < -1.0f) gradient = -1.0f;
 
-                this->weigth_output_hidden[j][k] += learningRate * gradient;
+                // Add L2 regularization gradient: 2 * lambda * weight
+                if (use_l2_reg) {
+                    gradient += 2.0f * l2_lambda * this->weigth_output_hidden[j][k];
+                }
+
+                // Gradient clipping to prevent exploding gradients
+                if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
+                    gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
+                }
+
+                output_hidden_gradients[j][k] += gradient;
             }
         }
 
-        // Update weights input to hidden with stable 3D transforms
+        // Accumulate gradients for input to hidden weights with stable 3D transforms
         for (int j = 0; j < this->neurons; ++j)
         {
             for (size_t k = 0; k < normalized_inputs[sample].size(); ++k)
@@ -547,21 +975,83 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 // Compute spatial features for consistency with forward pass
                 float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
-                // Derivative of stable transform w.r.t weight is weight_val
+                // Derivative of stable transform w.r.t weight is the input coordinate
                 int coord_type = k % 3;
-                float transform_derivative = this->weigth_input_hidden[j][k];
+                float transform_derivative;
+                if (coord_type == 0) {
+                    transform_derivative = x;  // d/dw(x*w + ...) = x
+                } else if (coord_type == 1) {
+                    transform_derivative = y;  // d/dw(y*w + ...) = y
+                } else {
+                    transform_derivative = z;  // d/dw(z*w + ...) = z
+                }
 
                 // Backpropagation with stable 3D transform: gradient = error * transform_derivative
                 float gradient = hidden_errors[j] * transform_derivative;
 
-                // Gradient clipping to prevent exploding gradients
-                if (gradient > 1.0f) gradient = 1.0f;
-                if (gradient < -1.0f) gradient = -1.0f;
+                // Add L2 regularization gradient: 2 * lambda * weight
+                if (use_l2_reg) {
+                    gradient += 2.0f * l2_lambda * this->weigth_input_hidden[j][k];
+                }
 
-                this->weigth_input_hidden[j][k] += learningRate * gradient;
+                // Gradient clipping to prevent exploding gradients
+                if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
+                    gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
+                }
+
+                input_hidden_gradients[j][k] += gradient;
             }
         }
     }
+
+    // Average gradients over the batch
+    size_t num_samples = normalized_inputs.size();
+    for (auto& row : output_hidden_gradients) {
+        for (float& grad : row) {
+            grad /= num_samples;
+        }
+    }
+    for (auto& row : input_hidden_gradients) {
+        for (float& grad : row) {
+            grad /= num_samples;
+        }
+    }
+
+    // Update weights using optimizer
+    if (optimizer) {
+        // Update learning rate in optimizer if scheduler is used
+        if (lrScheduler) {
+            // Note: This assumes optimizer has a way to update learning rate
+            // For now, we'll create new optimizer instances with updated learning rate
+            // In a more sophisticated implementation, optimizers would have a setLearningRate method
+        }
+
+        optimizer->update(this->weigth_output_hidden, output_hidden_gradients);
+        optimizer->update(this->weigth_input_hidden, input_hidden_gradients);
+
+        if (verbose) {
+            std::cout << "[DEBUG TRAIN] Weights updated using " << optimizer->getName() << " optimizer" << std::endl;
+        }
+    } else {
+        // Fallback to basic gradient descent if no optimizer set
+        for (int j = 0; j < this->outputSize; ++j) {
+            for (int k = 0; k < this->neurons; ++k) {
+                this->weigth_output_hidden[j][k] += currentLearningRate * output_hidden_gradients[j][k];
+            }
+        }
+        for (int j = 0; j < this->neurons; ++j) {
+            for (size_t k = 0; k < this->inputSize; ++k) {
+                this->weigth_input_hidden[j][k] += currentLearningRate * input_hidden_gradients[j][k];
+            }
+        }
+
+        if (verbose) {
+            std::cout << "[DEBUG TRAIN] Weights updated using basic gradient descent" << std::endl;
+        }
+    }
+
+    // Increment epoch counter
+    currentEpoch++;
 }
 
 void CoreAI::normalizeInput(float min_val, float max_val)
@@ -685,5 +1175,285 @@ void CoreAI::resizeWeights()
     
     if (verbose) {
         std::cout << "[DEBUG RESIZE] Weight re-initialization complete" << std::endl;
+    }
+}
+
+void CoreAI::setOptimizer(const std::string& optimizerType, float learningRate,
+                         float beta1, float beta2, float epsilon,
+                         float momentum, float rho) {
+    if (optimizerType == "SGD") {
+        optimizer = std::make_unique<SGD>(learningRate, momentum);
+    } else if (optimizerType == "Adam") {
+        optimizer = std::make_unique<Adam>(learningRate, beta1, beta2, epsilon);
+    } else if (optimizerType == "RMSprop") {
+        optimizer = std::make_unique<RMSprop>(learningRate, rho, epsilon);
+    } else {
+        throw std::invalid_argument("Unknown optimizer type: " + optimizerType);
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG OPTIMIZER] Set optimizer to: " << optimizerType
+                  << " with learning rate: " << learningRate << std::endl;
+    }
+}
+
+void CoreAI::setLearningRateScheduler(const std::string& schedulerType, float initialLearningRate,
+                                     float decayRate, int decaySteps,
+                                     float decayFactor, int totalEpochs,
+                                     float minLearningRate) {
+    if (schedulerType == "ExponentialDecay") {
+        lrScheduler = std::make_unique<ExponentialDecay>(initialLearningRate, decayRate, decaySteps);
+    } else if (schedulerType == "StepDecay") {
+        lrScheduler = std::make_unique<StepDecay>(initialLearningRate, decayFactor, decaySteps);
+    } else if (schedulerType == "CosineAnnealing") {
+        lrScheduler = std::make_unique<CosineAnnealing>(initialLearningRate, totalEpochs, minLearningRate);
+    } else {
+        throw std::invalid_argument("Unknown scheduler type: " + schedulerType);
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG SCHEDULER] Set learning rate scheduler to: " << schedulerType
+                  << " with initial learning rate: " << initialLearningRate << std::endl;
+    }
+}
+
+void CoreAI::resetOptimizerState() {
+    if (optimizer) {
+        optimizer->reset();
+    }
+    if (lrScheduler) {
+        lrScheduler->reset();
+    }
+    currentEpoch = 0;
+
+    if (verbose) {
+        std::cout << "[DEBUG RESET] Optimizer and scheduler state reset" << std::endl;
+    }
+}
+
+void CoreAI::setRegularizationParams(float l2_lambda, float dropout_rate,
+                                    float bn_momentum, float grad_clip_threshold) {
+    this->l2_lambda = l2_lambda;
+    this->dropout_rate = dropout_rate;
+    this->bn_momentum = bn_momentum;
+    this->grad_clip_threshold = grad_clip_threshold;
+
+    if (verbose) {
+        std::cout << "[DEBUG REGULARIZATION] Set regularization parameters:" << std::endl;
+        std::cout << "  L2 lambda: " << l2_lambda << std::endl;
+        std::cout << "  Dropout rate: " << dropout_rate << std::endl;
+        std::cout << "  BN momentum: " << bn_momentum << std::endl;
+        std::cout << "  Grad clip threshold: " << grad_clip_threshold << std::endl;
+    }
+}
+
+void CoreAI::enableRegularization(bool dropout, bool batch_norm,
+                                 bool l2_reg, bool grad_clip) {
+    this->use_dropout = dropout;
+void CoreAI::setLayerNeurons(int layer_index, int neurons) {
+    if (layer_index < 0 || layer_index >= static_cast<int>(layer_sizes.size())) {
+        throw std::invalid_argument("CoreAI::setLayerNeurons: Invalid layer index");
+    }
+    if (neurons <= 0) {
+        throw std::invalid_argument("CoreAI::setLayerNeurons: Neurons must be positive");
+    }
+
+    layer_sizes[layer_index] = neurons;
+
+    // Reinitialize weights
+    initializeMultiLayerWeights();
+
+    if (verbose) {
+        std::cout << "[DEBUG LAYER] Set layer " << layer_index << " to " << neurons << " neurons" << std::endl;
+    }
+}
+
+// Activation function configuration methods
+void CoreAI::setLayerActivation(int layer_index, ActivationType type, float alpha, float beta, float spatial_weight) {
+    if (layer_index < 0 || layer_index >= static_cast<int>(layer_sizes.size())) {
+        throw std::invalid_argument("CoreAI::setLayerActivation: Invalid layer index");
+    }
+
+    if (layer_activations.size() != layer_sizes.size()) {
+        layer_activations.resize(layer_sizes.size());
+    }
+
+    layer_activations[layer_index] = {type, alpha, beta, spatial_weight};
+
+    if (verbose) {
+        std::cout << "[DEBUG ACTIVATION] Set layer " << layer_index << " activation to type " << static_cast<int>(type)
+                  << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight << std::endl;
+    }
+}
+
+void CoreAI::setAllLayerActivations(ActivationType type, float alpha, float beta, float spatial_weight) {
+    if (layer_activations.size() != layer_sizes.size()) {
+        layer_activations.resize(layer_sizes.size());
+    }
+
+    for (size_t i = 0; i < layer_activations.size(); ++i) {
+        layer_activations[i] = {type, alpha, beta, spatial_weight};
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG ACTIVATION] Set all layers to activation type " << static_cast<int>(type)
+                  << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight << std::endl;
+    }
+}
+    this->use_batch_norm = batch_norm;
+    this->use_l2_reg = l2_reg;
+    this->use_grad_clip = grad_clip;
+
+    if (verbose) {
+        std::cout << "[DEBUG REGULARIZATION] Enabled features:" << std::endl;
+        std::cout << "  Dropout: " << (dropout ? "yes" : "no") << std::endl;
+        std::cout << "  Batch norm: " << (batch_norm ? "yes" : "no") << std::endl;
+        std::cout << "  L2 regularization: " << (l2_reg ? "yes" : "no") << std::endl;
+        std::cout << "  Gradient clipping: " << (grad_clip ? "yes" : "no") << std::endl;
+    }
+}
+
+// Multi-layer architecture implementation
+
+void CoreAI::initializeMultiLayerWeights() {
+    std::mt19937 gen(42);
+    layer_weights.clear();
+    layer_weights.resize(layer_sizes.size() - 1); // weights between layers
+
+    for (size_t i = 0; i < layer_weights.size(); ++i) {
+        int from_size = layer_sizes[i];
+        int to_size = layer_sizes[i + 1];
+        float scale = std::sqrt(6.0f / (from_size + to_size));
+        std::uniform_real_distribution<float> weight_dist(-scale, scale);
+
+        layer_weights[i].resize(to_size);
+        for (int j = 0; j < to_size; ++j) {
+            layer_weights[i][j].resize(from_size);
+            for (int k = 0; k < from_size; ++k) {
+                layer_weights[i][j][k] = weight_dist(gen);
+            }
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG MULTI-LAYER] Initialized " << layer_sizes.size() << " layers with sizes: ";
+        for (int size : layer_sizes) std::cout << size << " ";
+        std::cout << std::endl;
+    }
+}
+
+void CoreAI::initializeAttentionWeights() {
+    if (inputSize % 3 != 0) {
+        if (verbose) {
+            std::cout << "[WARNING ATTENTION] Input size not divisible by 3, attention may not work optimally" << std::endl;
+        }
+    }
+
+    int num_triplets = inputSize / 3;
+    attention_weights.resize(num_triplets);
+
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<float> att_dist(0.0f, 1.0f);
+
+    for (int i = 0; i < num_triplets; ++i) {
+        attention_weights[i].resize(num_triplets);
+        for (int j = 0; j < num_triplets; ++j) {
+            attention_weights[i][j] = att_dist(gen);
+        }
+        // Normalize attention weights for each triplet
+        float sum = 0.0f;
+        for (float w : attention_weights[i]) sum += w;
+        if (sum > 0) {
+            for (float& w : attention_weights[i]) w /= sum;
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG ATTENTION] Initialized attention weights for " << num_triplets << " triplets" << std::endl;
+    }
+}
+
+void CoreAI::setLayerArchitecture(const std::vector<int>& layer_sizes) {
+    if (layer_sizes.size() < 2) {
+        throw std::invalid_argument("CoreAI::setLayerArchitecture: Must have at least input and output layers");
+    }
+
+    this->layer_sizes = layer_sizes;
+    this->inputSize = layer_sizes[0];
+    this->outputSize = layer_sizes.back();
+    this->layers = layer_sizes.size() - 2; // hidden layers only
+
+    // Reinitialize weights for new architecture
+    initializeMultiLayerWeights();
+
+    if (enable_attention) {
+        initializeAttentionWeights();
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG ARCHITECTURE] Set layer architecture with " << layer_sizes.size() << " layers" << std::endl;
+    }
+}
+
+void CoreAI::enableResidualConnections(bool enable, const std::vector<std::vector<int>>& connections) {
+    this->enable_residual = enable;
+    if (enable && !connections.empty()) {
+        this->residual_connections = connections;
+    } else if (enable && connections.empty()) {
+        // Default: connect every other layer (1->3, 2->4, etc.)
+        residual_connections.clear();
+        for (size_t i = 0; i < layer_sizes.size() - 2; ++i) {
+            residual_connections.push_back({static_cast<int>(i), static_cast<int>(i + 2)});
+        }
+    } else {
+        residual_connections.clear();
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG RESIDUAL] " << (enable ? "Enabled" : "Disabled") << " residual connections" << std::endl;
+        if (enable && !residual_connections.empty()) {
+            std::cout << "[DEBUG RESIDUAL] Connections: ";
+            for (const auto& conn : residual_connections) {
+                std::cout << "(" << conn[0] << "->" << conn[1] << ") ";
+            }
+            std::cout << std::endl;
+        }
+    }
+}
+
+void CoreAI::configureAttention(bool enable, float temperature, float weight) {
+    this->enable_attention = enable;
+    this->attention_temperature = temperature;
+    this->attention_weight = weight;
+
+    if (enable) {
+        initializeAttentionWeights();
+    } else {
+        attention_weights.clear();
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG ATTENTION] " << (enable ? "Enabled" : "Disabled") << " spatial attention" << std::endl;
+        if (enable) {
+            std::cout << "[DEBUG ATTENTION] Temperature: " << temperature << ", Weight: " << weight << std::endl;
+        }
+    }
+}
+
+void CoreAI::setLayerNeurons(int layer_index, int neurons) {
+    if (layer_index < 0 || layer_index >= static_cast<int>(layer_sizes.size())) {
+        throw std::invalid_argument("CoreAI::setLayerNeurons: Invalid layer index");
+    }
+    if (neurons <= 0) {
+        throw std::invalid_argument("CoreAI::setLayerNeurons: Neurons must be positive");
+    }
+
+    layer_sizes[layer_index] = neurons;
+
+    // Reinitialize weights
+    initializeMultiLayerWeights();
+
+    if (verbose) {
+        std::cout << "[DEBUG LAYER] Set layer " << layer_index << " to " << neurons << " neurons" << std::endl;
     }
 }

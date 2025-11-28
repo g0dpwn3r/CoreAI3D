@@ -1,9 +1,13 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <cstdlib>
 #include "CoreAI3D/include/Core.hpp"
 
 int main() {
+    // Set fixed seed for reproducibility
+    std::srand(42);
+
     std::cout << "Testing CoreAI3D with 3D spatial data..." << std::endl;
 
     try {
@@ -42,7 +46,7 @@ int main() {
         int num_samples = inputs.size();
         double learning_rate = 0.1;
 
-        for (int epoch = 0; epoch < 100; ++epoch) {
+        for (int epoch = 0; epoch < 200; ++epoch) {
             network.train(inputs, targets, learning_rate, num_samples);
 
             if (epoch % 20 == 0) {
@@ -61,7 +65,19 @@ int main() {
         std::cout << "\n=== Final Assessment ===" << std::endl;
         auto final_predictions = network.forward(inputs);
 
-        std::cout << "Final predictions:" << std::endl;
+        // Denormalize predictions back to original target range
+        auto min_it = std::min_element(targets.begin(), targets.end(),
+            [](const std::vector<float>& a, const std::vector<float>& b) { return a[0] < b[0]; });
+        auto max_it = std::max_element(targets.begin(), targets.end(),
+            [](const std::vector<float>& a, const std::vector<float>& b) { return a[0] < b[0]; });
+        float target_min = (*min_it)[0];
+        float target_max = (*max_it)[0];
+
+        for (auto& pred : final_predictions) {
+            pred[0] = pred[0] * (target_max - target_min) + target_min;
+        }
+
+        std::cout << "Final predictions (denormalized):" << std::endl;
         for (size_t i = 0; i < std::min(size_t(5), inputs.size()); ++i) {
             std::cout << "Input: (" << inputs[i][0] << "," << inputs[i][1] << "," << inputs[i][2]
                       << ") -> Prediction: " << final_predictions[i][0]
