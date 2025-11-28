@@ -67,6 +67,12 @@ def copy_source_to_destination(src, dest):
     """Copy source directory to destination, excluding build artifacts."""
     try:
         logging.info(f"Copying {src} to {dest}")
+
+        # Delete destination if it exists
+        if dest.exists():
+            logging.info(f"Destination {dest} exists, deleting it first")
+            delete_directory(dest)
+
         shutil.copytree(src, dest, ignore=ignore_function)
         logging.info(f"Successfully copied to {dest}")
     except Exception as e:
@@ -269,7 +275,24 @@ def main():
         # Copy to destinations
         for dest in destinations:
             try:
-                copy_source_to_destination(source_dir, dest)
+                # Special handling for tools directory - only copy the executable
+                if str(dest) == '/home/carlon/tools/CoreAI3D':
+                    logging.info(f"Copying executable to tools directory: {target_executable} to {dest}")
+                    # Clear the directory first
+                    if dest.exists() or dest != '/home/carlon/tools/CoreAI3D':
+                        logging.info(f"Clearing tools directory: {dest}")
+                        delete_directory(dest)
+                    dest.mkdir(parents=True, exist_ok=True)
+                    # Use sudo to copy the executable
+                    result = subprocess.run(['sudo', 'cp', str(target_executable), str(dest / target_executable.name)],
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        logging.info(f"Successfully copied executable to {dest}")
+                    else:
+                        logging.error(f"Failed to copy executable with sudo: {result.stderr}")
+                        raise Exception(f"Sudo copy failed: {result.stderr}")
+                else:
+                    copy_source_to_destination(source_dir, dest)
             except Exception as e:
                 logging.error(f"Failed to copy to {dest}: {e}. Continuing with other destinations.")
            
