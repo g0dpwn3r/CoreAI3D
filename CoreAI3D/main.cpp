@@ -28,6 +28,7 @@ struct option long_options[] = {
     {"samples", required_argument, 0, 's'},
     {"epochs", required_argument, 0, 'e'},
     {"neurons", required_argument, 0, 'n'},
+    {"learning-rate", required_argument, 0, 'r'},
     {"min", required_argument, 0, 'm'},
     {"max", required_argument, 0, 'M'},
     {"inputsize", required_argument, 0, 'z'},
@@ -238,6 +239,12 @@ int main(int argc, char* argv[]) {
             std::cout << "    Dependencies: Requires database connection and appropriate permissions\n";
             std::cout << "    Example: ./CoreAI3D --create-table --db-host localhost\n\n";
             std::cout << "MODEL OPTIONS:\n";
+            std::cout << "  --learning-rate, -r <rate>\n";
+            std::cout << "    Set the learning rate for neural network training.\n";
+            std::cout << "    Expected value: Floating point number (default: 0.01)\n";
+            std::cout << "    Usage: --learning-rate <rate> or -r <rate>\n";
+            std::cout << "    Dependencies: Used in prediction/training mode\n";
+            std::cout << "    Example: --learning-rate 0.001 or -r 0.001\n\n";
             std::cout << "  --load-model <id_or_name>\n";
             std::cout << "    Load a pre-trained model from the database by ID or name.\n";
             std::cout << "    Expected value: Integer ID or string name of saved model\n";
@@ -323,6 +330,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--neurons" || arg == "-n") {
             std::string value = extractValue(i, "--neurons", arg);
             if (!value.empty()) neurons = value;
+        } else if (arg == "--learning-rate" || arg == "-r") {
+            std::string value = extractValue(i, "--learning-rate", arg);
+            if (!value.empty()) learningRate = value;
         } else if (arg == "--min") {
             std::string value = extractValue(i, "--min", arg);
             if (!value.empty()) minRange = value;

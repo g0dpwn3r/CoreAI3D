@@ -274,14 +274,11 @@ def main():
     try:
         # Copy to destinations
         for dest in destinations:
-            if delete_directory(dest):
-                try:
-                    copy_source_to_destination(source_dir, dest)
-                except Exception as e:
-                    logging.error(f"Failed to copy to {dest}: {e}. Continuing with other destinations.")
-            else:
-                logging.warning(f"Skipping copy to {dest} because deletion failed.")
-
+            try:
+                copy_source_to_destination(source_dir, dest)
+            except Exception as e:
+                logging.error(f"Failed to copy to {dest}: {e}. Continuing with other destinations.")
+           
         # Perform git operations
         branch = get_current_branch()
         remotes = get_git_remotes()
