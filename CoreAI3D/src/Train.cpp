@@ -564,6 +564,10 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
     this->numSamples = inputs.size();
     if (verbose) {
+        std::cout << "[DIAGNOSTIC] Training::loadCSV: Set numSamples to " << this->numSamples
+                  << ", inputs.size() = " << inputs.size() << ", targets.size() = " << targets.size() << std::endl;
+    }
+    if (verbose) {
         std::cout << "[DIAGNOSTIC] SUCCESS: Successfully loaded CSV. Samples: " << this->numSamples
                   << ", Input Size: " << this->inputSize << ", Output Size: " << this->outputSize << std::endl;
     }

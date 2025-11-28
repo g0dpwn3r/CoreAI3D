@@ -91,6 +91,10 @@ bool APIServer::initialize(const std::string& configPath,
         this->dbSSLMode = dbSSLMode;
         this->createTables = createTables;
 
+        // Set working directory to project root
+        std::filesystem::current_path("/home/carlon/code/CoreAI3D");
+        std::cout << "Server working directory set to: " << std::filesystem::current_path() << std::endl;
+
         // Initialize orchestrator
         orchestrator = std::make_unique<ModuleOrchestrator>(serverName + "_orchestrator");
 
@@ -1602,6 +1606,16 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                 }
 
                 // Check if data is loaded - with better diagnostic logging
+                std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training start - checking data state" << std::endl;
+                std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module state at start - "
+                          << "numSamples: " << trainingModule->numSamples << ", "
+                          << "inputSize: " << trainingModule->inputSize << ", "
+                          << "outputSize: " << trainingModule->outputSize << std::endl;
+
+                // DEBUG LOG: Training module instance and state for persistence check
+                std::cout << "[DEBUG] APIServer::handleTrainAPI START: trainingModule address: " << trainingModule.get()
+                          << ", numSamples: " << trainingModule->numSamples << std::endl;
+
                 if (trainingModule->numSamples == 0) {
                     std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module reports 0 samples, checking data state" << std::endl;
                     
@@ -1704,6 +1718,13 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             // DIAGNOSTIC LOG: Training dataset loading parameters
             std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Loading dataset - filename: " << filename
                       << ", directory: " << directory << ", datasetName: " << datasetName << std::endl;
+
+            // DIAGNOSTIC LOG: Training module state before loading
+            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module state before loading - "
+                      << "trainingModule exists: " << (trainingModule ? "YES" : "NO") << ", "
+                      << "numSamples: " << (trainingModule ? trainingModule->numSamples : -1) << ", "
+                      << "inputSize: " << (trainingModule ? trainingModule->inputSize : -1) << ", "
+                      << "outputSize: " << (trainingModule ? trainingModule->outputSize : -1) << std::endl;
 
             // FILE PATH VALIDATION: Check if requested files exist, fallback to available test data
             if (!filename.empty()) {
@@ -1839,6 +1860,16 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Dataset loaded successfully - samples: "
                       << trainingModule->numSamples << ", inputSize: " << trainingModule->inputSize
                       << ", outputSize: " << trainingModule->outputSize << std::endl;
+
+            // DIAGNOSTIC LOG: Training module state after loading
+            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module state after loading - "
+                      << "numSamples: " << trainingModule->numSamples << ", "
+                      << "inputSize: " << trainingModule->inputSize << ", "
+                      << "outputSize: " << trainingModule->outputSize << std::endl;
+
+            // DEBUG LOG: Training module instance and state for persistence check
+            std::cout << "[DEBUG] APIServer::handleTrainAPI LOAD: trainingModule address: " << trainingModule.get()
+                      << ", numSamples: " << trainingModule->numSamples << std::endl;
 
             // Perform data preprocessing with normalization
             try {
