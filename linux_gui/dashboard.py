@@ -8047,18 +8047,20 @@ def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Upload result handling error: {str(e)}")
             QMessageBox.warning(self, "Upload Error", str(e))
 
-    def clear_training_log(self):
-        """Clear training log"""
-        self.training_log.clear()
-
     def browse_predict_input_file(self):
         """Browse for prediction input file"""
+        import logging
+        logging.info("DEBUG: browse_predict_input_file method called")
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Input File",
             "", "All Files (*.*)"
         )
         if file_path:
             self.predict_file_path_edit.setText(file_path)
+
+    def clear_training_log(self):
+        """Clear training log"""
+        self.training_log.clear()
 
     @qasync.asyncSlot()
     async def run_prediction(self):
