@@ -1436,7 +1436,7 @@ class CodeDebugger(QObject):
                 message = "System metrics retrieved" if success else "System metrics failed"
 
             elif module_name == "web":
-                result = await self.client.web_search(test_data.get('query', ''))
+                result = await self.client.search_web(test_data.get('query', ''))
                 success = result.success
                 message = "Web search completed" if success else "Web search failed"
 
@@ -1522,6 +1522,54 @@ class CodeDebugger(QObject):
 
             return test_result
 
+    async def run_system_automation_test(self, task_type: str, parameters: Dict[str, Any]) -> TestResult:
+        """Run system automation test"""
+        start_time = time.time()
+
+        try:
+            # Call automation API
+            result = await self.client.automate_task({
+                'taskType': task_type,
+                'parameters': parameters
+            })
+
+            success = result.success
+
+            if success:
+                message = f"System automation completed: {task_type}"
+            else:
+                message = f"System automation failed: {task_type}"
+
+            total_duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"automation_{task_type}_{int(time.time())}",
+                test_type="automation",
+                success=success,
+                duration=total_duration,
+                message=message,
+                data=result.data if success else {}
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
+        except Exception as e:
+            duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"automation_{task_type}_{int(time.time())}",
+                test_type="automation",
+                success=False,
+                duration=duration,
+                message=str(e)
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
     async def run_performance_test(self, test_config: Dict[str, Any]) -> TestResult:
         """Run performance benchmarking test"""
         start_time = time.time()
@@ -1579,6 +1627,114 @@ class CodeDebugger(QObject):
             self.test_completed.emit(test_result)
 
             return test_result
+
+    async def run_load_test(self, test_config: Dict[str, Any]) -> TestResult:
+        """Run load testing with concurrent requests"""
+        start_time = time.time()
+
+        try:
+            # Extract test configuration
+            test_type = test_config.get('test_type', 'api')
+            duration = test_config.get('duration', 30)
+            concurrent_users = test_config.get('concurrent_users', 10)
+            requests_per_user = test_config.get('requests_per_user', 100)
+            endpoint = test_config.get('endpoint', '/health')
+
+            # Simulate load by making concurrent requests
+            tasks = []
+            for user_id in range(concurrent_users):
+                task = asyncio.create_task(self._simulate_user_load(
+                    user_id, endpoint, requests_per_user, duration
+                ))
+                tasks.append(task)
+
+            # Wait for all tasks to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Calculate load test metrics
+            successful_requests = sum(1 for r in results if not isinstance(r, Exception) and r)
+            failed_requests = len(results) - successful_requests
+            total_requests = concurrent_users * requests_per_user
+            actual_duration = time.time() - start_time
+
+            success_rate = (successful_requests / total_requests) * 100 if total_requests > 0 else 0
+            requests_per_second = successful_requests / actual_duration if actual_duration > 0 else 0
+
+            success = success_rate >= 95  # Consider test successful if 95%+ requests succeed
+
+            message = f"Load test completed: {successful_requests}/{total_requests} successful ({success_rate:.1f}%), {requests_per_second:.2f} req/sec"
+
+            test_result = TestResult(
+                test_id=f"load_{test_type}_{int(time.time())}",
+                test_type="load",
+                success=success,
+                duration=actual_duration,
+                message=message,
+                data={
+                    'successful_requests': successful_requests,
+                    'failed_requests': failed_requests,
+                    'total_requests': total_requests,
+                    'success_rate': success_rate,
+                    'requests_per_second': requests_per_second,
+                    'concurrent_users': concurrent_users,
+                    'duration': actual_duration
+                }
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
+        except Exception as e:
+            duration = time.time() - start_time
+            test_result = TestResult(
+                test_id=f"load_{test_config.get('test_type', 'unknown')}_{int(time.time())}",
+                test_type="load",
+                success=False,
+                duration=duration,
+                message=str(e)
+            )
+
+            self.test_history.append(test_result)
+            self.test_completed.emit(test_result)
+
+            return test_result
+
+    async def _simulate_user_load(self, user_id: int, endpoint: str, requests_per_user: int, duration: float) -> bool:
+        """Simulate load for a single user"""
+        try:
+            start_time = time.time()
+            successful_requests = 0
+
+            # Make requests for the specified duration or number of requests
+            for i in range(requests_per_user):
+                if time.time() - start_time > duration:
+                    break
+
+                try:
+                    # Make API request
+                    if endpoint == '/health':
+                        result = await self.client.health_check()
+                    elif endpoint == '/system/metrics':
+                        result = await self.client.get_system_metrics()
+                    else:
+                        result = await self.client.get(endpoint)
+
+                    if result.success:
+                        successful_requests += 1
+
+                    # Small delay between requests
+                    await asyncio.sleep(0.1)
+
+                except Exception:
+                    # Count failed requests
+                    pass
+
+            return successful_requests > 0
+
+        except Exception:
+            return False
 
 
 
@@ -2093,6 +2249,49 @@ class CoreAI3DDashboard(QMainWindow):
 
         layout.addWidget(self.performance_config_group)
         self.performance_config_group.setVisible(False)  # Hidden by default
+
+        # Load Test specific configuration
+        self.load_config_group = QGroupBox("Load Test Configuration")
+        load_layout = QFormLayout(self.load_config_group)
+
+        self.load_test_type_combo = QComboBox()
+        self.load_test_type_combo.addItems([
+            "api",
+            "web",
+            "database",
+            "file_system",
+            "computational"
+        ])
+        load_layout.addRow("Test Type:", self.load_test_type_combo)
+
+        self.load_duration_spin = QSpinBox()
+        self.load_duration_spin.setRange(10, 600)
+        self.load_duration_spin.setValue(30)
+        self.load_duration_spin.setSuffix(" seconds")
+        load_layout.addRow("Duration:", self.load_duration_spin)
+
+        self.load_concurrent_users_spin = QSpinBox()
+        self.load_concurrent_users_spin.setRange(1, 1000)
+        self.load_concurrent_users_spin.setValue(10)
+        load_layout.addRow("Concurrent Users:", self.load_concurrent_users_spin)
+
+        self.load_requests_per_user_spin = QSpinBox()
+        self.load_requests_per_user_spin.setRange(10, 10000)
+        self.load_requests_per_user_spin.setValue(100)
+        load_layout.addRow("Requests per User:", self.load_requests_per_user_spin)
+
+        self.load_endpoint_combo = QComboBox()
+        self.load_endpoint_combo.addItems([
+            "/health",
+            "/system/metrics",
+            "/api/status",
+            "/module/status",
+            "/predict"
+        ])
+        load_layout.addRow("Target Endpoint:", self.load_endpoint_combo)
+
+        layout.addWidget(self.load_config_group)
+        self.load_config_group.setVisible(False)  # Hidden by default
 
         # Test controls
         controls_layout = QHBoxLayout()
@@ -5432,39 +5631,93 @@ if __name__ == "__main__":
     @qasync.asyncSlot()
     async def run_test(self):
         """Run selected test with proper qasync async slot pattern"""
-        if not self.client_initialized:
-            if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
-                return
-
-        test_type = self.test_type_combo.currentText()
-
+        # Prevent multiple test executions simultaneously
+        if hasattr(self, '_test_running') and self._test_running:
+            QMessageBox.warning(self, "Test Running", "A test is already running. Please wait for it to complete.")
+            return
+            
+        self._test_running = True
+        
         try:
-            # Show progress indicator for test execution
-            self.status_bar.showMessage("Running test...")
-            QApplication.processEvents()  # Allow UI to update
+            if not self.client_initialized:
+                if not self.initialize_client():
+                    QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                    return
 
-            if test_type == "API Connectivity":
-                result = await self.debugger.run_api_test("health_check")
-                self.add_test_result(result)
+            test_type = self.test_type_combo.currentText()
 
-            elif test_type == "Module Functionality":
-                module_name = self.test_module_combo.currentText().split()[0].lower()
-                test_data = {"test": "functionality"}
+            try:
+                # Show progress indicator for test execution
+                self.status_bar.showMessage("Running test...")
+                QApplication.processEvents()  # Allow UI to update
 
-                result = await self.debugger.run_module_test(module_name, test_data)
-                self.add_test_result(result)
+                if test_type == "API Connectivity":
+                    result = await self.debugger.run_api_test("health_check")
+                    self.add_test_result(result)
 
-            else:
-                QMessageBox.information(self, "Test", f"Test type '{test_type}' not implemented yet")
+                elif test_type == "Module Functionality":
+                    module_name = self.test_module_combo.currentText().split()[0].lower()
+                    test_data = {"test": "functionality"}
+                    
+                    # Add specific test data for web module
+                    if module_name == "web":
+                        test_data["query"] = "test search query"
+                    elif module_name == "vision":
+                        test_data["image_path"] = "test_image.jpg"
+                    elif module_name == "audio":
+                        test_data["audio_path"] = "test_audio.wav"
+                    elif module_name == "math":
+                        test_data["expression"] = "2 + 2"
 
-            # Update status when test completes
-            self.status_bar.showMessage("Test completed")
+                    result = await self.debugger.run_module_test(module_name, test_data)
+                    self.add_test_result(result)
 
-        except Exception as e:
-            logger.error(f"Test execution error: {str(e)}")
-            QMessageBox.warning(self, "Test Error", f"Test execution failed: {str(e)}")
-            self.status_bar.showMessage("Test failed")
+                elif test_type == "System Automation":
+                    task_type = self.automation_task_combo.currentText()
+                    try:
+                        parameters = json.loads(self.automation_params_text.toPlainText())
+                    except json.JSONDecodeError:
+                        parameters = {}
+                    
+                    result = await self.debugger.run_system_automation_test(task_type, parameters)
+                    self.add_test_result(result)
+
+                elif test_type == "Performance Test":
+                    test_config = {
+                        'test_type': self.performance_test_type_combo.currentText(),
+                        'duration': self.performance_duration_spin.value(),
+                        'iterations': self.performance_iterations_spin.value(),
+                        'concurrency': self.performance_concurrency_spin.value()
+                    }
+                    
+                    result = await self.debugger.run_performance_test(test_config)
+                    self.add_test_result(result)
+
+                elif test_type == "Load Test":
+                    test_config = {
+                        'test_type': self.load_test_type_combo.currentText(),
+                        'duration': self.load_duration_spin.value(),
+                        'concurrent_users': self.load_concurrent_users_spin.value(),
+                        'requests_per_user': self.load_requests_per_user_spin.value(),
+                        'endpoint': self.load_endpoint_combo.currentText()
+                    }
+                    
+                    result = await self.debugger.run_load_test(test_config)
+                    self.add_test_result(result)
+
+                else:
+                    QMessageBox.information(self, "Test", f"Test type '{test_type}' not implemented yet")
+
+                # Update status when test completes
+                self.status_bar.showMessage("Test completed")
+
+            except Exception as e:
+                logger.error(f"Test execution error: {str(e)}")
+                QMessageBox.warning(self, "Test Error", f"Test execution failed: {str(e)}")
+                self.status_bar.showMessage("Test failed")
+                
+        finally:
+            self._test_running = False
 
     def add_test_result(self, result: TestResult):
         """Add test result to table"""
@@ -8361,7 +8614,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         elif model_type == "Math Models":
             result = await self.client.calculate(input_data)
         elif model_type == "Web Models":
-            result = await self.client.web_search(input_data)
+            result = await self.client.search_web(input_data)
         else:
             # Generic prediction call with data format options
             result = await self.client.run_prediction(
@@ -8756,16 +9009,23 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Handle test type selection change"""
         test_type = self.test_type_combo.currentText()
 
-        # Show/hide automation config group based on test type
+        # Show/hide configuration groups based on test type
         if test_type == "System Automation":
             self.automation_config_group.setVisible(True)
             self.performance_config_group.setVisible(False)
+            self.load_config_group.setVisible(False)
         elif test_type == "Performance Test":
             self.automation_config_group.setVisible(False)
             self.performance_config_group.setVisible(True)
+            self.load_config_group.setVisible(False)
+        elif test_type == "Load Test":
+            self.automation_config_group.setVisible(False)
+            self.performance_config_group.setVisible(False)
+            self.load_config_group.setVisible(True)
         else:
             self.automation_config_group.setVisible(False)
             self.performance_config_group.setVisible(False)
+            self.load_config_group.setVisible(False)
 
     def on_predict_model_type_changed(self):
         """Handle model type selection change"""

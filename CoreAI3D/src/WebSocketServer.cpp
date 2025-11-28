@@ -309,6 +309,9 @@ void WebSocketSession::processChatMessage(const json& chatData) {
                 {"timestamp", getTimestampString()},
                 {"ai_processed", false}
             };
+            
+            // DIAGNOSTIC LOG: WebSocket chat processing using fallback (orchestrator not available)
+            std::cout << "[DIAGNOSTIC] WebSocketSession::processChatMessage: Using fallback echo (orchestrator not available)" << std::endl;
             sendMessage(response);
         // }
     }
@@ -427,6 +430,9 @@ bool WebSocketServer::initialize(const std::string& configPath) {
 
         // Create orchestrator (initialized to nullptr to avoid compilation issues)
         orchestrator_ = nullptr;
+        
+        // DIAGNOSTIC LOG: WebSocketServer orchestrator initialized to nullptr
+        std::cout << "[DIAGNOSTIC] WebSocketServer::initialize: orchestrator_ set to nullptr (module integration disabled)" << std::endl;
 
         // Load configuration if provided
         if (!configPath.empty()) {

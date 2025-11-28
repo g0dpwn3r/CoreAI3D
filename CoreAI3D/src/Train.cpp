@@ -2576,7 +2576,7 @@ bool Training::loadFile(const std::string& filename, int maxSeqLen, int embeddin
     // Check if file exists
     std::ifstream testFile(filename);
     if (!testFile.is_open()) {
-        std::cerr << "Error: Cannot open file: " << filename << std::endl;
+        std::cerr << "Error: Cannot open file: " << filename << " (Current working directory: " << std::filesystem::current_path() << ")" << std::endl;
         return false;
     }
     testFile.close();

@@ -599,6 +599,11 @@ class CoreAI3DClient:
     async def search_web(self, query: str, max_results: int = 10) -> APIResponse:
         return await self.post('/web/search', {'query': query, 'maxResults': max_results})
 
+    # Backward compatibility alias
+    async def web_search(self, query: str, max_results: int = 10) -> APIResponse:
+        """Alias for search_web for backward compatibility"""
+        return await self.search_web(query, max_results)
+
     async def get_web_page(self, url: str) -> APIResponse:
         return await self.post('/web/fetch', {'url': url})
 

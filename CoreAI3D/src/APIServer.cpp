@@ -323,7 +323,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "chat") {
             return handleChatAPI(action, requestData, method);
         }
-        else if (module == "websocket") {
+        else if (module == "websocket" || module == "ws") {
             // Handle WebSocket-related API calls
             if (action == "chat") {
                 // Route chat messages through orchestrator
@@ -334,14 +334,21 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
                         {"sessionId", requestData.value("sessionId", "")},
                         {"clientId", requestData.value("clientId", "")}
                     };
+                    
+                    // DIAGNOSTIC LOG: API server routing WebSocket chat to orchestrator
+                    std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing WebSocket chat to orchestrator" << std::endl;
                     return orchestrator->processChatMessage(chatData);
                 } else {
+                    // DIAGNOSTIC LOG: API server orchestrator not available
+                    std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Orchestrator not available for WebSocket chat" << std::endl;
                     return createErrorResponse("Orchestrator not available", 503);
                 }
             }
             return createErrorResponse("Unknown websocket action: " + action, 400);
         }
-        else if (module == "predict" || module == "prediction") {
+        else if (module == "predict" || module == "prediction" || module == "ai") {
+            // DIAGNOSTIC LOG: API server routing to prediction/AI module
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to prediction/AI module: " << module << "/" << action << std::endl;
             return handlePredictAPI(action, requestData, method);
         }
         else if (module == "training") {
@@ -1595,6 +1602,10 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             float maxRange = parameters.value("max_range", 1.0f);
             int maxSeqLen = parameters.value("max_seq_len", 512);
             int embeddingDim = parameters.value("embedding_dim", EMBEDDING_DIM);
+            
+            // DIAGNOSTIC LOG: Training dataset loading parameters
+            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Loading dataset - filename: " << filename
+                      << ", directory: " << directory << ", datasetName: " << datasetName << std::endl;
 
             // Allow setting network topology during load
             if (parameters.contains("layers")) {
@@ -1654,8 +1665,16 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                 if (!filename.empty()) errorMsg += " from file: " + filename;
                 else if (!directory.empty()) errorMsg += " from directory: " + directory;
                 else errorMsg += " from batch files";
+                
+                // DIAGNOSTIC LOG: Dataset loading failed
+                std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Dataset loading failed - " << errorMsg << std::endl;
                 return createErrorResponse(errorMsg, 500);
             }
+            
+            // DIAGNOSTIC LOG: Dataset loaded successfully
+            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Dataset loaded successfully - samples: "
+                      << trainingModule->numSamples << ", inputSize: " << trainingModule->inputSize
+                      << ", outputSize: " << trainingModule->outputSize << std::endl;
 
             // Perform data preprocessing with normalization
             try {

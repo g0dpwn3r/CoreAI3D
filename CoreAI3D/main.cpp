@@ -32,6 +32,8 @@ struct option long_options[] = {
     {"max", required_argument, 0, 'M'},
     {"inputsize", required_argument, 0, 'z'},
     {"outputsize", required_argument, 0, 'Z'},
+    {"dataset-name", required_argument, 0, 'N'},
+    {"dataset-id", required_argument, 0, 'I'},
     {"api-port", required_argument, 0, 'A'},
     {"start-predict", no_argument, 0, 'P'},
     {"start-chat", no_argument, 0, 'C'},
@@ -336,6 +338,12 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--outputsize") {
             std::string value = extractValue(i, "--outputsize", arg);
             if (!value.empty()) outputSize = value;
+        } else if (arg == "--dataset-name") {
+            std::string value = extractValue(i, "--dataset-name", arg);
+            if (!value.empty()) datasetName = value;
+        } else if (arg == "--dataset-id") {
+            std::string value = extractValue(i, "--dataset-id", arg);
+            if (!value.empty()) datasetId = value;
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
@@ -432,6 +440,22 @@ int main(int argc, char* argv[]) {
 
     if (verbose) std::cout << "DEBUG: All arguments retrieved. Proceeding to logic.\n";
 
+    // --- Mode Check ---
+    // Default to API server mode if no other mode is specified
+    bool apiMode = (!startChat && !startPredict);
+
+    // --- DIAGNOSTIC LOGGING FOR COMMAND LINE ARGUMENTS ---
+    std::cout << "DIAGNOSTIC: Command line argument analysis:\n";
+    std::cout << "  dataset-name: '" << datasetName << "'\n";
+    std::cout << "  dataset-id: '" << datasetId << "' (parsed as: " << datasetId_val << ")\n";
+    std::cout << "  api-port: '" << apiPort << "' (parsed as: " << apiPort_val << ")\n";
+    std::cout << "  enable-websocket: " << (enableWebsocket ? "true" : "false") << "\n";
+    std::cout << "  start-chat: " << (startChat ? "true" : "false") << "\n";
+    std::cout << "  start-predict: " << (startPredict ? "true" : "false") << "\n";
+    std::cout << "  api-mode: " << (apiMode ? "true" : "false") << "\n";
+    std::cout << "  offline-mode: " << (isOfflineMode ? "true" : "false") << "\n";
+    std::cout << "  verbose: " << (verbose ? "true" : "false") << "\n";
+    std::cout << "DIAGNOSTIC: End of command line argument analysis.\n";
 
 #ifdef USE_MYSQL
     // MySQL variables
@@ -458,10 +482,6 @@ int main(int argc, char* argv[]) {
         ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
     }
 #endif
-
-    // --- Mode Check ---
-    // Default to API server mode if no other mode is specified
-    bool apiMode = (!startChat && !startPredict);
 
     // --- Main Logic Branches ---
     try
@@ -543,7 +563,9 @@ int main(int argc, char* argv[]) {
             std::unique_ptr<WebSocketServer> wsServerPtr;
             if (enableWebsocket) {
                 std::cout << "[API MODE] Initializing WebSocket Server...\n";
+                std::cout << "DIAGNOSTIC: Creating WebSocketServer with name='CoreAI3D_WebSocket', address='0.0.0.0'\n";
                 wsServerPtr = std::make_unique<WebSocketServer>("CoreAI3D_WebSocket", "0.0.0.0");
+                std::cout << "DIAGNOSTIC: WebSocketServer object created, calling initialize()...\n";
                 if (!wsServerPtr->initialize()) {
                     std::cerr << "Failed to initialize WebSocket server\n";
                     return 1;
@@ -552,11 +574,13 @@ int main(int argc, char* argv[]) {
 
                 // Start WebSocket Server
                 std::cout << "[API MODE] Starting WebSocket Server...\n";
+                std::cout << "DIAGNOSTIC: Calling WebSocketServer start() method...\n";
                 if (!wsServerPtr->start()) {
                     std::cerr << "Failed to start WebSocket server\n";
                     return 1;
                 }
                 std::cout << "[API MODE] WebSocket Server started.\n";
+                std::cout << "DIAGNOSTIC: WebSocket server health status: " << (wsServerPtr->isHealthy() ? "healthy" : "unhealthy") << "\n";
             } else {
                 std::cout << "[API MODE] WebSocket Server disabled (use --enable-websocket to enable).\n";
             }
@@ -564,8 +588,11 @@ int main(int argc, char* argv[]) {
             // Initialize Training object
             std::cout << "[API MODE] Initializing Training object...\n";
             std::unique_ptr<Training> trainer;
+            std::cout << "DIAGNOSTIC: Creating Training object with isOffline=true, verbose=" << (verbose ? "true" : "false")
+                      << ", wsServerPtr=" << (wsServerPtr.get() ? "valid" : "null") << "\n";
             trainer = std::make_unique<Training>(true, verbose, wsServerPtr.get()); // Always offline for API mode to avoid MySQL issues
             std::cout << "[API MODE] Training object initialized.\n";
+            std::cout << "DIAGNOSTIC: Training object created successfully\n";
 
 
             // Set training parameters (now that they are members of Training
@@ -597,12 +624,15 @@ int main(int argc, char* argv[]) {
 
             // Initialize API Server
             std::cout << "[API MODE] Initializing API Server...\n";
+            std::cout << "DIAGNOSTIC: Creating APIServer with name='CoreAI3D_API', address='0.0.0.0', port=" << apiPort_val << "\n";
             APIServer apiServer("CoreAI3D_API", "0.0.0.0", apiPort_val);
+            std::cout << "DIAGNOSTIC: Calling APIServer initialize() with config.json...\n";
             if (!apiServer.initialize("config.json")) {
                 std::cerr << "Failed to initialize API server\n";
                 return 1;
             }
             std::cout << "[API MODE] API Server initialized.\n";
+            std::cout << "DIAGNOSTIC: API Server initialization successful\n";
 
             // Initialize language processor for text processing
             std::cout << "[API MODE] Initializing Language Processor...\n";
