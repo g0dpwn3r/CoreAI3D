@@ -292,50 +292,78 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         // Skip API version prefix if present (e.g., /api/v1/vision/classify -> vision/classify)
         size_t startIndex = 0;
         if (pathParts.size() >= 2 && pathParts[0] == "api") {
+            std::string potentialEndpoint = pathParts[1];
+            
+            // DIAGNOSTIC LOG: API endpoint parsing
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Path parts: [";
+            for (size_t i = 0; i < pathParts.size(); ++i) {
+                std::cout << "\"" << pathParts[i] << "\"";
+                if (i < pathParts.size() - 1) std::cout << ", ";
+            }
+            std::cout << "], apiVersion: " << apiVersion << std::endl;
+            
             if (pathParts[1] == apiVersion) {
                 startIndex = 2;
+                std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Version-matched endpoint, startIndex = 2" << std::endl;
             } else {
                 // Handle endpoints without version (e.g., /api/status, /api/health)
                 // Check if the second part is a known endpoint that doesn't require version
-                std::string potentialEndpoint = pathParts[1];
                 if (potentialEndpoint == "status" || potentialEndpoint == "health" ||
                     potentialEndpoint == "ws" || potentialEndpoint == "ai" ||
                     potentialEndpoint == "predict" || potentialEndpoint == "training") {
                     startIndex = 1; // Skip only "api" prefix
+                    std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Version-less endpoint matched: " << potentialEndpoint << ", startIndex = 1" << std::endl;
+                } else {
+                    std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown endpoint: " << potentialEndpoint << ", startIndex = 0" << std::endl;
                 }
             }
         }
 
         std::string module = (startIndex < pathParts.size()) ? pathParts[startIndex] : "";
         std::string action = (startIndex + 1 < pathParts.size()) ? pathParts[startIndex + 1] : "status";
+        
+        // DIAGNOSTIC LOG: Final module/action determination
+        std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Final module = \"" << module << "\", action = \"" << action << "\"" << std::endl;
 
+        // DIAGNOSTIC LOG: Starting module routing
+        std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Starting module routing for module=\"" << module << "\", action=\"" << action << "\"" << std::endl;
+        
         // Route to appropriate handler
         if (module == "vision") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to vision module" << std::endl;
             return handleVisionAPI(action, requestData);
         }
         else if (module == "audio") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to audio module" << std::endl;
             return handleAudioAPI(action, requestData);
         }
         else if (module == "system") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to system module" << std::endl;
             return handleSystemAPI(action, requestData);
         }
         else if (module == "web") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to web module" << std::endl;
             return handleWebAPI(action, requestData);
         }
         else if (module == "math") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to math module" << std::endl;
             return handleMathAPI(action, requestData);
         }
         else if (module == "orchestrator") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to orchestrator module" << std::endl;
             return handleOrchestratorAPI(action, requestData);
         }
         else if (module == "neural") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to neural module" << std::endl;
             return handleNeuralAPI(action, requestData);
         }
         else if (module == "chat") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to chat module" << std::endl;
             return handleChatAPI(action, requestData, method);
         }
         else if (module == "websocket" || module == "ws") {
             // Handle WebSocket-related API calls
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to websocket module, action=" << action << std::endl;
             if (action == "chat") {
                 // Route chat messages through orchestrator
                 if (orchestrator) {
@@ -355,6 +383,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
                     return createErrorResponse("Orchestrator not available", 503);
                 }
             }
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown websocket action: " << action << std::endl;
             return createErrorResponse("Unknown websocket action: " + action, 400);
         }
         else if (module == "predict" || module == "prediction" || module == "ai") {
@@ -363,12 +392,15 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             return handlePredictAPI(action, requestData, method);
         }
         else if (module == "training") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to training module" << std::endl;
             return handleTrainAPI(action, requestData, method);
         }
         else if (module == "sessions") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to sessions module" << std::endl;
             return handleSessionsAPI(action, requestData, method);
         }
         else if (module == "performance") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to performance module" << std::endl;
             if (action == "load_test") {
                 // Handle load testing endpoint
                 int concurrentUsers = requestData.value("concurrentUsers", 10);
@@ -381,6 +413,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             }
         }
         else if (module == "debug") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to debug module" << std::endl;
             if (action == "api") {
                 return handleAPIDebug(requestData);
             }
@@ -393,6 +426,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         }
         else if (module == "ws" || module == "websocket") {
             // Handle WebSocket module API calls
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to WebSocket module API" << std::endl;
             if (action == "status") {
                 json wsStatus;
                 wsStatus["websocket_enabled"] = true;
@@ -417,6 +451,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         }
         else if (module == "ai") {
             // Handle AI module API calls
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to AI module API" << std::endl;
             if (action == "status") {
                 json aiStatus;
                 aiStatus["ai_module_enabled"] = true;
@@ -439,9 +474,11 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             }
         }
         else if (module == "status") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to status module" << std::endl;
             return getAPIStatus();
         }
         else if (module == "health") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to health module" << std::endl;
             json health;
             health["status"] = "healthy";
             health["timestamp"] = getTimestampString();
@@ -450,6 +487,7 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             return health;
         }
         else if (module == "generate_key") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to generate_key module" << std::endl;
             std::string apiKey = generateAPIKey();
             if (database) {
                 database->saveAPIKey(apiKey, "Generated via API", true);
@@ -457,13 +495,16 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             return createSuccessResponse("API key generated", {{"api_key", apiKey}});
         }
         else if (module == "sessions") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to sessions module" << std::endl;
             return handleSessionsAPI(action, requestData, method);
         }
         else if (module.empty() || module == "/") {
             // Handle root endpoint
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to root endpoint" << std::endl;
             return getAPIStatus();
         }
         else {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown module: " << module << std::endl;
             return createErrorResponse("Unknown module: " + module, 404);
         }
     }
