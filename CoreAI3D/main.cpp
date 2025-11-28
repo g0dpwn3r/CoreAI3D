@@ -325,14 +325,15 @@ int main(int argc, char* argv[]) {
     std::string value = extractValue(i, "--min", arg);
     if (!value.empty()) minRange = value;
 } else if (arg == "--max") {
+        } else if (arg == "--inputsize") {
+            std::string value = extractValue(i, "--inputsize", arg);
+            if (!value.empty()) inputSize = value;
+        } else if (arg == "--outputsize") {
+            std::string value = extractValue(i, "--outputsize", arg);
+            if (!value.empty()) outputSize = value;
     std::string value = extractValue(i, "--max", arg);
     if (!value.empty()) maxRange = value;
-} else if (arg == "--inputsize") {
-    std::string value = extractValue(i, "--inputsize", arg);
-    if (!value.empty()) inputSize = value;
-} else if (arg == "--outputsize") {
-    std::string value = extractValue(i, "--outputsize", arg);
-    if (!value.empty()) outputSize = value;
+}
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
@@ -590,7 +591,7 @@ int main(int argc, char* argv[]) {
                                                inputSize_val, outputSize_val, layers_val, neurons_val);
             
             // Verify language processor initialization
-            if (trainer->getLanguage() != nullptr) {
+            if (trainer->getLanguageProcessor() != nullptr) {
                 std::cout << "[API MODE] Language Processor initialized successfully.\n";
             } else {
                 std::cerr << "[API MODE] ERROR: Language Processor initialization failed!\n";
@@ -661,7 +662,7 @@ int main(int argc, char* argv[]) {
     {
         std::cerr << "General Exception caught: " << err.what() << std::endl;
         return 1;
-    }
-
+    }   
+    
     return 0;
 }
