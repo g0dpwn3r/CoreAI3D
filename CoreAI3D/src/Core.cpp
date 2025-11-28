@@ -544,20 +544,12 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 float y = (triplet_base + 1 < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base + 1] : 0.0f;
                 float z = (triplet_base + 2 < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base + 2] : 0.0f;
 
-                // Derivative of stable transform w.r.t weight is the coordinate value
-                int coord_type = k % 3;
-                float transform_derivative;
+                // Compute spatial features for consistency with forward pass
+                float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
-                if (coord_type == 0) {
-                    // d/dw (x * w + distance * 0.1) = x
-                    transform_derivative = x;
-                } else if (coord_type == 1) {
-                    // d/dw (y * w + distance * 0.1) = y
-                    transform_derivative = y;
-                } else {
-                    // d/dw (z * w + (x² + y² + z²) * 0.01) = z
-                    transform_derivative = z;
-                }
+                // Derivative of stable transform w.r.t weight is weight_val
+                int coord_type = k % 3;
+                float transform_derivative = this->weigth_input_hidden[j][k];
 
                 // Backpropagation with stable 3D transform: gradient = error * transform_derivative
                 float gradient = hidden_errors[j] * transform_derivative;

@@ -67,9 +67,11 @@ def copy_source_to_destination(src, dest):
     """Copy source directory to destination, excluding build artifacts."""
     try:
         logging.info(f"Copying {src} to {dest}")
-
+        tools_dir = Path('/home/carlon/tools/CoreAI3D').resolve()
+        dest_dir = Path(dest).resolve()
+                   
         # Delete destination if it exists
-        if dest.exists():
+        if dest.exists() and tools_dir == dest_dir:
             logging.info(f"Destination {dest} exists, deleting it first")
             delete_directory(dest)
 
@@ -281,7 +283,7 @@ def main():
                     # Clear the directory first
                     tools_dir = Path('/home/carlon/tools/CoreAI3D').resolve()
                     dest_dir = Path(dest).resolve()
-                    if dest.exists() or tools_dir != dest_dir:
+                    if dest.exists() and tools_dir != dest_dir:
                         logging.info(f"Clearing tools directory: {dest}")
                         delete_directory(dest)
                     dest.mkdir(parents=True, exist_ok=True)
