@@ -653,7 +653,7 @@ float CoreAI::xTransform2(float x, float e, float n, float m)
     const int max_terms = 5;
     
     for (int i = 1; i <= max_terms; ++i) {
-        float power_term = std::pow(x, 3.0f * i);  // x^(3n)
+        float power_term = std::pow(std::abs(x), 3.0f * i);  // x^(3n) - use abs to prevent NaN
         float denominator = std::pow(3.0f, i * i);  // 3^(n²)
         
         // Add epsilon to prevent division by zero
@@ -664,16 +664,34 @@ float CoreAI::xTransform2(float x, float e, float n, float m)
         result += (power_term + n) / denominator;
     }
     
-    // Additional term: x^m/Ly * e^(e^m)
-    // Using m as the exponent and e as the base
+    // Additional term: x^m/Ly * e^(e^m) - THIS IS THE OVERFLOW ISSUE
+    // CRITICAL FIX: Clamp e^m to prevent overflow before computing e^(e^m)
     float ly = std::abs(m) + 1.0f;  // Ly factor (avoid zero)
-    float exp_term = std::pow(x, m) / ly * std::exp(std::pow(e, m));
+    float clamped_em = std::min(std::abs(m), 5.0f);  // Clamp m to prevent e^m overflow
+    float exp_em = std::exp(clamped_em);  // e^m (clamped)
+    float clamped_exp_em = std::min(exp_em, 10.0f);  // Clamp again to prevent e^(e^m) overflow
+    float safe_exp_exp = std::exp(clamped_exp_em);  // e^(e^m) with clamping
+    
+    // Further clamp to reasonable range
+    if (safe_exp_exp > 1000.0f) safe_exp_exp = 1000.0f;
+    
+    float exp_term = std::pow(std::abs(x), std::abs(m)) / ly * safe_exp_exp;
+    
+    // Clamp exp_term to prevent it from dominating
+    if (exp_term > 100.0f) exp_term = 100.0f;
+    if (exp_term < -100.0f) exp_term = -100.0f;
+    
     result += exp_term;
     
     // Clamp result to prevent numerical instability
     if (std::isnan(result) || std::isinf(result)) {
         return this->epsilon;
     }
+    
+    // Final clamping to safe range
+    if (result > 1000.0f) result = 1000.0f;
+    if (result < -1000.0f) result = -1000.0f;
+    
     return result;
 }
 
@@ -686,29 +704,70 @@ float CoreAI::yTransform2(float y, float e, float n, float m)
     const int max_terms = 5;
     
     for (int i = 1; i <= max_terms; ++i) {
-        float exponent = n + std::pow(m, static_cast<float>(i));  // z + x^n
-        float numerator = std::pow(std::abs(y), exponent);  // y^(z+x^n)
-        float denominator = std::pow(std::abs(m), 3.0f) * i;  // x³ * N
+        // Clamp exponent to prevent overflow
+        float m_power = std::pow(std::abs(m), static_cast<float>(i));
+        if (m_power > 20.0f) m_power = 20.0f;  // Prevent extreme exponents
+        
+        float exponent = n + m_power;  // z + x^n
+        // Clamp exponent to safe range
+        if (exponent > 20.0f) exponent = 20.0f;
+        if (exponent < -20.0f) exponent = -20.0f;
+        
+        float numerator = std::pow(std::abs(y) + this->epsilon, exponent);  // y^(z+x^n)
+        float denominator = std::pow(std::abs(m) + this->epsilon, 3.0f) * i;  // x³ * N
         
         // Add epsilon to prevent division by zero
         if (std::abs(denominator) < this->epsilon) {
             denominator = this->epsilon;
         }
         
-        result += numerator / denominator;
+        float term = numerator / denominator;
+        // Clamp term to prevent it from dominating
+        if (term > 100.0f) term = 100.0f;
+        if (term < -100.0f) term = -100.0f;
+        
+        result += term;
     }
     
-    // Additional term: y^n/Ly * e^(e^(S/N))
-    // Using n as the exponent, e as base, and m as S/N ratio
+    // Additional term: y^n/Ly * e^(e^(S/N)) - THIS IS ALSO AN OVERFLOW ISSUE
+    // CRITICAL FIX: Clamp all exponentials
     float ly = std::abs(n) + 1.0f;  // Ly factor (avoid zero)
     float s_over_n = m / (std::abs(n) + this->epsilon);
-    float exp_term = std::pow(std::abs(y), n) / ly * std::exp(std::pow(e, s_over_n));
+    
+    // Clamp s_over_n to prevent overflow
+    if (s_over_n > 5.0f) s_over_n = 5.0f;
+    if (s_over_n < -5.0f) s_over_n = -5.0f;
+    
+    float exp_s_n = std::exp(s_over_n);  // e^(S/N)
+    // Clamp again
+    if (exp_s_n > 10.0f) exp_s_n = 10.0f;
+    
+    float safe_exp_exp = std::exp(exp_s_n);  // e^(e^(S/N))
+    // Final clamp
+    if (safe_exp_exp > 1000.0f) safe_exp_exp = 1000.0f;
+    
+    // Clamp n to prevent y^n overflow
+    float safe_n = n;
+    if (safe_n > 10.0f) safe_n = 10.0f;
+    if (safe_n < -10.0f) safe_n = -10.0f;
+    
+    float exp_term = std::pow(std::abs(y) + this->epsilon, safe_n) / ly * safe_exp_exp;
+    
+    // Clamp exp_term
+    if (exp_term > 100.0f) exp_term = 100.0f;
+    if (exp_term < -100.0f) exp_term = -100.0f;
+    
     result += exp_term;
     
     // Clamp result to prevent numerical instability
     if (std::isnan(result) || std::isinf(result)) {
         return this->epsilon;
     }
+    
+    // Final clamping to safe range
+    if (result > 1000.0f) result = 1000.0f;
+    if (result < -1000.0f) result = -1000.0f;
+    
     return result;
 }
 
