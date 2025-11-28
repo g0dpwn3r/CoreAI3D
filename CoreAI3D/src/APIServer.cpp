@@ -291,8 +291,19 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
 
         // Skip API version prefix if present (e.g., /api/v1/vision/classify -> vision/classify)
         size_t startIndex = 0;
-        if (pathParts.size() >= 2 && pathParts[0] == "api" && pathParts[1] == apiVersion) {
-            startIndex = 2;
+        if (pathParts.size() >= 2 && pathParts[0] == "api") {
+            if (pathParts[1] == apiVersion) {
+                startIndex = 2;
+            } else {
+                // Handle endpoints without version (e.g., /api/status, /api/health)
+                // Check if the second part is a known endpoint that doesn't require version
+                std::string potentialEndpoint = pathParts[1];
+                if (potentialEndpoint == "status" || potentialEndpoint == "health" ||
+                    potentialEndpoint == "ws" || potentialEndpoint == "ai" ||
+                    potentialEndpoint == "predict" || potentialEndpoint == "training") {
+                    startIndex = 1; // Skip only "api" prefix
+                }
+            }
         }
 
         std::string module = (startIndex < pathParts.size()) ? pathParts[startIndex] : "";
@@ -378,6 +389,53 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             }
             else {
                 return createErrorResponse("Unknown debug action: " + action, 400);
+            }
+        }
+        else if (module == "ws" || module == "websocket") {
+            // Handle WebSocket module API calls
+            if (action == "status") {
+                json wsStatus;
+                wsStatus["websocket_enabled"] = true;
+                wsStatus["port"] = 8081; // Default WebSocket port
+                wsStatus["connections"] = 0; // Would track active connections
+                wsStatus["timestamp"] = getTimestampString();
+                return wsStatus;
+            }
+            else if (action == "connect") {
+                // Handle WebSocket connection request
+                json response = {
+                    {"status", "connected"},
+                    {"session_id", generateUniqueId()},
+                    {"websocket_url", "ws://localhost:8081/ws"},
+                    {"timestamp", getTimestampString()}
+                };
+                return response;
+            }
+            else {
+                return createErrorResponse("Unknown WebSocket action: " + action, 400);
+            }
+        }
+        else if (module == "ai") {
+            // Handle AI module API calls
+            if (action == "status") {
+                json aiStatus;
+                aiStatus["ai_module_enabled"] = true;
+                aiStatus["model_loaded"] = false; // Would check actual model status
+                aiStatus["timestamp"] = getTimestampString();
+                return aiStatus;
+            }
+            else if (action == "predict") {
+                // Handle AI prediction request
+                json response = {
+                    {"status", "processing"},
+                    {"prediction_id", generateUniqueId()},
+                    {"message", "AI prediction not yet implemented"},
+                    {"timestamp", getTimestampString()}
+                };
+                return response;
+            }
+            else {
+                return createErrorResponse("Unknown AI action: " + action, 400);
             }
         }
         else if (module == "status") {
