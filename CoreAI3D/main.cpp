@@ -308,9 +308,6 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--db-schema") {
             std::string value = extractValue(i, "--db-schema", arg);
             if (!value.empty()) dbSchema = value;
-        } else if (arg == "--db-schema") {
-            std::string value = extractValue(i, "--db-schema", arg);
-            if (!value.empty()) dbSchema = value;
         } else if (arg == "--target" || arg == "-t") {
             std::string value = extractValue(i, "--target", arg);
             if (!value.empty()) targetFile = value;
@@ -563,8 +560,8 @@ int main(int argc, char* argv[]) {
             std::unique_ptr<WebSocketServer> wsServerPtr;
             if (enableWebsocket) {
                 std::cout << "[API MODE] Initializing WebSocket Server...\n";
-                std::cout << "DIAGNOSTIC: Creating WebSocketServer with name='CoreAI3D_WebSocket', address='0.0.0.0'\n";
-                wsServerPtr = std::make_unique<WebSocketServer>("CoreAI3D_WebSocket", "0.0.0.0");
+                std::cout << "DIAGNOSTIC: Creating WebSocketServer with name='CoreAI3D_WebSocket', address='0.0.0.0', port=" << (apiPort_val + 1) << "\n";
+                wsServerPtr = std::make_unique<WebSocketServer>("CoreAI3D_WebSocket", "0.0.0.0", apiPort_val + 1);
                 std::cout << "DIAGNOSTIC: WebSocketServer object created, calling initialize()...\n";
                 if (!wsServerPtr->initialize()) {
                     std::cerr << "Failed to initialize WebSocket server\n";
@@ -579,7 +576,7 @@ int main(int argc, char* argv[]) {
                     std::cerr << "Failed to start WebSocket server\n";
                     return 1;
                 }
-                std::cout << "[API MODE] WebSocket Server started.\n";
+                std::cout << "[API MODE] WebSocket Server started on port " << (apiPort_val + 1) << ".\n";
                 std::cout << "DIAGNOSTIC: WebSocket server health status: " << (wsServerPtr->isHealthy() ? "healthy" : "unhealthy") << "\n";
             } else {
                 std::cout << "[API MODE] WebSocket Server disabled (use --enable-websocket to enable).\n";

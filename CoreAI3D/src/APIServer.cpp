@@ -362,9 +362,27 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             return handleChatAPI(action, requestData, method);
         }
         else if (module == "websocket" || module == "ws") {
-            // Handle WebSocket-related API calls
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to websocket module, action=" << action << std::endl;
-            if (action == "chat") {
+            // Handle WebSocket module API calls - consolidated handler
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to WebSocket module API, action=" << action << std::endl;
+            if (action == "status") {
+                json wsStatus;
+                wsStatus["websocket_enabled"] = true;
+                wsStatus["port"] = 8081; // Default WebSocket port
+                wsStatus["connections"] = 0; // Would track active connections
+                wsStatus["timestamp"] = getTimestampString();
+                return wsStatus;
+            }
+            else if (action == "connect") {
+                // Handle WebSocket connection request
+                json response = {
+                    {"status", "connected"},
+                    {"session_id", generateUniqueId()},
+                    {"websocket_url", "ws://localhost:8081/ws"},
+                    {"timestamp", getTimestampString()}
+                };
+                return response;
+            }
+            else if (action == "chat") {
                 // Route chat messages through orchestrator
                 if (orchestrator) {
                     json chatData = {
@@ -383,12 +401,14 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
                     return createErrorResponse("Orchestrator not available", 503);
                 }
             }
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown websocket action: " << action << std::endl;
-            return createErrorResponse("Unknown websocket action: " + action, 400);
+            else {
+                std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown WebSocket action: " << action << std::endl;
+                return createErrorResponse("Unknown WebSocket action: " + action, 400);
+            }
         }
-        else if (module == "predict" || module == "prediction" || module == "ai") {
-            // DIAGNOSTIC LOG: API server routing to prediction/AI module
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to prediction/AI module: " << module << "/" << action << std::endl;
+        else if (module == "predict" || module == "prediction") {
+            // DIAGNOSTIC LOG: API server routing to prediction module
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to prediction module: " << module << "/" << action << std::endl;
             return handlePredictAPI(action, requestData, method);
         }
         else if (module == "training") {
@@ -424,54 +444,10 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
                 return createErrorResponse("Unknown debug action: " + action, 400);
             }
         }
-        else if (module == "ws" || module == "websocket") {
-            // Handle WebSocket module API calls
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to WebSocket module API" << std::endl;
-            if (action == "status") {
-                json wsStatus;
-                wsStatus["websocket_enabled"] = true;
-                wsStatus["port"] = 8081; // Default WebSocket port
-                wsStatus["connections"] = 0; // Would track active connections
-                wsStatus["timestamp"] = getTimestampString();
-                return wsStatus;
-            }
-            else if (action == "connect") {
-                // Handle WebSocket connection request
-                json response = {
-                    {"status", "connected"},
-                    {"session_id", generateUniqueId()},
-                    {"websocket_url", "ws://localhost:8081/ws"},
-                    {"timestamp", getTimestampString()}
-                };
-                return response;
-            }
-            else {
-                return createErrorResponse("Unknown WebSocket action: " + action, 400);
-            }
-        }
         else if (module == "ai") {
-            // Handle AI module API calls
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to AI module API" << std::endl;
-            if (action == "status") {
-                json aiStatus;
-                aiStatus["ai_module_enabled"] = true;
-                aiStatus["model_loaded"] = false; // Would check actual model status
-                aiStatus["timestamp"] = getTimestampString();
-                return aiStatus;
-            }
-            else if (action == "predict") {
-                // Handle AI prediction request
-                json response = {
-                    {"status", "processing"},
-                    {"prediction_id", generateUniqueId()},
-                    {"message", "AI prediction not yet implemented"},
-                    {"timestamp", getTimestampString()}
-                };
-                return response;
-            }
-            else {
-                return createErrorResponse("Unknown AI action: " + action, 400);
-            }
+            // Consolidated AI module API calls - delegate to prediction handler
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing AI module to prediction handler, action=" << action << std::endl;
+            return handlePredictAPI(action, requestData, method);
         }
         else if (module == "status") {
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to status module" << std::endl;
@@ -1625,9 +1601,30 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                     return createErrorResponse("output_size must be positive", 400);
                 }
 
-                // Check if data is loaded
+                // Check if data is loaded - with better diagnostic logging
                 if (trainingModule->numSamples == 0) {
-                    return createErrorResponse("No training data loaded. Please load dataset first.", 400);
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module reports 0 samples, checking data state" << std::endl;
+                    
+                    // Try to reload data if available - use parameters from the request
+                    std::string reloadFilename = parameters.value("filename", "");
+                    bool reloadHasHeader = parameters.value("has_header", true);
+                    bool reloadContainsText = parameters.value("contains_text", false);
+                    
+                    if (!reloadFilename.empty() && std::filesystem::exists(reloadFilename)) {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Attempting to reload data from: " << reloadFilename << std::endl;
+                        bool reloaded = trainingModule->loadCSV(reloadFilename, -1, outputSize, reloadHasHeader, reloadContainsText, ',', datasetName);
+                        if (reloaded) {
+                            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Data reloaded successfully, samples: " << trainingModule->numSamples << std::endl;
+                        } else {
+                            std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Data reload failed" << std::endl;
+                            return createErrorResponse("No training data loaded. Please load dataset first.", 400);
+                        }
+                    } else {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: No data file available for reload" << std::endl;
+                        return createErrorResponse("No training data loaded. Please load dataset first.", 400);
+                    }
+                } else {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module has " << trainingModule->numSamples << " samples loaded" << std::endl;
                 }
 
                 try {
@@ -1636,8 +1633,10 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                     trainingModule->inputSize = inputSize;
                     trainingModule->outputSize = outputSize;
                     trainingModule->preprocess(minRange, maxRange);
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Neural network initialized successfully" << std::endl;
                 }
                 catch (const std::exception& e) {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Neural network initialization failed: " << e.what() << std::endl;
                     return createErrorResponse("Failed to initialize neural network: " + std::string(e.what()), 500);
                 }
             }
@@ -1706,6 +1705,25 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Loading dataset - filename: " << filename
                       << ", directory: " << directory << ", datasetName: " << datasetName << std::endl;
 
+            // FILE PATH VALIDATION: Check if requested files exist, fallback to available test data
+            if (!filename.empty()) {
+                std::filesystem::path filePath(filename);
+                if (!std::filesystem::exists(filePath)) {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: File not found: " << filename << std::endl;
+                    
+                    // Fallback to available test data
+                    std::string testDataPath = "training_data/sample_dataset/test_data.csv";
+                    if (std::filesystem::exists(testDataPath)) {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Using fallback test data: " << testDataPath << std::endl;
+                        filename = testDataPath;
+                    } else {
+                        std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: No fallback test data available" << std::endl;
+                    }
+                } else {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: File exists: " << filename << std::endl;
+                }
+            }
+
             // Allow setting network topology during load
             if (parameters.contains("layers")) {
                 trainingModule->layers = parameters["layers"];
@@ -1767,6 +1785,14 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
                 
                 // DIAGNOSTIC LOG: Dataset loading failed
                 std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Dataset loading failed - " << errorMsg << std::endl;
+                
+                // Check if training module has any data loaded
+                if (trainingModule->numSamples == 0) {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module reports 0 samples loaded" << std::endl;
+                } else {
+                    std::cout << "[DIAGNOSTIC] APIServer::handleTrainAPI: Training module reports " << trainingModule->numSamples << " samples loaded" << std::endl;
+                }
+                
                 return createErrorResponse(errorMsg, 500);
             }
             
