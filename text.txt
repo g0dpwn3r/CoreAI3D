@@ -1,0 +1,9 @@
+python dashboard.py -v
+INFO:__main__:Debug messages enabled via -v flag
+INFO:__main__:API key validation complete: length=10, configured=True
+ERROR:__main__:Application error: 'CoreAI3DDashboard' object has no attribute 'on_norm_min_changed' linux_gui/dashboard.py:4050-4052
+```
+        start_training_btn = QPushButton("Start Training")
+        start_training_btn.clicked.connect(self.start_training)
+        logger.info(f"DEBUG: start_training method exists: {hasattr(self, 'start_training')}")
+```

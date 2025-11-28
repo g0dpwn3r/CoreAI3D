@@ -499,7 +499,11 @@ class TrainingDataManager(QObject):
                 'data_type': data_type,
                 'created_at': datetime.now().isoformat(),
                 'files': [],
-                'metadata': {}
+                'metadata': {
+                    'inputsize': 0,
+                    'outputsize': 0,
+                    'samplesize': 0
+                }
             }
 
             # Save dataset metadata
@@ -517,7 +521,7 @@ class TrainingDataManager(QObject):
             logger.error(f"Error creating dataset: {str(e)}")
             return False
 
-    def add_file_to_dataset(self, dataset_name: str, file_path: str) -> bool:
+    def add_file_to_dataset(self, dataset_name: str, file_path: str, file_sizes: Dict[str, Any] = None) -> bool:
         """Add file to dataset"""
         try:
             if dataset_name not in self.datasets:
@@ -531,13 +535,24 @@ class TrainingDataManager(QObject):
             dest_path = os.path.join(dataset_path, file_name)
             shutil.copy2(file_path, dest_path)
 
+            # Calculate dataset sizes for this file if not provided
+            if file_sizes is None:
+                file_sizes = self.calculate_dataset_sizes(dest_path, self.datasets[dataset_name]['data_type'])
+
             # Update dataset metadata
-            self.datasets[dataset_name]['files'].append({
+            file_info = {
                 'name': file_name,
                 'path': dest_path,
                 'added_at': datetime.now().isoformat(),
-                'size': os.path.getsize(dest_path)
-            })
+                'size': os.path.getsize(dest_path),
+                'inputsize': file_sizes['inputsize'],
+                'outputsize': file_sizes['outputsize'],
+                'samplesize': file_sizes['samplesize']
+            }
+            self.datasets[dataset_name]['files'].append(file_info)
+
+            # Update overall dataset metadata with cumulative sizes
+            self._update_dataset_sizes(dataset_name)
 
             self._save_dataset_metadata(dataset_name)
             self.file_added.emit(dataset_name, file_name)
@@ -548,6 +563,49 @@ class TrainingDataManager(QObject):
         except Exception as e:
             logger.error(f"Error adding file to dataset: {str(e)}")
             return False
+
+    def _update_dataset_sizes(self, dataset_name: str):
+        """Update overall dataset sizes based on all files"""
+        try:
+            dataset = self.datasets[dataset_name]
+            files = dataset['files']
+
+            if not files:
+                # No files, reset sizes
+                dataset['metadata']['inputsize'] = 0
+                dataset['metadata']['outputsize'] = 0
+                dataset['metadata']['samplesize'] = 0
+                return
+
+            # For multiple files, aggregate sizes
+            # This is a simplified approach - in practice, you might want more sophisticated aggregation
+            total_inputsize = 0
+            total_outputsize = 0
+            total_samplesize = 0
+            valid_files = 0
+
+            for file_info in files:
+                inputsize = file_info.get('inputsize', 'N/A')
+                outputsize = file_info.get('outputsize', 'N/A')
+                samplesize = file_info.get('samplesize', 'N/A')
+
+                if inputsize != 'N/A' and outputsize != 'N/A' and samplesize != 'N/A':
+                    total_inputsize = max(total_inputsize, inputsize)  # Use max for inputsize
+                    total_outputsize = max(total_outputsize, outputsize)  # Use max for outputsize
+                    total_samplesize += samplesize  # Sum samplesize
+                    valid_files += 1
+
+            if valid_files > 0:
+                dataset['metadata']['inputsize'] = total_inputsize
+                dataset['metadata']['outputsize'] = total_outputsize
+                dataset['metadata']['samplesize'] = total_samplesize
+            else:
+                dataset['metadata']['inputsize'] = 'N/A'
+                dataset['metadata']['outputsize'] = 'N/A'
+                dataset['metadata']['samplesize'] = 'N/A'
+
+        except Exception as e:
+            logger.error(f"Error updating dataset sizes: {str(e)}")
 
     def _save_dataset_metadata(self, dataset_name: str):
         """Save dataset metadata to file"""
@@ -1952,7 +2010,7 @@ class CoreAI3DDashboard(QMainWindow):
             "Performance Test",
             "Load Test"
         ])
-        self.test_type_combo.currentTextChanged.connect(self.on_test_type_changed)
+        self.test_type_combo.currentTextChanged.connect(lambda: self.on_test_type_changed())
         config_layout.addRow("Test Type:", self.test_type_combo)
 
         self.test_module_combo = QComboBox()
@@ -2074,7 +2132,7 @@ class CoreAI3DDashboard(QMainWindow):
             "Math Models",
             "Web Models"
         ])
-        self.predict_model_combo.currentTextChanged.connect(self.on_predict_model_type_changed)
+        self.predict_model_combo.currentTextChanged.connect(lambda: self.on_predict_model_type_changed())
         model_layout.addRow("Model Type:", self.predict_model_combo)
 
         self.predict_specific_model_combo = QComboBox()
@@ -3199,22 +3257,45 @@ class CoreAI3DDashboard(QMainWindow):
 
         return template
 
-    def _get_generic_template(self, language: str, code_type: str, complexity: str, description: str) -> str:
-        """Generic code template"""
-        return f"""# {language} {code_type} - {complexity} Level
-# Generated for: {description}
+    # Training parameter change handlers
+    def on_norm_min_changed(self, value):
+        """Handle normalization min value change"""
+        logger.info(f"DEBUG: First on_norm_min_changed called with value: {value}")
+        self.norm_min = value
+        self.learning_config['normalization_min'] = value
+        logger.info(f"Normalization minimum value changed to: {value}")
 
-# TODO: Implement {code_type.lower()} in {language}
-# This is a placeholder template that needs to be customized
-# based on the specific requirements.
+    def on_norm_max_changed(self, value):
+        """Handle normalization max value change"""
+        self.norm_max = value
+        self.learning_config['normalization_max'] = value
 
-def main():
-    # Main function implementation
-    pass
+    def on_neurons_changed(self, value):
+        """Handle neurons value change"""
+        self.neurons = value
+        self.learning_config['neurons_per_layer'] = value
 
-if __name__ == "__main__":
-    main()
-"""
+    def on_samples_changed(self, value):
+        """Handle samples value change"""
+        self.samples = value
+        self.learning_config['training_samples'] = value
+
+    def on_epochs_changed(self, value):
+        """Handle epochs value change"""
+        self.epochs = value
+        self.learning_config['epochs'] = value
+
+    def on_layers_changed(self, value):
+        """Handle layers value change"""
+        self.layers = value
+        self.learning_config['hidden_layers'] = value
+
+    def on_learning_rate_changed(self, value):
+        """Handle learning rate value change"""
+        self.learning_rate = value
+        self.learning_config['learning_rate'] = value
+
+
 
     def _get_python_function_template(self, complexity: str, description: str) -> str:
         """Python function template"""
@@ -3967,11 +4048,11 @@ if __name__ == "__main__":
         controls_layout = QHBoxLayout()
 
         start_training_btn = QPushButton("Start Training")
-        start_training_btn.clicked.connect(self.start_training)
+        start_training_btn.clicked.connect(lambda: self.start_training())
         controls_layout.addWidget(start_training_btn)
 
         stop_training_btn = QPushButton("Stop Training")
-        stop_training_btn.clicked.connect(self.stop_training)
+        stop_training_btn.clicked.connect(lambda: self.stop_training())
         controls_layout.addWidget(stop_training_btn)
 
         save_config_btn = QPushButton("Save Configuration")
@@ -3999,7 +4080,7 @@ if __name__ == "__main__":
         log_layout.addWidget(self.training_log)
 
         clear_log_btn = QPushButton("Clear Log")
-        clear_log_btn.clicked.connect(self.clear_training_log)
+        clear_log_btn.clicked.connect(lambda: self.clear_training_log())
         log_layout.addWidget(clear_log_btn)
 
         layout.addWidget(log_group)
@@ -4320,12 +4401,41 @@ if __name__ == "__main__":
         dataset_name = item.text()
         if dataset_name in self.training_manager.datasets:
             dataset = self.training_manager.datasets[dataset_name]
-            self.dataset_info.setPlainText(json.dumps(dataset, indent=2))
+
+            # Create enhanced display with calculated sizes
+            display_info = {
+                'name': dataset['name'],
+                'description': dataset['description'],
+                'data_type': dataset['data_type'],
+                'created_at': dataset['created_at'],
+                'dataset_sizes': {
+                    'inputsize': dataset['metadata'].get('inputsize', 'N/A'),
+                    'outputsize': dataset['metadata'].get('outputsize', 'N/A'),
+                    'samplesize': dataset['metadata'].get('samplesize', 'N/A')
+                },
+                'files': []
+            }
+
+            # Add file information with individual sizes
+            for file_info in dataset.get('files', []):
+                file_display = {
+                    'name': file_info['name'],
+                    'size_bytes': file_info['size'],
+                    'added_at': file_info['added_at'],
+                    'inputsize': file_info.get('inputsize', 'N/A'),
+                    'outputsize': file_info.get('outputsize', 'N/A'),
+                    'samplesize': file_info.get('samplesize', 'N/A')
+                }
+                display_info['files'].append(file_display)
+
+            self.dataset_info.setPlainText(json.dumps(display_info, indent=2))
 
             # Update file list
             self.file_list.clear()
             for file_info in dataset.get('files', []):
-                self.file_list.addItem(file_info['name'])
+                size_info = f" (Input: {file_info.get('inputsize', 'N/A')}, Output: {file_info.get('outputsize', 'N/A')}, Samples: {file_info.get('samplesize', 'N/A')})"
+                display_text = f"{file_info['name']}{size_info}"
+                self.file_list.addItem(display_text)
 
     def on_sandbox_started(self, message: str):
         """Handle sandbox started event"""
@@ -4917,7 +5027,9 @@ if __name__ == "__main__":
 
         for file_path in file_paths:
             if os.path.isfile(file_path):
-                success = self.training_manager.add_file_to_dataset(dataset_name, file_path)
+                # Calculate sizes for this file
+                file_sizes = self.calculate_dataset_sizes(file_path, self.training_manager.datasets[dataset_name]['data_type'])
+                success = self.training_manager.add_file_to_dataset(dataset_name, file_path, file_sizes)
                 if success:
                     added_count += 1
                 else:
@@ -4944,7 +5056,9 @@ if __name__ == "__main__":
                 for file in files:
                     file_path = os.path.join(root, file)
                     try:
-                        success = self.training_manager.add_file_to_dataset(dataset_name, file_path)
+                        # Calculate sizes for this file
+                        file_sizes = self.calculate_dataset_sizes(file_path, self.training_manager.datasets[dataset_name]['data_type'])
+                        success = self.training_manager.add_file_to_dataset(dataset_name, file_path, file_sizes)
                         if success:
                             added_count += 1
                         else:
@@ -7079,6 +7193,370 @@ capabilities, training data, performance metrics, and usage instructions."""
                 min_range=min_range,
                 max_range=max_range
             )
+def calculate_dataset_sizes(self, file_path: str, data_type: str = None) -> Dict[str, Any]:
+    """Calculate inputsize, outputsize, and samplesize for a dataset file"""
+    try:
+        if not os.path.exists(file_path):
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+        file_ext = os.path.splitext(file_path.lower())[1]
+
+        # Determine data type if not provided
+        if not data_type:
+            ext_to_type = {
+                '.csv': 'csv', '.json': 'json', '.xml': 'xml', '.txt': 'txt', '.text': 'txt',
+                '.pdf': 'pdf', '.docx': 'docx', '.doc': 'doc',
+                '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.bmp': 'image', '.gif': 'image',
+                '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.aac': 'audio',
+                '.mp4': 'video', '.avi': 'video', '.mov': 'video', '.mkv': 'video'
+            }
+            data_type = ext_to_type.get(file_ext, 'unknown')
+
+        # Calculate sizes based on data type
+        if data_type == 'csv':
+            return self._calculate_csv_sizes(file_path)
+        elif data_type == 'json':
+            return self._calculate_json_sizes(file_path)
+        elif data_type == 'xml':
+            return self._calculate_xml_sizes(file_path)
+        elif data_type == 'txt':
+            return self._calculate_text_sizes(file_path)
+        elif data_type in ['pdf', 'docx', 'doc']:
+            return self._calculate_document_sizes(file_path, data_type)
+        elif data_type == 'image':
+            return self._calculate_image_sizes(file_path)
+        elif data_type == 'audio':
+            return self._calculate_audio_sizes(file_path)
+        elif data_type == 'video':
+            return self._calculate_video_sizes(file_path)
+        else:
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+    except Exception as e:
+        logger.error(f"Error calculating dataset sizes for {file_path}: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_csv_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for CSV files"""
+    try:
+        parsed_data = self.parse_csv_file(file_path, None, self.learning_config.get('contains_text', False))
+        if 'error' in parsed_data:
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+        column_count = parsed_data.get('column_count', 0)
+        row_count = parsed_data.get('row_count', 0)
+
+        if column_count <= 1:
+            # Single column or empty - assume inputsize=1, outputsize=0
+            return {'inputsize': 1, 'outputsize': 0, 'samplesize': row_count}
+
+        # For CSV files, assume last column is target (output) and rest are inputs
+        # This is a common convention in machine learning datasets
+        inputsize = column_count - 1
+        outputsize = 1
+        samplesize = row_count
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating CSV sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_json_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for JSON files"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Try to parse as JSON
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+        # Analyze JSON structure
+        if isinstance(data, list):
+            # Array of objects/samples
+            if len(data) == 0:
+                return {'inputsize': 0, 'outputsize': 0, 'samplesize': 0}
+
+            first_item = data[0]
+            if isinstance(first_item, dict):
+                # Each item is an object with features
+                keys = list(first_item.keys())
+                # Assume 'target' or 'label' or last key is output, rest are inputs
+                target_keys = ['target', 'label', 'output', 'y']
+                output_key = None
+                for key in reversed(keys):
+                    if key.lower() in target_keys:
+                        output_key = key
+                        break
+
+                if output_key:
+                    inputsize = len(keys) - 1
+                    outputsize = 1
+                else:
+                    # No clear target column, assume all are inputs
+                    inputsize = len(keys)
+                    outputsize = 0
+
+                samplesize = len(data)
+            else:
+                # Array of simple values
+                inputsize = 1
+                outputsize = 0
+                samplesize = len(data)
+        elif isinstance(data, dict):
+            # Single object - treat as one sample
+            keys = list(data.keys())
+            target_keys = ['target', 'label', 'output', 'y']
+            output_key = None
+            for key in reversed(keys):
+                if key.lower() in target_keys:
+                    output_key = key
+                    break
+
+            if output_key:
+                inputsize = len(keys) - 1
+                outputsize = 1
+            else:
+                inputsize = len(keys)
+                outputsize = 0
+            samplesize = 1
+        else:
+            # Simple value
+            inputsize = 1
+            outputsize = 0
+            samplesize = 1
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating JSON sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_xml_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for XML files"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Simple XML analysis - count elements and attributes
+        # This is a basic implementation
+        import re
+
+        # Count XML elements (rough estimate of features)
+        element_count = len(re.findall(r'<\w+', content))
+
+        # Count text content blocks (rough estimate of samples)
+        text_blocks = len(re.findall(r'>[^<]+<', content))
+
+        # For XML, we make some assumptions:
+        # - Each element could represent a feature
+        # - Text blocks could represent sample data
+        # - This is highly simplified and would need domain-specific logic
+
+        if element_count > 0:
+            # Assume some elements are targets/outputs
+            inputsize = max(1, element_count - 1)
+            outputsize = 1
+            samplesize = max(1, text_blocks // 10)  # Rough estimate
+        else:
+            inputsize = 1
+            outputsize = 0
+            samplesize = 1
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating XML sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_text_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for text files"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Analyze text structure
+        lines = content.split('\n')
+        non_empty_lines = [line for line in lines if line.strip()]
+
+        if not non_empty_lines:
+            return {'inputsize': 0, 'outputsize': 0, 'samplesize': 0}
+
+        # For text files, we treat each line as a sample
+        # Input size is based on word count per line (embeddings)
+        avg_words_per_line = sum(len(line.split()) for line in non_empty_lines) / len(non_empty_lines)
+
+        # Assume text classification task
+        inputsize = int(avg_words_per_line * 50)  # Rough embedding dimension estimate
+        outputsize = 1  # Classification target
+        samplesize = len(non_empty_lines)
+
+        return {'inputsize': max(1, inputsize), 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating text sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_document_sizes(self, file_path: str, doc_type: str) -> Dict[str, Any]:
+    """Calculate sizes for document files (PDF, DOCX, DOC)"""
+    try:
+        # For document files, we estimate based on file size and type
+        file_size = os.path.getsize(file_path)
+
+        # Rough estimates based on document type and size
+        if doc_type == 'pdf':
+            # PDFs typically contain structured text
+            estimated_pages = max(1, file_size // 2000)  # Rough page estimate
+            inputsize = 1000  # Text embeddings
+            outputsize = 1
+            samplesize = estimated_pages
+        elif doc_type == 'docx':
+            # DOCX files are XML-based
+            estimated_paragraphs = max(1, file_size // 500)
+            inputsize = 800  # Text embeddings
+            outputsize = 1
+            samplesize = estimated_paragraphs
+        elif doc_type == 'doc':
+            # Legacy DOC format
+            estimated_paragraphs = max(1, file_size // 300)
+            inputsize = 600  # Text embeddings
+            outputsize = 1
+            samplesize = estimated_paragraphs
+        else:
+            inputsize = 500
+            outputsize = 1
+            samplesize = 1
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating document sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_image_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for image files"""
+    try:
+        # For images, we extract basic properties
+        file_size = os.path.getsize(file_path)
+
+        # Try to get image dimensions (basic approach)
+        try:
+            # Simple header parsing for common formats
+            with open(file_path, 'rb') as f:
+                header = f.read(24)  # Read first 24 bytes
+
+            width, height = 224, 224  # Default fallback
+
+            # PNG format
+            if header.startswith(b'\x89PNG'):
+                if len(header) >= 24:
+                    width = int.from_bytes(header[16:20], 'big')
+                    height = int.from_bytes(header[20:24], 'big')
+            # JPEG format (SOF0 marker)
+            elif header.startswith(b'\xff\xd8'):
+                # Look for SOF0 marker
+                f.seek(0)
+                data = f.read()
+                sof0_pos = data.find(b'\xff\xc0')
+                if sof0_pos != -1 and sof0_pos + 9 < len(data):
+                    height = int.from_bytes(data[sof0_pos + 5:sof0_pos + 7], 'big')
+                    width = int.from_bytes(data[sof0_pos + 7:sof0_pos + 9], 'big')
+
+            # For images, input size is pixels * channels, output size depends on task
+            channels = 3  # Assume RGB
+            inputsize = width * height * channels
+            outputsize = 1000  # Classification outputs (e.g., ImageNet classes)
+            samplesize = 1  # Single image
+
+        except Exception:
+            # Fallback for unsupported formats
+            inputsize = 224 * 224 * 3  # Standard image size
+            outputsize = 1000
+            samplesize = 1
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating image sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_audio_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for audio files"""
+    try:
+        file_size = os.path.getsize(file_path)
+
+        # Basic audio format detection and size estimation
+        file_ext = os.path.splitext(file_path.lower())[1]
+
+        # Rough estimates based on format and file size
+        if file_ext in ['.wav', '.flac']:
+            # Uncompressed formats - can estimate duration
+            estimated_duration_sec = max(1, file_size // 176400)  # Rough WAV estimate (44.1kHz, 16-bit, stereo)
+            inputsize = 128 * estimated_duration_sec  # MFCC features over time
+            outputsize = 1  # Classification or regression target
+            samplesize = estimated_duration_sec  # One sample per second
+        elif file_ext == '.mp3':
+            # Compressed format
+            estimated_duration_sec = max(1, file_size // 16000)  # Rough MP3 estimate
+            inputsize = 128 * estimated_duration_sec
+            outputsize = 1
+            samplesize = estimated_duration_sec
+        elif file_ext == '.aac':
+            # AAC format
+            estimated_duration_sec = max(1, file_size // 12000)  # Rough AAC estimate
+            inputsize = 128 * estimated_duration_sec
+            outputsize = 1
+            samplesize = estimated_duration_sec
+        else:
+            # Unknown audio format
+            inputsize = 128 * 10  # 10 seconds default
+            outputsize = 1
+            samplesize = 10
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating audio sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+
+def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
+    """Calculate sizes for video files"""
+    try:
+        file_size = os.path.getsize(file_path)
+
+        # Rough video analysis based on file size and format
+        file_ext = os.path.splitext(file_path.lower())[1]
+
+        # Estimate duration and frame rate
+        if file_ext in ['.mp4', '.mkv']:
+            # Compressed formats - rough estimates
+            estimated_duration_sec = max(1, file_size // 500000)  # Rough estimate: ~0.5MB per second
+            frames_per_sec = 30  # Assume 30 FPS
+            total_frames = estimated_duration_sec * frames_per_sec
+        elif file_ext in ['.avi', '.mov']:
+            # Other formats
+            estimated_duration_sec = max(1, file_size // 700000)  # Slightly higher bitrate
+            frames_per_sec = 25  # Assume 25 FPS
+            total_frames = estimated_duration_sec * frames_per_sec
+        else:
+            estimated_duration_sec = 10  # Default 10 seconds
+            total_frames = 300  # 30 FPS * 10 seconds
+
+        # For video, input size is frame pixels * channels, processed over time
+        frame_width, frame_height = 224, 224  # Standard frame size
+        channels = 3  # RGB
+        inputsize = frame_width * frame_height * channels
+        outputsize = 1000  # Classification outputs
+        samplesize = total_frames  # One sample per frame
+
+        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+
+    except Exception as e:
+        logger.error(f"Error calculating video sizes: {str(e)}")
+        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
 
     def _handle_load_dataset_result_direct(self, result, data_file=None):
         """Handle dataset loading result directly"""
@@ -7088,57 +7566,19 @@ capabilities, training data, performance metrics, and usage instructions."""
                 data = result.data
 
                 # Compute input_size and output_size from dataset data instead of backend response
-                computed_input_size = 'N/A'
-                computed_output_size = 'N/A'
-                computed_samples = data.get('samples', 'N/A')
+                computed_sizes = {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
 
                 if data_file and os.path.exists(data_file):
-                    try:
-                        file_ext = os.path.splitext(data_file.lower())[1]
-
-                        if file_ext == '.csv':
-                            # Parse CSV to determine sizes - use auto-detection for headers
-                            parsed_data = self.parse_csv_file(data_file, None, self.learning_config.get('contains_text', False))
-                            if 'error' not in parsed_data:
-                                column_count = parsed_data.get('column_count', 0)
-                                if column_count > 0:
-                                    # Assume last column is target for regression/classification
-                                    computed_input_size = column_count - 1
-                                    computed_output_size = 1
-                                    computed_samples = parsed_data.get('row_count', 0)
-                        elif file_ext in ['.json', '.txt']:
-                            # For text-based formats, try to estimate
-                            # This is a simplified approach - in practice, more complex parsing would be needed
-                            try:
-                                with open(data_file, 'r', encoding='utf-8') as f:
-                                    content = f.read(1024)  # Read first 1KB for analysis
-                                    # Simple heuristic: count commas or assume structured data
-                                    if ',' in content:
-                                        lines = content.split('\n')[:5]  # Check first few lines
-                                        if lines:
-                                            first_line = lines[0].strip()
-                                            if first_line:
-                                                column_count = first_line.count(',') + 1
-                                                computed_input_size = max(1, column_count - 1)
-                                                computed_output_size = 1
-                                                # Estimate samples from file size (rough approximation)
-                                                file_size = os.path.getsize(data_file)
-                                                computed_samples = max(1, file_size // 100)  # Rough estimate
-                            except Exception:
-                                pass
-                        # For other formats (images, audio, etc.), sizes would be format-specific
-                        # For now, keep as N/A for unsupported formats
-
-                    except Exception as e:
-                        logger.warning(f"Error computing dataset sizes from {data_file}: {str(e)}")
+                    # Calculate sizes based on file analysis
+                    computed_sizes = self.calculate_dataset_sizes(data_file)
 
                 # Update the data dict with computed values
-                if computed_input_size != 'N/A':
-                    data['input_size'] = computed_input_size
-                if computed_output_size != 'N/A':
-                    data['output_size'] = computed_output_size
-                if computed_samples != 'N/A':
-                    data['samples'] = computed_samples
+                if computed_sizes['inputsize'] != 'N/A':
+                    data['input_size'] = computed_sizes['inputsize']
+                if computed_sizes['outputsize'] != 'N/A':
+                    data['output_size'] = computed_sizes['outputsize']
+                if computed_sizes['samplesize'] != 'N/A':
+                    data['samples'] = computed_sizes['samplesize']
 
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
                 self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
@@ -7147,10 +7587,11 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
 
                 QMessageBox.information(self, "Dataset Loaded",
-                                      f"Dataset loaded successfully!\n\n"
-                                      f"Samples: {data.get('samples', 'N/A')}\n"
-                                      f"Input Size: {data.get('input_size', 'N/A')}\n"
-                                      f"Output Size: {data.get('output_size', 'N/A')}")
+                                    f"Dataset loaded successfully!\n\n"
+                                    f"Samples: {data.get('samples', 'N/A')}\n"
+                                    f"Input Size: {data.get('input_size', 'N/A')}\n"
+                                    f"Output Size: {data.get('output_size', 'N/A')}")
+
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
@@ -7233,6 +7674,61 @@ capabilities, training data, performance metrics, and usage instructions."""
                 async with self.task_cleanup_lock:
                     self.pending_tasks.discard(self.current_async_task)
                     self.current_async_task = None
+                    
+    def closeEvent(self, event):
+        """Handle application close event with proper async cleanup"""
+        try:
+            logger.info("Starting application shutdown sequence")
+
+            # Cancel all active tasks first
+            self.cancel_all_tasks()
+
+            # Stop health check timer to prevent new tasks during shutdown
+            if hasattr(self, 'health_timer') and self.health_timer.isActive():
+                self.health_timer.stop()
+                logger.debug("Health check timer stopped during shutdown")
+
+            # Stop training if running (using global async lock)
+            async def stop_training_on_shutdown():
+                async with self.global_async_lock:
+                    if self.training_in_progress:
+                        logger.info("Stopping training during shutdown")
+                        self.training_in_progress = False
+
+            # Schedule training stop in event loop
+            if asyncio.get_event_loop().is_running():
+                asyncio.create_task(stop_training_on_shutdown())
+
+            # Stop sandbox if running
+            if hasattr(self, 'sandbox_manager') and self.sandbox_manager.is_running:
+                logger.info("Stopping sandbox manager")
+                self.sandbox_manager.stop_sandbox()
+
+            # Close client connection using the existing qasync event loop
+            if hasattr(self, 'client_initialized') and self.client_initialized and self.client:
+                logger.info("Closing client connection")
+                try:
+                    # Use the existing qasync event loop instead of creating a new one
+                    if hasattr(self.client, 'close'):
+                        # Schedule the close operation in the current event loop
+                        async def close_client():
+                            await self.client.close()
+
+                        # Use qasync-compatible approach for closing client
+                        # Schedule the close operation using asyncio.create_task() for qasync compatibility
+                        asyncio.create_task(close_client())
+                except Exception as e:
+                    logger.error(f"Error closing client: {str(e)}")
+
+            # Save configuration
+            self._save_config()
+
+            logger.info("CoreAI3D Dashboard closed successfully")
+            event.accept()
+
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
+            event.accept()
 
     async def _start_training_async(self):
         """Async part of training start"""
@@ -7462,12 +7958,16 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_progress.setRange(0, 100)
                 self.training_progress.setValue(10)
 
-                # Log upload start
+                # Calculate sizes for the uploaded file
+                file_sizes = self.calculate_dataset_sizes(file_path, file_type.lower())
+
+                # Log upload start with calculated sizes
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Uploading {file_type.upper()} file '{os.path.basename(file_path)}' as dataset '{dataset_name}'")
+                self.training_log.appendPlainText(f"  - Calculated sizes: Input={file_sizes['inputsize']}, Output={file_sizes['outputsize']}, Samples={file_sizes['samplesize']}")
 
                 # Upload file to API server
                 result = await self._upload_file_async(file_path, dataset_name)
-                self._handle_upload_file_result_direct(result)
+                self._handle_upload_file_result_direct(result, file_sizes)
 
                 # If successful, also load the dataset
                 if result.success:
@@ -7514,7 +8014,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         result = await self.client.upload_file(file_path, metadata)
         return result
 
-    def _handle_upload_file_result_direct(self, result):
+    def _handle_upload_file_result_direct(self, result, file_sizes=None):
         """Handle file upload result directly"""
         try:
             self.training_progress.setVisible(False)
@@ -7526,6 +8026,12 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_log.appendPlainText(f"  - File: {os.path.basename(data.get('file_path', 'Unknown'))}")
                 self.training_log.appendPlainText(f"  - Size: {data.get('file_size', 0) / 1024:.1f} KB")
                 self.training_log.appendPlainText(f"  - Dataset: {data.get('dataset_name', 'Unknown')}")
+
+                # Add calculated sizes to the log if available
+                if file_sizes:
+                    self.training_log.appendPlainText(f"  - Calculated Input Size: {file_sizes['inputsize']}")
+                    self.training_log.appendPlainText(f"  - Calculated Output Size: {file_sizes['outputsize']}")
+                    self.training_log.appendPlainText(f"  - Calculated Sample Size: {file_sizes['samplesize']}")
 
                 QMessageBox.information(self, "Upload Successful",
                                       f"{format_desc} uploaded and validated successfully!\n\n"
@@ -8494,11 +9000,6 @@ capabilities, training data, performance metrics, and usage instructions."""
         self.activity_canvas.draw()
 
     # Training parameter change handlers
-    def on_norm_min_changed(self, value):
-        """Handle normalization min value change"""
-        self.norm_min = value
-        self.learning_config['normalization_min'] = value
-
     def on_norm_max_changed(self, value):
         """Handle normalization max value change"""
         self.norm_max = value

@@ -210,7 +210,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_input_hidden, j, k))
                 {
-                    sum += this->input[i][k] * this->weigth_input_hidden[j][k];
+                    sum += this->zTransform2(this->input[i][k], this->epsilon, this->neurons, this->weigth_input_hidden[j][k]) * this->xTransform2(this->input[i][k], this->epsilon, this->neurons, this->weigth_input_hidden[j][k]);
                 }
             }
             hiddenLayer[j] = this->sigmoid(sum);
@@ -233,7 +233,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_output_hidden, j, k))
                 {
-                    sum += hiddenLayer[k] * this->weigth_output_hidden[j][k];
+                    sum += this->zTransform2(hiddenLayer[k], this->epsilon, this->neurons, this->weigth_output_hidden[j][k]) * this->yTransform2(hiddenLayer[k], this->epsilon, this->neurons, this->weigth_output_hidden[j][k]);
                 }
             }
             outputLayer[j] = this->sigmoid(sum);
@@ -295,7 +295,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         {
             float output = this->results[sample][j];
             float target = targets[sample][j];
-            output_errors[j] = (target - output) * output * (1.0f - output); // Derivative of sigmoid
+            output_errors[j] = (this->zTransform(this->x, this->y, target, this->neurons, this->hidden_error[j])) * this->xTransform(this->x, this->y, target, this->neurons, this->hidden_output[j]) * output * (1.0f - output); // Derivative of sigmoid
         }
 
         // Hidden layer error
@@ -305,7 +305,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             float sum = 0.0f;
             for (int k = 0; k < this->outputSize; ++k)
             {
-                sum += output_errors[k] * this->weigth_output_hidden[k][j];
+                sum += this->zTransform(this->x, this->y, this->z, this->neurons, output_errors[k]) * this->yTransform(this->x, this->y, this->z, this->neurons, this->weigth_output_hidden[k][j]);
             }
             float hidden = this->hidden[sample][j];
             hidden_errors[j] = sum * hidden * (1.0f - hidden); // Derivative of sigmoid
@@ -316,7 +316,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         {
             for (int k = 0; k < this->neurons; ++k)
             {
-                this->weigth_output_hidden[j][k] += learningRate * output_errors[j] * this->hidden[sample][k];
+                this->weigth_output_hidden[j][k] += learningRate * this->xTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * this->yTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * this->xTransform(this->x, this->y, this->z, this->neurons, this->hidden[sample][k]);
             }
         }
 
@@ -325,7 +325,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         {
             for (size_t k = 0; k < inputs[sample].size(); ++k)
             {
-                this->weigth_input_hidden[j][k] += learningRate * hidden_errors[j] * inputs[sample][k];
+                this->weigth_input_hidden[j][k] += learningRate * this->zTransform(this->x, this->y, this->z, this->neurons, output_errors[j]) * inputs[sample][k];
             }
         }
     }
@@ -410,16 +410,16 @@ void CoreAI::denormalizeOutput()
 
 float CoreAI::xTransform(float x, float y, float z, float n, float m)
 {
-    if (n <= 1)
-    {
-        if (y == 0 || m == 0)
+    if (n <= 1) {
+        if (y == 0.0f || m == 0.0f) {
             return this->epsilon;
+        }
 
-        double denom = y * std::pow(m, 3);
-        double num = std::pow(x, 3) * n + z;
-        float result = this->epsilon * (num / denom);
+        double denom = static_cast<double>(y) * std::pow(static_cast<double>(m), 3.0);
+        double num = std::pow(static_cast<double>(x), 3.0) * static_cast<double>(n) + static_cast<double>(z);
+        
+        float result = this->epsilon * (static_cast<float>(num / denom));
 
-        // FIX: Return the result, not whether it's NaN!
         return std::isnan(result) ? this->epsilon : result;
     }
     return this->epsilon;
@@ -427,51 +427,44 @@ float CoreAI::xTransform(float x, float y, float z, float n, float m)
 
 float CoreAI::yTransform(float x, float y, float z, float n, float m)
 {
-    if (m <= 1)
-    {
-        float denom = std::pow(x, 3) * n;
-        if (std::abs(denom) < this->epsilon)
-            denom = this->epsilon;
-
-        float result = this->epsilon * ((std::pow(y, 5) * 2 + std::pow(x, n)) / denom);
-
-        // FIX: Return the result, not whether it's NaN!
+    if (m <= 1) {
+        float denom = std::pow(x, 3.0f) * n;    
+        if (std::abs(denom) < this->epsilon) {
+            denom = this->epsilon; 
+        }
+        float result = this->epsilon * ((std::pow(y, 5.0f) * 2.0f + std::pow(x, n)) / denom);
         return std::isnan(result) ? this->epsilon : result;
-    }
-    else
-    {
+    } else {
         return this->epsilon;
     }
 }
 
 float CoreAI::zTransform(float x, float y, float z, float n, float m)
 {
-    if (std::abs(y) < this->epsilon)
-        y = this->epsilon;
-
+   if (std::abs(y) < this->epsilon) { 
+        y = this->epsilon; 
+    }
     float result = this->epsilon * (std::pow(z, 3.0f) * std::pow(std::abs(y), n));
-
-    // FIX: Return the result, not whether it's NaN!
     return std::isnan(result) ? this->epsilon : result;
 }
 
 float CoreAI::xTransform2(float x, float e, float n, float m)
 {
     float result = ((std::pow(x, n) / 5.0f) * std::pow(e, m));
-    return result; // Return the calculated result if it's finite and within
-    // bounds
+    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
 }
 
 float CoreAI::yTransform2(float y, float e, float n, float m)
 {
-    float result = ((std::pow(y, n) / 5) * std::pow(e, m));
-    return (std::isnan(result) || std::isinf(result)) ? this->e : result;
+    float result = ((std::pow(y, n) / 5.0f) * std::pow(e, m));
+    return (std::isnan(result) || std::isinf(result)) ? this->epsilon : result;
+
 }
 
 float CoreAI::zTransform2(float z, float e, float n, float m)
 {
-    float result = ((std::pow(z, n) * e) / 3.69);
-    return (std::isnan(result) || std::isinf(result)) ? this->z : result;
+    float result = ((std::pow(z, n) * e) / 3.69f);
+    return (std::isnan(result) || std::isinf(result)) ? z : result;
 }
 
 void CoreAI::setInputSize(int size)
