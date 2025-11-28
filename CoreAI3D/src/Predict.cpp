@@ -36,6 +36,7 @@ bool Predict::runPrediction(const std::string& inputFile,
                            bool hasHeader,
                            bool containsText,
                            char delimiter,
+                           bool isOfflineMode,
                            const std::string& dbHost,
                            int dbPort,
                            const std::string& dbUser,
@@ -47,11 +48,16 @@ bool Predict::runPrediction(const std::string& inputFile,
         }
 
         // Determine if we need online mode (database access)
-        bool useOnlineMode = (datasetId != -1 || !loadModelId.empty());
+        // Respect the offline mode flag first
+        bool useOnlineMode = !isOfflineMode && (datasetId != -1 || !loadModelId.empty());
         
-        // If database parameters are provided, we can use online mode even if not strictly required by ID
-        if (!dbHost.empty() && !dbUser.empty()) {
+        // If database parameters are provided AND not in offline mode, we can use online mode
+        if (!isOfflineMode && !dbHost.empty() && !dbUser.empty()) {
              useOnlineMode = true;
+        }
+        
+        if (verbose_) {
+            std::cout << "[PREDICT] Running in " << (useOnlineMode ? "online" : "offline") << " mode" << std::endl;
         }
 
         // Initialize trainer

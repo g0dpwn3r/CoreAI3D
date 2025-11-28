@@ -33,6 +33,7 @@ public:
                       bool hasHeader = true,
                       bool containsText = false,
                       char delimiter = ',',
+                      bool isOfflineMode = false,
                       const std::string& dbHost = "",
                       int dbPort = 0,
                       const std::string& dbUser = "",
