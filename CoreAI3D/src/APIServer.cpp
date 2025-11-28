@@ -1394,6 +1394,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             // Save chat message to database if available
             if (database && !sessionId.empty()) {
                 try {
+                    int sessionIdInt = std::stoi(sessionId); // Convert string to int
                     std::string role = "user"; // Assume user message for now
                     float confidence = 1.0f; // Default confidence
                     std::string metadata = json({
@@ -1402,7 +1403,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                         {"timestamp", getTimestampString()}
                     }).dump();
 
-                    database->saveChatMessage(sessionId, role, message, messageType, confidence, metadata);
+                    database->saveChatMessage(sessionIdInt, role, message, messageType, confidence, metadata);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save chat message to database: " << dbError.what() << std::endl;
                     // Continue with processing even if database save fails
@@ -1416,6 +1417,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             // Save AI response to database if available
             if (database && !sessionId.empty()) {
                 try {
+                    int sessionIdInt = std::stoi(sessionId); // Convert string to int
                     std::string role = "assistant";
                     float confidence = 0.8f; // AI response confidence
                     std::string metadata = json({
@@ -1425,7 +1427,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                         {"response_type", "echo"}
                     }).dump();
 
-                    database->saveChatMessage(sessionId, role, responseMessage, "text", confidence, metadata);
+                    database->saveChatMessage(sessionIdInt, role, responseMessage, "text", confidence, metadata);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save AI response to database: " << dbError.what() << std::endl;
                 }
@@ -1456,7 +1458,8 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             // Retrieve chat history from database if available
             if (database) {
                 try {
-                    auto messages = database->getChatMessages(sessionId, limit);
+                    int sessionIdInt = std::stoi(sessionId); // Convert string to int
+                    auto messages = database->getChatMessages(sessionIdInt, limit);
                     for (const auto& msg : messages) {
                         json messageJson = {
                             {"id", msg.id},
@@ -1500,7 +1503,8 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             // Clear chat history from database if available
             if (database) {
                 try {
-                    cleared = database->clearChatMessages(sessionId);
+                    int sessionIdInt = std::stoi(sessionId); // Convert string to int
+                    cleared = database->clearChatMessages(sessionIdInt);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to clear chat history from database: " << dbError.what() << std::endl;
                 }
@@ -1525,7 +1529,9 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             // Save chat session to database if available
             if (database) {
                 try {
-                    sessionId = database->saveChatSession(sessionName, userId, modelVersion, "active");
+                    std::string sessionId;
+                    int dbSessionId = database->saveChatSession(sessionName, userId, modelVersion, "active");
+                    sessionId = std::to_string(dbSessionId); // Convert to string for API response
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save chat session to database: " << dbError.what() << std::endl;
                 }

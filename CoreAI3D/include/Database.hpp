@@ -123,6 +123,23 @@ public:
 
     // Chat history management methods
     void saveChatMessage(int sessionId, const std::string& speaker, const std::string& message);
+    void saveChatMessage(int sessionId, const std::string& role,
+                          const std::string& content, const std::string& messageType,
+                          float confidence = 1.0, const std::string& metadata = "");
+    struct ChatMessage {
+        int id;
+        int sessionId;
+        std::string role;
+        std::string content;
+        std::string messageType;
+        float confidence;
+        std::string timestamp;
+        std::string metadata;
+    };
+    std::vector<ChatMessage> getChatMessages(int sessionId, int limit = 50);
+    bool clearChatMessages(int sessionId);
+    int saveChatSession(const std::string& sessionName, const std::string& userId,
+                        const std::string& modelVersion, const std::string& status);
     std::vector<std::pair<std::string, std::string>> loadChatHistory(int sessionId);
     void saveModelState(int sessionId, const nlohmann::json& modelState);
     nlohmann::json loadLatestModelState(int sessionId);

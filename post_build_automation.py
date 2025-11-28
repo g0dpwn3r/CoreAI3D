@@ -207,20 +207,18 @@ def perform_git_operations(branch, remotes):
         subprocess.run(['git', 'commit', '-m', 'Another successful build with Git LFS support'], check=True)
 
         # Check and convert origin remote to SSH if it's HTTPS
-        if 'origin' in remotes:
-            origin_url = get_remote_url('origin')
-            if is_https_url(origin_url):
-                ssh_url = convert_to_ssh(origin_url)
-                logging.info(f"Converting origin remote from HTTPS to SSH: {ssh_url}")
-                subprocess.run(['git', 'remote', 'set-url', 'origin', ssh_url], check=True)
-
+        origin_url = get_remote_url('origin')
+        if is_https_url(origin_url):
+            ssh_url = convert_to_ssh(origin_url)
+            logging.info(f"Converting origin remote from HTTPS to SSH: {ssh_url}")
+            subprocess.run(['git', 'remote', 'set-url', 'origin', ssh_url], check=True)
         # Check SSH connectivity before pushing
         if not check_ssh_connectivity():
             logging.error("SSH connectivity to Bitbucket failed. Skipping push operations.")
             return
 
         # Ensure we push to GitHub, GitLab, and Bitbucket if configured
-        target_remotes = ['origin', 'github', 'gitlab', 'bitbucket']
+        target_remotes = ['github', 'gitlab', 'bitbucket']
         available_remotes = [r for r in remotes if r in target_remotes or any(tr in r for tr in target_remotes)]
 
         if not available_remotes:

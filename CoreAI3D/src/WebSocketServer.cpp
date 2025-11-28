@@ -5,12 +5,13 @@
 #include "SystemModule.hpp"
 #include "WebModule.hpp"
 #include "MathModule.hpp"
-#include "LinuxModule.hpp"
+#include "Database.hpp" // FIX: Include the Database header
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include <iomanip> // For std::put_time
 
 // WebSocketServer constants
 const int DEFAULT_PORT = 8081;
@@ -18,13 +19,26 @@ const int DEFAULT_NUM_THREADS = 4;
 
 // WebSocketSession implementation
 WebSocketSession::WebSocketSession(tcp::socket socket, const std::string& sessionId)
-    : ws_(std::move(socket)), sessionId_(sessionId), server_(nullptr), isActive_(true), isStreaming_(false) {
+    : ws_(std::move(socket)), sessionId_(sessionId), dbSessionId_(-1), server_(nullptr), isActive_(true), isStreaming_(false) {
     // Generate client ID
     clientId_ = WebSocketServer::generateClientId();
 }
 
 WebSocketSession::~WebSocketSession() {
     close();
+}
+
+void WebSocketSession::saveToDatabase() {
+    if (server_ && server_->database_) {
+        try {
+            dbSessionId_ = server_->database_->saveChatSession(sessionId_, clientId_, "", "active");
+            std::cout << "[" << getTimestampString() << "] WebSocketSession: Saved session " << sessionId_
+                      << " to database with ID " << dbSessionId_ << std::endl;
+        } catch (const std::exception& dbError) {
+            std::cerr << "Warning: Failed to save chat session to database: " << dbError.what() << std::endl;
+            dbSessionId_ = -1; // Keep as invalid
+        }
+    }
 }
 
 void WebSocketSession::run() {
@@ -297,7 +311,7 @@ void WebSocketSession::processChatMessage(const json& chatData) {
                     {"source", "websocket"}
                 }).dump();
 
-                server_->database_->saveChatMessage(sessionId_, role, message, messageType, confidence, metadata);
+                server_->database_->saveChatMessage(dbSessionId_, role, message, messageType, confidence, metadata);
             } catch (const std::exception& dbError) {
                 std::cerr << "Warning: Failed to save user chat message to database: " << dbError.what() << std::endl;
                 // Continue with processing even if database save fails
@@ -333,7 +347,7 @@ void WebSocketSession::processChatMessage(const json& chatData) {
                         {"ai_processed", true}
                     }).dump();
 
-                    server_->database_->saveChatMessage(sessionId_, role, aiMessage, "text", confidence, metadata);
+                    server_->database_->saveChatMessage(dbSessionId_, role, aiMessage, "text", confidence, metadata);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save AI response to database: " << dbError.what() << std::endl;
                 }
@@ -366,7 +380,7 @@ void WebSocketSession::processChatMessage(const json& chatData) {
                         {"fallback", true}
                     }).dump();
 
-                    server_->database_->saveChatMessage(sessionId_, role, fallbackMessage, "text", confidence, metadata);
+                    server_->database_->saveChatMessage(dbSessionId_, role, fallbackMessage, "text", confidence, metadata);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save fallback response to database: " << dbError.what() << std::endl;
                 }
@@ -604,6 +618,11 @@ void WebSocketServer::setNumThreads(int threads) {
     numThreads_ = std::max(1, std::min(16, threads));
 }
 
+// FIX: Implementation for setDatabase
+void WebSocketServer::setDatabase(std::unique_ptr<Database> database) {
+    database_ = std::move(database);
+}
+
 // Module integration methods commented out to avoid compilation issues
 // bool WebSocketServer::addVisionModule(const std::string& name, std::unique_ptr<VisionModule> module) {
 //     return orchestrator_->addVisionModule(name, std::move(module));
@@ -655,6 +674,9 @@ void WebSocketServer::onAccept(beast::error_code ec, tcp::socket socket) {
         // Log session creation
         std::cout << "[" << getTimestampString() << "] WebSocketServer: Created session " << sessionId
                   << " for client " << session->getClientId() << std::endl;
+
+        // Save session to database
+        session->saveToDatabase();
 
         // Start the session
         session->run();

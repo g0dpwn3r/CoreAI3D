@@ -9,6 +9,7 @@ class AudioModule;
 class SystemModule;
 class WebModule;
 class MathModule;
+class Database; // FIX: Forward declaration for Database
 
 // Forward declaration to break circular dependency
 class ModuleOrchestrator;
@@ -23,6 +24,7 @@ class ModuleOrchestrator;
 #include <atomic>
 #include <queue>
 #include <mutex>
+#include <functional> // FIX: Added for std::function used in event handlers
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -36,6 +38,7 @@ private:
     websocket::stream<tcp::socket> ws_;
     beast::flat_buffer buffer_;
     std::string sessionId_;
+    int dbSessionId_;
     std::string clientId_;
     std::atomic<bool> isActive_;
 
@@ -70,9 +73,11 @@ public:
 
     // Session management
     std::string getSessionId() const { return sessionId_; }
+    int getDbSessionId() const { return dbSessionId_; }
     std::string getClientId() const { return clientId_; }
     bool isActive() const { return isActive_; }
     void close();
+    void saveToDatabase();
 
     // Utility functions
     static std::string getTimestampString();
@@ -225,7 +230,7 @@ public:
     void reloadConfiguration();
     bool isHealthy();
     size_t getActiveConnections();
-    void setDatabase(std::unique_ptr<Database> database) { database_ = std::move(database); }
+    void setDatabase(std::unique_ptr<Database> database); // FIX: Removed inline implementation
     size_t getTotalMessages();
 };
 

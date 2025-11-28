@@ -210,6 +210,16 @@ target_include_directories(CoreAI3DLib PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+# Add the PCH configuration to your library target
+target_precompile_headers(CoreAI3DLib
+    # Use the public keyword so all dependent executables (like CoreAI3D) also use the PCH
+    PUBLIC
+        <iostream> # Example: You can list common system headers directly
+        <string>
+        # Reference the header file you created
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/CoreAI3D_pch.hpp
+)
+
 # Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
 option(USE_MYSQL "Enable MySQL support" ON)
 if(USE_MYSQL)
@@ -338,6 +348,19 @@ if(USE_MYSQL AND MYSQLCPP_FOUND)
 endif()
 
 add_executable(CoreAI3D main.cpp)
+
+# Enable LTO if available
+include(CheckIPOSupported)
+check_ipo_supported(RESULT IPO_SUPPORTED)
+
+if(IPO_SUPPORTED)
+    # This automatically adds -flto (full LTO) depending on CMake/Compiler version
+    set_property(TARGET CoreAI3DLib PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    set_property(TARGET CoreAI3D PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    message(STATUS "Link-Time Optimization (LTO) enabled.")
+else()
+    message(WARNING "Compiler does not support Link-Time Optimization.")
+endif()
 
 # Include directories for the executable
 target_include_directories(CoreAI3D PRIVATE

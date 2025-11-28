@@ -217,6 +217,20 @@ public:
     std::vector<std::string> original_date_strings; // To store the original date strings
 
 
+    // NEW: Database saving methods for comprehensive data persistence
+    bool saveLearningSettingsDuringTraining(int datasetId, double learningRate, int batchSize, int epochs,
+                                           float momentum, float weightDecay, float dropoutRate,
+                                           const std::string& optimizer, const std::string& lossFunction,
+                                           const std::string& activationFunction);
+    bool savePredictionResultsAfterInference(int datasetId, const std::vector<std::vector<float>>& inputs,
+                                            const std::vector<std::vector<float>>& actualTargets,
+                                            const std::vector<std::vector<float>>& predictedTargets);
+    bool saveChatSession(int& sessionId, const std::string& sessionName, const std::string& userId,
+                        const std::string& modelVersion, const std::string& status);
+    bool saveChatMessage(int sessionId, const std::string& role, const std::string& content,
+                        const std::string& messageType, float confidence, const std::string& metadata);
+    bool saveModelStateJSON(int datasetId, const nlohmann::json& modelState);
+    bool saveComprehensiveTrainingData(int datasetId, const std::string& datasetName);
     int getDecimalPlacesInString(float value, int precision_for_conversion);
     std::string formatValueForDisplay(float value, int customPrecision) const;
     static std::vector<std::string> parseCSVLine(const std::string& line, char delimiter);

@@ -36,7 +36,7 @@ Database::Database(const std::string& host, unsigned int port,
                 mysqlSslMode = mysqlx::SSLMode::DISABLED;
                 std::cout << "DEBUG: SSL mode defaulted to DISABLED" << std::endl;
                 break;
-        }
+        };
 
         // First, connect without schema to create it if it doesn't exist
         std::cout << "DEBUG: Attempting temporary connection to create database..." << std::endl;
@@ -61,11 +61,11 @@ Database::Database(const std::string& host, unsigned int port,
             } else {
                 std::cerr << "DEBUG: Temporary session creation failed: " << errorMsg << std::endl;
                 throw std::runtime_error("Failed to create temporary database session: " + errorMsg);
-            }
+            };
         } catch (const std::exception& tempEx) {
             std::cerr << "DEBUG: Temporary session creation failed: " << tempEx.what() << std::endl;
             throw std::runtime_error("Failed to create temporary database session: " + std::string(tempEx.what()));
-        }
+        };
 
         // Now establish connection to the specific schema
         std::cout << "DEBUG: Attempting main connection to schema..." << std::endl;
@@ -91,34 +91,34 @@ Database::Database(const std::string& host, unsigned int port,
                 } catch (const std::exception& altEx) {
                     std::cerr << "DEBUG: Alternative connection method also failed: " << altEx.what() << std::endl;
                     throw std::runtime_error("Failed to create main database session: " + errorMsg);
-                }
+                };
             } else {
                 std::cerr << "DEBUG: Main session creation failed: " << errorMsg << std::endl;
                 throw std::runtime_error("Failed to create main database session: " + errorMsg);
-            }
+            };
         } catch (const std::exception& sessionEx) {
             std::cerr << "DEBUG: Main session creation failed: " << sessionEx.what() << std::endl;
             throw std::runtime_error("Failed to create main database session: " + std::string(sessionEx.what()));
-        }
+        };
 
         // Create tables if they don't exist and createTables is true
         if (createTables) {
             std::cout << "DEBUG: Creating database tables..." << std::endl;
             this->createTables();
             std::cout << "DEBUG: Database tables created successfully" << std::endl;
-        }
+        };
     } catch (const std::exception& ex) {
         std::cerr << "Database initialization error: " << ex.what() << std::endl;
         throw std::runtime_error("Failed to initialize database: " + std::string(ex.what()));
-    }
+    };
 #else
     // Stub implementation - no actual database connection
     std::cout << "Database stub initialized (no MySQL connection)" << std::endl;
     if (createTables) {
         Database::createTables();
-    }
+    };
 #endif
-}
+};
 
 // Helper to convert std::vector<std::vector<float>> to std::vector<char>
 std::vector<char> Database::matrixToBlob(const std::vector<std::vector<float>>& matrix) {
@@ -129,7 +129,7 @@ std::vector<char> Database::matrixToBlob(const std::vector<std::vector<float>>& 
         blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(&rows), reinterpret_cast<const char*>(&rows) + sizeof(int));
         blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(&cols), reinterpret_cast<const char*>(&cols) + sizeof(int));
         return blob_data;
-    }
+    };
 
     int rows = static_cast<int>(matrix.size());
     int cols = static_cast<int>(matrix[0].size());
@@ -141,16 +141,16 @@ std::vector<char> Database::matrixToBlob(const std::vector<std::vector<float>>& 
     // Store data
     for (const auto& row : matrix) {
         blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(row.data()), reinterpret_cast<const char*>(row.data()) + row.size() * sizeof(float));
-    }
+    };
 
     return blob_data;
-}
+};
 
 std::vector<std::vector<float>> Database::blobToMatrix(const std::vector<char>& blob) {
     std::vector<std::vector<float>> matrix;
     if (blob.empty()) {
         return matrix;
-    }
+    };
 
     int rows, cols;
     size_t offset = 0;
@@ -171,12 +171,12 @@ std::vector<std::vector<float>> Database::blobToMatrix(const std::vector<char>& 
         if (offset + cols * sizeof(float) > blob.size()) {
             std::cerr << "Error: Blob data truncated for matrix. Expected " << cols * sizeof(float) << " bytes, got " << (blob.size() - offset) << std::endl;
             return std::vector<std::vector<float>>();
-        }
+        };
         std::copy(blob.data() + offset, blob.data() + offset + cols * sizeof(float), reinterpret_cast<char*>(matrix[i].data()));
         offset += cols * sizeof(float);
-    }
+    };
     return matrix;
-}
+};
 
 // Helper to convert std::vector<float> to std::vector<char>
 std::vector<char> Database::vectorToBlob(const std::vector<float>& vec) {
@@ -190,14 +190,14 @@ std::vector<char> Database::vectorToBlob(const std::vector<float>& vec) {
     blob_data.insert(blob_data.end(), reinterpret_cast<const char*>(vec.data()), reinterpret_cast<const char*>(vec.data()) + size * sizeof(float));
 
     return blob_data;
-}
+};
 
 // Helper to convert std::vector<char> to std::vector<float>
 std::vector<float> Database::blobToVector(const std::vector<char>& blob) {
     std::vector<float> vec;
     if (blob.empty()) {
         return vec;
-    }
+    };
 
     int size;
     size_t offset = 0;
@@ -215,12 +215,12 @@ std::vector<float> Database::blobToVector(const std::vector<char>& blob) {
     if (offset + size * sizeof(float) > blob.size()) {
         std::cerr << "Error: Blob data truncated for vector. Expected " << size * sizeof(float) << " bytes, got " << (blob.size() - offset) << std::endl;
         return std::vector<float>();
-    }
+    };
     std::copy(blob.data() + offset, blob.data() + offset + size * sizeof(float), reinterpret_cast<char*>(vec.data()));
     offset += size * sizeof(float);
 
     return vec;
-}
+};
 
 void Database::createPredictionResultsTable() {
     ensureConnection();
@@ -240,12 +240,12 @@ void Database::createPredictionResultsTable() {
     } catch (const std::exception& ex) {
         std::cerr << "Error creating prediction_results table: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: createPredictionResultsTable() called" << std::endl;
 #endif
-}
+};
 
 void Database::createTables() {
     ensureConnection();
@@ -309,23 +309,29 @@ void Database::createTables() {
 
         // Create chat_sessions table for chat history
         session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".chat_sessions ("
-                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
-                       "session_name VARCHAR(255) DEFAULT 'default',"
-                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                       "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-                       "INDEX idx_session_name (session_name)"
-                       ")").execute();
+                        "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                        "session_name VARCHAR(255) DEFAULT 'default',"
+                        "user_id VARCHAR(255),"
+                        "model_version VARCHAR(255),"
+                        "status VARCHAR(50) DEFAULT 'active',"
+                        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                        "INDEX idx_session_name (session_name)"
+                        ")").execute();
 
         // Create chat_messages table for storing individual messages
         session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".chat_messages ("
-                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
-                       "session_id BIGINT NOT NULL,"
-                       "speaker VARCHAR(50) NOT NULL,"
-                       "message TEXT NOT NULL,"
-                       "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                       "INDEX idx_session_timestamp (session_id, timestamp),"
-                       "FOREIGN KEY (session_id) REFERENCES " + dbSchema + ".chat_sessions(id) ON DELETE CASCADE"
-                       ")").execute();
+                        "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                        "session_id BIGINT NOT NULL,"
+                        "speaker VARCHAR(50) NOT NULL,"
+                        "message TEXT NOT NULL,"
+                        "message_type VARCHAR(50) DEFAULT 'text',"
+                        "confidence FLOAT DEFAULT 1.0,"
+                        "metadata TEXT,"
+                        "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                        "INDEX idx_session_timestamp (session_id, timestamp),"
+                        "FOREIGN KEY (session_id) REFERENCES " + dbSchema + ".chat_sessions(id) ON DELETE CASCADE"
+                        ")").execute();
 
         // Create model_states table for storing AI model states
         session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".model_states ("
@@ -342,13 +348,13 @@ void Database::createTables() {
     } catch (const std::exception& ex) {
         std::cerr << "Error creating tables: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: createTables() called" << std::endl;
     createPredictionResultsTable();
 #endif
-}
+};
 
 int Database::addDataset(const std::string& datasetName, const std::string& description,
     int numRows, int numFeatures, int numLabels) {
@@ -374,14 +380,14 @@ int Database::addDataset(const std::string& datasetName, const std::string& desc
     } catch (const std::exception& ex) {
         std::cerr << "Error adding dataset: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation - return a dummy ID
     static int nextId = 1;
     std::cout << "Database stub: addDataset('" << datasetName << "') -> ID: " << nextId << std::endl;
     return nextId++;
 #endif
-}
+};
 
 void Database::addDatasetRecord(int& datasetId, int rowIndex,
     const std::vector<float>& featureValues,
@@ -403,19 +409,19 @@ void Database::addDatasetRecord(int& datasetId, int rowIndex,
         // Only log every 100th record to avoid spam during data loading
         if (rowIndex % 100 == 0) {
             std::cout << "Added dataset record for dataset " << datasetId << ", row " << rowIndex << std::endl;
-        }
+        };
     } catch (const std::exception& ex) {
         std::cerr << "Error adding dataset record: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation - reduce verbosity for bulk operations
     // Only log every 100th record to avoid spam during data loading
     if (rowIndex % 100 == 0) {
         std::cout << "Database stub: addDatasetRecord(datasetId=" << datasetId << ", rowIndex=" << rowIndex << ") - processing..." << std::endl;
-    }
+    };
 #endif
-}
+};
 
 Database::DatasetData Database::getDataset(int& datasetId) {
     ensureConnection();
@@ -431,7 +437,7 @@ Database::DatasetData Database::getDataset(int& datasetId) {
         auto row = result.fetchOne();
         if (!row) {
             throw std::runtime_error("Dataset not found with ID: " + std::to_string(datasetId));
-        }
+        };
 
         data.datasetName = row[0].get<std::string>();
         data.numRows = static_cast<long long>(row[1].get<int64_t>());
@@ -461,18 +467,18 @@ Database::DatasetData Database::getDataset(int& datasetId) {
             if (static_cast<size_t>(rowIndex) >= data.inputs.size()) {
                 data.inputs.resize(rowIndex + 1);
                 data.targets.resize(rowIndex + 1);
-            }
+            };
 
             data.inputs[rowIndex] = featureVec;
             data.targets[rowIndex] = labelVec;
-        }
+        };
 
         std::cout << "Loaded dataset '" << data.datasetName << "' with " << data.numRows << " rows" << std::endl;
         return data;
     } catch (const std::exception& ex) {
         std::cerr << "Error getting dataset: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     DatasetData data;
     // Stub implementation - return empty data
@@ -483,7 +489,7 @@ Database::DatasetData Database::getDataset(int& datasetId) {
     std::cout << "Database stub: getDataset(" << datasetId << ") -> empty data" << std::endl;
     return data;
 #endif
-}
+};
 
 void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std::vector<float>& labelValues) {
     ensureConnection();
@@ -501,12 +507,12 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
     } catch (const std::exception& ex) {
         std::cerr << "Error updating dataset record labels: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: updateDatasetRecordLabels(datasetId=" << datasetId << ", rowIndex=" << rowIndex << ")" << std::endl;
 #endif
-}
+};
 
 void Database::clearDatasetRecords(long long& datasetId) {
     ensureConnection();
@@ -520,12 +526,12 @@ void Database::clearDatasetRecords(long long& datasetId) {
     } catch (const std::exception& ex) {
         std::cerr << "Error clearing dataset records: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: clearDatasetRecords(datasetId=" << datasetId << ")" << std::endl;
 #endif
-}
+};
 
 void Database::saveAIModelState(int& datasetId,
     const std::vector<std::vector<float>>& inputData,
@@ -564,12 +570,12 @@ void Database::saveAIModelState(int& datasetId,
     } catch (const std::exception& ex) {
         std::cerr << "Error saving AI model state: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: saveAIModelState(datasetId=" << datasetId << ")" << std::endl;
 #endif
-}
+};
 
 Database::AIModelState Database::loadLatestAIModelState(int& datasetId) {
     ensureConnection();
@@ -589,7 +595,7 @@ Database::AIModelState Database::loadLatestAIModelState(int& datasetId) {
         if (!row) {
             std::cout << "No AI model state found for dataset " << datasetId << std::endl;
             return state; // Return empty state
-        }
+        };
 
         // Convert BLOBs back to matrices and vectors
         auto inputBytes = row[0].getRawBytes();
@@ -620,14 +626,14 @@ Database::AIModelState Database::loadLatestAIModelState(int& datasetId) {
     } catch (const std::exception& ex) {
         std::cerr << "Error loading AI model state: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     AIModelState state;
     // Stub implementation - return empty state
     std::cout << "Database stub: loadLatestAIModelState(" << datasetId << ") -> empty state" << std::endl;
     return state;
 #endif
-}
+};
 
 void Database::savePredictionResults(int& datasetId, int sampleIndex,
     const std::vector<float>& inputFeatures,
@@ -654,12 +660,12 @@ void Database::savePredictionResults(int& datasetId, int sampleIndex,
     } catch (const std::exception& ex) {
         std::cerr << "Error saving prediction results: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: savePredictionResults(datasetId=" << datasetId << ", sampleIndex=" << sampleIndex << ")" << std::endl;
 #endif
-}
+};
 
 bool Database::getDatasetRecords(long long datasetId,
     std::vector<std::vector<float>>& loadedInputs,
@@ -678,7 +684,7 @@ bool Database::getDatasetRecords(long long datasetId,
         if (!metaRow) {
             std::cerr << "Dataset not found: " << datasetId << std::endl;
             return false;
-        }
+        };
 
         loadedInputSize = metaRow[0].get<int>();
         loadedOutputSize = metaRow[1].get<int>();
@@ -707,20 +713,20 @@ bool Database::getDatasetRecords(long long datasetId,
 
             loadedInputs[rowIndex] = blobToVector(featureBlob);
             loadedTargets[rowIndex] = blobToVector(labelBlob);
-        }
+        };
 
         std::cout << "Loaded " << loadedNumSamples << " records for dataset " << datasetId << std::endl;
         return true;
     } catch (const std::exception& ex) {
         std::cerr << "Error getting dataset records: " << ex.what() << std::endl;
         return false;
-    }
+    };
 #else
     // Stub implementation - return false
     std::cout << "Database stub: getDatasetRecords(datasetId=" << datasetId << ")" << std::endl;
     return false;
 #endif
-}
+};
 
 // NEW: Methods for learning settings management
 void Database::saveLearningSettings(int& datasetId, double learningRate, int batchSize, int epochs,
@@ -749,12 +755,12 @@ void Database::saveLearningSettings(int& datasetId, double learningRate, int bat
     } catch (const std::exception& ex) {
         std::cerr << "Error saving learning settings: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: saveLearningSettings(datasetId=" << datasetId << ")" << std::endl;
 #endif
-}
+};
 
 Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
     ensureConnection();
@@ -774,7 +780,7 @@ Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
         if (!row) {
             std::cout << "No learning settings found for dataset " << datasetId << ", using defaults" << std::endl;
             return LearningSettings{0.01, 32, 100, 0.0, 0.0, 0.0, "adam", "mse", "relu"}; // Return defaults
-        }
+        };
 
         settings.learningRate = row[0].get<double>();
         settings.batchSize = row[1].get<int>();
@@ -791,7 +797,7 @@ Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
     } catch (const std::exception& ex) {
         std::cerr << "Error loading learning settings: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     LearningSettings settings;
     // Stub implementation - return defaults
@@ -807,7 +813,7 @@ Database::LearningSettings Database::loadLearningSettings(int& datasetId) {
     std::cout << "Database stub: loadLearningSettings(" << datasetId << ") -> default settings" << std::endl;
     return settings;
 #endif
-}
+};
 
 // API key management methods
 void Database::saveAPIKey(const std::string& apiKey, const std::string& description, bool isActive) {
@@ -836,12 +842,12 @@ void Database::saveAPIKey(const std::string& apiKey, const std::string& descript
     } catch (const std::exception& ex) {
         std::cerr << "Error saving API key: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: saveAPIKey('" << apiKey.substr(0, 8) << "...')" << std::endl;
 #endif
-}
+};
 
 bool Database::validateAPIKey(const std::string& apiKey) {
     ensureConnection();
@@ -854,18 +860,18 @@ bool Database::validateAPIKey(const std::string& apiKey) {
         auto row = result.fetchOne();
         if (row) {
             return row[0].get<int64_t>() > 0;
-        }
+        };
         return false;
     } catch (const std::exception& ex) {
         std::cerr << "Error validating API key: " << ex.what() << std::endl;
         return false;
-    }
+    };
 #else
     // Stub implementation - accept any non-empty key
     std::cout << "Database stub: validateAPIKey('" << apiKey.substr(0, 8) << "...') -> " << (!apiKey.empty()) << std::endl;
     return !apiKey.empty();
 #endif
-}
+};
 
 void Database::deactivateAPIKey(const std::string& apiKey) {
     ensureConnection();
@@ -879,12 +885,12 @@ void Database::deactivateAPIKey(const std::string& apiKey) {
     } catch (const std::exception& ex) {
         std::cerr << "Error deactivating API key: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: deactivateAPIKey('" << apiKey.substr(0, 8) << "...')" << std::endl;
 #endif
-}
+};
 
 std::vector<std::pair<std::string, std::string>> Database::getAPIKeys() {
     ensureConnection();
@@ -899,17 +905,17 @@ std::vector<std::pair<std::string, std::string>> Database::getAPIKeys() {
             std::string apiKey = row[0].get<std::string>();
             std::string description = row[1].get<std::string>();
             keys.emplace_back(apiKey, description);
-        }
+        };
     } catch (const std::exception& ex) {
         std::cerr << "Error getting API keys: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation - return empty list
     std::cout << "Database stub: getAPIKeys() -> empty list" << std::endl;
 #endif
     return keys;
-}
+};
 
 // Chat history management methods
 void Database::saveChatMessage(int sessionId, const std::string& speaker, const std::string& message) {
@@ -931,12 +937,146 @@ void Database::saveChatMessage(int sessionId, const std::string& speaker, const 
     } catch (const std::exception& ex) {
         std::cerr << "Error saving chat message: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: saveChatMessage(sessionId=" << sessionId << ", speaker='" << speaker << "')" << std::endl;
 #endif
-}
+};
+// Enhanced chat message method with additional metadata
+void Database::saveChatMessage(int sessionId, const std::string& role, const std::string& content,
+                              const std::string& messageType, float confidence, const std::string& metadata) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("INSERT INTO " + dbSchema + ".chat_messages (session_id, speaker, message, message_type, confidence, metadata) "
+                     "VALUES (?, ?, ?, ?, ?, ?)")
+                .bind(sessionId)
+                .bind(role)
+                .bind(content)
+                .bind(messageType)
+                .bind(confidence)
+                .bind(metadata)
+                .execute();
+
+        // Update session timestamp
+        session->sql("UPDATE " + dbSchema + ".chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(sessionId)
+                .execute();
+
+        // Note: trainer is not available in Database class, removed verbose logging
+    } catch (const std::exception& ex) {
+        std::cerr << "Error saving enhanced chat message: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: saveChatMessage(sessionId=" << sessionId << ", role='" << role << "', messageType='" << messageType << "')" << std::endl;
+#endif
+};
+
+// Get chat messages with full metadata
+std::vector<Database::ChatMessage> Database::getChatMessages(int sessionId, int limit) {
+    ensureConnection();
+    std::vector<ChatMessage> messages;
+#ifdef USE_MYSQL
+    try {
+        std::string query = "SELECT id, session_id, speaker, message, message_type, confidence, timestamp, metadata "
+                           "FROM " + dbSchema + ".chat_messages WHERE session_id = ? ORDER BY timestamp DESC";
+        if (limit > 0) {
+            query += " LIMIT ?";
+        };
+
+        auto stmt = session->sql(query).bind(sessionId);
+        if (limit > 0) {
+            stmt = stmt.bind(limit);
+        };
+
+        auto result = stmt.execute();
+
+        mysqlx::Row row;
+        while ((row = result.fetchOne())) {
+            ChatMessage msg;
+            msg.id = static_cast<int>(row[0].get<int64_t>());
+            msg.sessionId = static_cast<int>(row[1].get<int64_t>());
+            msg.role = row[2].get<std::string>();
+            msg.content = row[3].get<std::string>();
+            msg.messageType = row[4].get<std::string>();
+            msg.confidence = row[5].get<float>();
+            msg.timestamp = row[6].get<std::string>();
+            msg.metadata = row[7].get<std::string>();
+            messages.push_back(msg);
+        };
+
+        // Reverse to get chronological order (oldest first)
+        std::reverse(messages.begin(), messages.end());
+
+        // Note: trainer is not available in Database class, removed verbose logging
+    } catch (const std::exception& ex) {
+        std::cerr << "Error getting chat messages: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation - return empty vector
+    std::cout << "Database stub: getChatMessages(sessionId=" << sessionId << ", limit=" << limit << ") -> empty messages" << std::endl;
+#endif
+    return messages;
+};
+
+// Clear all chat messages for a session
+bool Database::clearChatMessages(int sessionId) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("DELETE FROM " + dbSchema + ".chat_messages WHERE session_id = ?")
+                .bind(sessionId)
+                .execute();
+
+        // Note: trainer is not available in Database class, removed verbose logging
+        return true;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error clearing chat messages: " << ex.what() << std::endl;
+        return false;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: clearChatMessages(sessionId=" << sessionId << ") -> true" << std::endl;
+    return true;
+#endif
+};
+
+// Save chat session
+int Database::saveChatSession(const std::string& sessionName, const std::string& userId,
+                             const std::string& modelVersion, const std::string& status) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("INSERT INTO " + dbSchema + ".chat_sessions (session_name, user_id, model_version, status) "
+                                   "VALUES (?, ?, ?, ?)")
+                        .bind(sessionName)
+                        .bind(userId)
+                        .bind(modelVersion)
+                        .bind(status)
+                        .execute();
+
+        // Get the auto-generated ID
+        auto idResult = session->sql("SELECT LAST_INSERT_ID() as id").execute();
+        auto row = idResult.fetchOne();
+        int sessionId = static_cast<int>(row[0].get<int64_t>());
+
+        // Note: trainer is not available in Database class, removed verbose logging
+        return sessionId;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error saving chat session: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation - return dummy ID
+    static int nextSessionId = 1;
+    std::cout << "Database stub: saveChatSession('" << sessionName << "', '" << userId << "') -> ID: " << nextSessionId << std::endl;
+    return nextSessionId++;
+#endif
+};
 
 std::vector<std::pair<std::string, std::string>> Database::loadChatHistory(int sessionId) {
     ensureConnection();
@@ -952,19 +1092,19 @@ std::vector<std::pair<std::string, std::string>> Database::loadChatHistory(int s
             std::string speaker = row[0].get<std::string>();
             std::string message = row[1].get<std::string>();
             conversation.emplace_back(speaker, message);
-        }
+        };
 
         // Note: trainer is not available in Database class, removed verbose logging
     } catch (const std::exception& ex) {
         std::cerr << "Error loading chat history: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation - return empty conversation
     std::cout << "Database stub: loadChatHistory(sessionId=" << sessionId << ") -> empty conversation" << std::endl;
 #endif
     return conversation;
-}
+};
 
 void Database::saveModelState(int sessionId, const nlohmann::json& modelState) {
     ensureConnection();
@@ -980,12 +1120,12 @@ void Database::saveModelState(int sessionId, const nlohmann::json& modelState) {
     } catch (const std::exception& ex) {
         std::cerr << "Error saving model state: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: saveModelState(sessionId=" << sessionId << ")" << std::endl;
 #endif
-}
+};
 
 nlohmann::json Database::loadLatestModelState(int sessionId) {
     ensureConnection();
@@ -1003,24 +1143,24 @@ nlohmann::json Database::loadLatestModelState(int sessionId) {
             // Note: trainer is not available in Database class, removed verbose logging
         } else {
             // Note: trainer is not available in Database class, removed verbose logging
-        }
+        };
     } catch (const std::exception& ex) {
         std::cerr << "Error loading model state: " << ex.what() << std::endl;
         throw;
-    }
+    };
 #else
     // Stub implementation - return empty JSON
     std::cout << "Database stub: loadLatestModelState(sessionId=" << sessionId << ") -> empty state" << std::endl;
 #endif
     return modelState;
-}
+};
 
 // Connection management methods
 bool Database::isConnectionHealthy() {
 #ifdef USE_MYSQL
     if (!session) {
         return false;
-    }
+    };
     try {
         // Try a simple query to check if connection is alive
         session->sql("SELECT 1").execute();
@@ -1028,12 +1168,12 @@ bool Database::isConnectionHealthy() {
     } catch (const std::exception& ex) {
         std::cerr << "Connection health check failed: " << ex.what() << std::endl;
         return false;
-    }
+    };
 #else
     // Stub implementation - always return true
     return true;
 #endif
-}
+};
 
 void Database::reconnect() {
 #ifdef USE_MYSQL
@@ -1045,7 +1185,7 @@ void Database::reconnect() {
             session->close();
             delete session;
             session = nullptr;
-        }
+        };
 
         // Convert SSLMode enum to mysqlx::SSLMode
         mysqlx::SSLMode mysqlSslMode;
@@ -1065,7 +1205,7 @@ void Database::reconnect() {
             default:
                 mysqlSslMode = mysqlx::SSLMode::DISABLED;
                 break;
-        }
+        };
 
         // First, connect without schema to ensure database exists
         mysqlx::Session tempSession(dbHost, dbPort, dbUser, dbPassword);
@@ -1078,18 +1218,18 @@ void Database::reconnect() {
     } catch (const std::exception& ex) {
         std::cerr << "Database reconnection failed: " << ex.what() << std::endl;
         throw std::runtime_error("Failed to reconnect to database: " + std::string(ex.what()));
-    }
+    };
 #else
     // Stub implementation
     std::cout << "Database stub: reconnect() called" << std::endl;
 #endif
-}
+};
 
 void Database::ensureConnection() {
     if (!isConnectionHealthy()) {
         reconnect();
-    }
-}
+    };
+};
 
 // Destructor for proper cleanup
 Database::~Database() {
@@ -1098,6 +1238,6 @@ Database::~Database() {
         session->close();
         delete session;
         session = nullptr;
-    }
+    };
 #endif
-}
+};
