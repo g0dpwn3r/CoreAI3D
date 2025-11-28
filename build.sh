@@ -8,7 +8,6 @@ set -e
 # Default build type
 BUILD_TYPE="debug"
 USE_MYSQL="ON"
-CLEAN_BUILD="false"
 export CMAKE_LINKER=mold
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -26,15 +25,20 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --clean)
-      CLEAN_BUILD="true"
-      shift
+      echo "Cleaning CMake build artifacts..."
+      find . -maxdepth 1 -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null
+      find . -maxdepth 1 -name "CMakeCache.txt" -type f -delete 2>/dev/null
+      find out/build -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null
+      find out/build -name "CMakeCache.txt" -type f -delete 2>/dev/null
+      echo "Cleanup completed"
+      exit 0
       ;;
     --help)
       echo "Usage: $0 [--debug|--release] [--no-mysql] [--clean]"
       echo "  --debug    Build in Debug mode (default)"
       echo "  --release  Build in Release mode"
       echo "  --no-mysql Disable MySQL support"
-      echo "  --clean    Clean build directory before building"
+      echo "  --clean    Clean CMake build artifacts"
       exit 0
       ;;
     *)
@@ -44,10 +48,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-if [ "$CLEAN_BUILD" = "true" ]; then
-    rm -rf "$BUILD_DIR"
-fi
 
 echo "Building CoreAI3D in $BUILD_TYPE mode with MySQL=$USE_MYSQL"
 
