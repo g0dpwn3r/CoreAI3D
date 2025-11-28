@@ -1081,11 +1081,11 @@ void Training::train(double learningRate, int epochs) {
     }
     const int barWidth = 70;
 
-    // Early stopping variables
+    // Early stopping variables - made less aggressive
     float previous_loss = std::numeric_limits<float>::max();
-    int patience = 10; // Stop if no improvement for 10 epochs
+    int patience = 50; // Increased from 10 to 50 - allow more epochs without improvement
     int patience_counter = 0;
-    float min_improvement = 1e-6f; // Minimum improvement threshold
+    float min_improvement = 1e-4f; // Increased from 1e-6f to 1e-4f - require more significant improvement
 
     for (int i = 0; i < epochs; ++i) {
         printProgressBar("Training Progress", i + 1, epochs, barWidth);
@@ -1157,11 +1157,11 @@ bool Training::startTraining(double learningRate, int epochs) {
             trainingStatus = "running";
             const int barWidth = 70;
 
-            // Early stopping variables
+            // Early stopping variables - made less aggressive
             float previous_loss = std::numeric_limits<float>::max();
-            int patience = 10;
+            int patience = 50; // Increased from 10 to 50 - allow more epochs without improvement
             int patience_counter = 0;
-            float min_improvement = 1e-6f;
+            float min_improvement = 1e-4f; // Increased from 1e-6f to 1e-4f - require more significant improvement
 
             for (int i = 0; i < epochs; ++i) {
                 if (trainingStopRequested.load()) {

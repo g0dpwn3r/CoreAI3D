@@ -237,7 +237,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         std::vector<float> hiddenLayer(this->neurons, 0.0f);
         std::vector<float> outputLayer(this->outputSize, 0.0f);
 
-        // Input to hidden layer - use transform functions with proper weight multiplication
+        // Input to hidden layer - standard neural network computation
         for (int j = 0; j < this->neurons; ++j)
         {
             float sum = 0.0f;
@@ -245,28 +245,8 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_input_hidden, j, k))
                 {
-                    // Apply transform functions to input values and multiply by weights
-                    float input_val = this->input[i][k];
-                    float weight_val = this->weigth_input_hidden[j][k];
-                    
-                    // Transform the input value and multiply by weight
-                    float transformed_val = 0.0f;
-                    if (this->input[i].size() == 1) {
-                        transformed_val = this->xTransform2(input_val, this->epsilon, this->neurons, 1.0f);
-                    } else if (this->input[i].size() >= 3) {
-                        if (k % 3 == 0) {
-                            transformed_val = this->xTransform2(input_val, this->epsilon, this->neurons, 1.0f);
-                        } else if (k % 3 == 1) {
-                            transformed_val = this->yTransform2(input_val, this->epsilon, this->neurons, 1.0f);
-                        } else {
-                            transformed_val = this->zTransform2(input_val, this->epsilon, this->neurons, 1.0f);
-                        }
-                    } else {
-                        transformed_val = this->xTransform2(input_val, this->epsilon, this->neurons, 1.0f);
-                    }
-                    
-                    // Multiply transformed value by weight and add to sum
-                    sum += transformed_val * weight_val;
+                    // Standard weighted sum: sum += input * weight
+                    sum += this->input[i][k] * this->weigth_input_hidden[j][k];
                 }
             }
             hiddenLayer[j] = this->sigmoid(sum);
@@ -281,7 +261,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             std::cout << "..." << std::endl;
         }
 
-        // Hidden to output layer - use transform functions with proper weight multiplication
+        // Hidden to output layer - standard neural network computation
         for (int j = 0; j < this->outputSize; ++j)
         {
             float sum = 0.0f;
@@ -289,22 +269,8 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             {
                 if (safe2DIndex(this->weigth_output_hidden, j, k))
                 {
-                    // Apply transform functions to hidden activations and multiply by weights
-                    float hidden_val = hiddenLayer[k];
-                    float weight_val = this->weigth_output_hidden[j][k];
-                    
-                    // Transform the hidden activation and multiply by weight
-                    float transformed_val = 0.0f;
-                    if (k % 3 == 0) {
-                        transformed_val = this->xTransform2(hidden_val, this->epsilon, this->neurons, 1.0f);
-                    } else if (k % 3 == 1) {
-                        transformed_val = this->yTransform2(hidden_val, this->epsilon, this->neurons, 1.0f);
-                    } else {
-                        transformed_val = this->zTransform2(hidden_val, this->epsilon, this->neurons, 1.0f);
-                    }
-                    
-                    // Multiply transformed value by weight and add to sum
-                    sum += transformed_val * weight_val;
+                    // Standard weighted sum: sum += hidden * weight
+                    sum += hiddenLayer[k] * this->weigth_output_hidden[j][k];
                 }
             }
             outputLayer[j] = this->sigmoid(sum);
@@ -459,24 +425,10 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if(!safe2DIndex(this->weigth_output_hidden, j, k)) {
                     throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                 }
-                // Backpropagation with transform derivatives
-                float deriv = 0.0f;
-                if (k % 3 == 0) {
-                    deriv = xTransform2_derivative_m(hidden[sample][k], epsilon, neurons, 1.0f);
-                } else if (k % 3 == 1) {
-                    deriv = yTransform2_derivative_m(hidden[sample][k], epsilon, neurons, 1.0f);
-                } else {
-                    deriv = zTransform2_derivative_m(hidden[sample][k], epsilon, neurons, 1.0f);
-                }
-                // Multiply by the transformed value for proper derivative calculation
-                deriv *= hidden[sample][k]; // Using the hidden activation as the transformed value
-                // Add a minimum derivative value to prevent vanishing gradients
-                if (std::abs(deriv) < 1e-6f) {
-                    deriv = (deriv >= 0) ? 1e-6f : -1e-6f;
-                }
+                // Standard backpropagation: gradient = error * activation
+                float gradient = output_errors[j] * hidden[sample][k];
                 
-                // Gradient clipping
-                float gradient = output_errors[j] * deriv;
+                // Gradient clipping to prevent exploding gradients
                 if (gradient > 1.0f) gradient = 1.0f;
                 if (gradient < -1.0f) gradient = -1.0f;
 
@@ -492,34 +444,10 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
                     throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                 }
-                // Backpropagation with transform derivatives
-                float deriv = 0.0f;
-                // Use transform logic based on input dimensionality
-                if (normalized_inputs[sample].size() == 1) {
-                    // 1D input - use xTransform2 derivative for all
-                    deriv = xTransform2_derivative_m(normalized_inputs[sample][k], epsilon, neurons, 1.0f);
-                } else if (normalized_inputs[sample].size() >= 3) {
-                    // 3D input - use appropriate transform derivative based on axis
-                    if (k % 3 == 0) {
-                        deriv = xTransform2_derivative_m(normalized_inputs[sample][k], epsilon, neurons, 1.0f);
-                    } else if (k % 3 == 1) {
-                        deriv = yTransform2_derivative_m(normalized_inputs[sample][k], epsilon, neurons, 1.0f);
-                    } else {
-                        deriv = zTransform2_derivative_m(normalized_inputs[sample][k], epsilon, neurons, 1.0f);
-                    }
-                } else {
-                    // Other dimensionalities - use xTransform2 derivative as default
-                    deriv = xTransform2_derivative_m(normalized_inputs[sample][k], epsilon, neurons, 1.0f);
-                }
-                // Multiply by the transformed value for proper derivative calculation
-                deriv *= normalized_inputs[sample][k]; // Using the input value as the transformed value
-                // Add a minimum derivative value to prevent vanishing gradients
-                if (std::abs(deriv) < 1e-6f) {
-                    deriv = (deriv >= 0) ? 1e-6f : -1e-6f;
-                }
-
-                // Gradient clipping
-                float gradient = hidden_errors[j] * deriv;
+                // Standard backpropagation: gradient = error * input
+                float gradient = hidden_errors[j] * normalized_inputs[sample][k];
+                
+                // Gradient clipping to prevent exploding gradients
                 if (gradient > 1.0f) gradient = 1.0f;
                 if (gradient < -1.0f) gradient = -1.0f;
 
@@ -642,55 +570,41 @@ float CoreAI::zTransform(float x, float y, float z, float n, float m)
 
 float CoreAI::xTransform2(float x, float e, float n, float m)
 {
-    // Improved transform function that produces meaningful values
-    // Use a combination of linear and non-linear terms for better learning
-    // Added scaling factor 0.1 to prevent saturation
-    float linear_term = x * m;
-    float non_linear_term = std::pow(x, 2.0f) * n / 10.0f;
-    float result = (linear_term + non_linear_term + e) * 0.1f;
-    return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
+    // Simplified transform - just return the input value
+    // This prevents saturation and allows the network to learn properly
+    return x;
 }
 
 float CoreAI::yTransform2(float y, float e, float n, float m)
 {
-    // Improved transform function that produces meaningful values
-    // Added scaling factor 0.1 to prevent saturation
-    float linear_term = y * m;
-    float non_linear_term = std::pow(y, 2.0f) * n / 10.0f;
-    float result = (linear_term + non_linear_term + e) * 0.1f;
-    return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
+    // Simplified transform - just return the input value
+    // This prevents saturation and allows the network to learn properly
+    return y;
 }
 
 float CoreAI::zTransform2(float z, float e, float n, float m)
 {
-    // Improved transform function that produces meaningful values
-    // Added scaling factor 0.1 to prevent saturation
-    float linear_term = z * m;
-    float non_linear_term = std::pow(z, 2.0f) * n / 10.0f;
-    float result = (linear_term + non_linear_term + e) * 0.1f;
-    return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
+    // Simplified transform - just return the input value
+    // This prevents saturation and allows the network to learn properly
+    return z;
 }
 
 float CoreAI::xTransform2_derivative_m(float x, float e_arg, float n, float m)
 {
-    // Simple derivative for the improved transform function
-    // Derivative of (x*m + x^2*n/10 + e) * 0.1 with respect to m is x * 0.1
-    float result = x * 0.1f;
-    return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
+    // Derivative of identity function is 1
+    return 1.0f;
 }
 
 float CoreAI::yTransform2_derivative_m(float y, float e_arg, float n, float m)
 {
-    // Simple derivative for the improved transform function
-    float result = y * 0.1f;
-    return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
+    // Derivative of identity function is 1
+    return 1.0f;
 }
 
 float CoreAI::zTransform2_derivative_m(float z, float e_arg, float n, float m)
 {
-    // Simple derivative for the improved transform function
-    float result = z * 0.1f;
-    return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
+    // Derivative of identity function is 1
+    return 1.0f;
 }
 
 void CoreAI::setInputSize(int size)
