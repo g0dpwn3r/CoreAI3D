@@ -4356,9 +4356,9 @@ if __name__ == "__main__":
         # Training controls
         controls_layout = QHBoxLayout()
 
-        start_training_btn = QPushButton("Start Training")
-        start_training_btn.clicked.connect(lambda: self.start_training())
-        controls_layout.addWidget(start_training_btn)
+        self.training_button = QPushButton("Start Training")
+        self.training_button.clicked.connect(lambda: self.start_training())
+        controls_layout.addWidget(self.training_button)
 
         stop_training_btn = QPushButton("Stop Training")
         stop_training_btn.clicked.connect(lambda: self.stop_training())
@@ -7392,7 +7392,8 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 # Enable training button if dataset loaded successfully
                 if result.success:
-                    self.training_button.setEnabled(True)
+                    if self.training_button:
+                        self.training_button.setEnabled(True)
 
                 # Mark dataset as loaded if successful
                 if result.success:
@@ -7502,372 +7503,372 @@ capabilities, training data, performance metrics, and usage instructions."""
                 min_range=min_range,
                 max_range=max_range
             )
-def calculate_dataset_sizes(self, file_path: str, data_type: str = None) -> Dict[str, Any]:
-    """Calculate inputsize, outputsize, and samplesize for a dataset file"""
-    try:
-        if not os.path.exists(file_path):
-            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-        file_ext = os.path.splitext(file_path.lower())[1]
-
-        # Determine data type if not provided
-        if not data_type:
-            ext_to_type = {
-                '.csv': 'csv', '.json': 'json', '.xml': 'xml', '.txt': 'txt', '.text': 'txt',
-                '.pdf': 'pdf', '.docx': 'docx', '.doc': 'doc',
-                '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.bmp': 'image', '.gif': 'image',
-                '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.aac': 'audio',
-                '.mp4': 'video', '.avi': 'video', '.mov': 'video', '.mkv': 'video'
-            }
-            data_type = ext_to_type.get(file_ext, 'unknown')
-
-        # Calculate sizes based on data type
-        if data_type == 'csv':
-            return self._calculate_csv_sizes(file_path)
-        elif data_type == 'json':
-            return self._calculate_json_sizes(file_path)
-        elif data_type == 'xml':
-            return self._calculate_xml_sizes(file_path)
-        elif data_type == 'txt':
-            return self._calculate_text_sizes(file_path)
-        elif data_type in ['pdf', 'docx', 'doc']:
-            return self._calculate_document_sizes(file_path, data_type)
-        elif data_type == 'image':
-            return self._calculate_image_sizes(file_path)
-        elif data_type == 'audio':
-            return self._calculate_audio_sizes(file_path)
-        elif data_type == 'video':
-            return self._calculate_video_sizes(file_path)
-        else:
-            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-    except Exception as e:
-        logger.error(f"Error calculating dataset sizes for {file_path}: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_csv_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for CSV files"""
-    try:
-        parsed_data = self.parse_csv_file(file_path, None, self.learning_config.get('contains_text', False))
-        if 'error' in parsed_data:
-            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-        column_count = parsed_data.get('column_count', 0)
-        row_count = parsed_data.get('row_count', 0)
-
-        if column_count <= 1:
-            # Single column or empty - assume inputsize=1, outputsize=0
-            return {'inputsize': 1, 'outputsize': 0, 'samplesize': row_count}
-
-        # For CSV files, assume last column is target (output) and rest are inputs
-        # This is a common convention in machine learning datasets
-        inputsize = column_count - 1
-        outputsize = 1
-        samplesize = row_count
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating CSV sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_json_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for JSON files"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        # Try to parse as JSON
+    def calculate_dataset_sizes(self, file_path: str, data_type: str = None) -> Dict[str, Any]:
+        """Calculate inputsize, outputsize, and samplesize for a dataset file"""
         try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
+            if not os.path.exists(file_path):
+                return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+            file_ext = os.path.splitext(file_path.lower())[1]
+    
+            # Determine data type if not provided
+            if not data_type:
+                ext_to_type = {
+                    '.csv': 'csv', '.json': 'json', '.xml': 'xml', '.txt': 'txt', '.text': 'txt',
+                    '.pdf': 'pdf', '.docx': 'docx', '.doc': 'doc',
+                    '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.bmp': 'image', '.gif': 'image',
+                    '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.aac': 'audio',
+                    '.mp4': 'video', '.avi': 'video', '.mov': 'video', '.mkv': 'video'
+                }
+                data_type = ext_to_type.get(file_ext, 'unknown')
+    
+            # Calculate sizes based on data type
+            if data_type == 'csv':
+                return self._calculate_csv_sizes(file_path)
+            elif data_type == 'json':
+                return self._calculate_json_sizes(file_path)
+            elif data_type == 'xml':
+                return self._calculate_xml_sizes(file_path)
+            elif data_type == 'txt':
+                return self._calculate_text_sizes(file_path)
+            elif data_type in ['pdf', 'docx', 'doc']:
+                return self._calculate_document_sizes(file_path, data_type)
+            elif data_type == 'image':
+                return self._calculate_image_sizes(file_path)
+            elif data_type == 'audio':
+                return self._calculate_audio_sizes(file_path)
+            elif data_type == 'video':
+                return self._calculate_video_sizes(file_path)
+            else:
+                return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+        except Exception as e:
+            logger.error(f"Error calculating dataset sizes for {file_path}: {str(e)}")
             return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-        # Analyze JSON structure
-        if isinstance(data, list):
-            # Array of objects/samples
-            if len(data) == 0:
-                return {'inputsize': 0, 'outputsize': 0, 'samplesize': 0}
-
-            first_item = data[0]
-            if isinstance(first_item, dict):
-                # Each item is an object with features
-                keys = list(first_item.keys())
-                # Assume 'target' or 'label' or last key is output, rest are inputs
+    
+    def _calculate_csv_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for CSV files"""
+        try:
+            parsed_data = self.parse_csv_file(file_path, None, self.learning_config.get('contains_text', False))
+            if 'error' in parsed_data:
+                return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+            column_count = parsed_data.get('column_count', 0)
+            row_count = parsed_data.get('row_count', 0)
+    
+            if column_count <= 1:
+                # Single column or empty - assume inputsize=1, outputsize=0
+                return {'inputsize': 1, 'outputsize': 0, 'samplesize': row_count}
+    
+            # For CSV files, assume last column is target (output) and rest are inputs
+            # This is a common convention in machine learning datasets
+            inputsize = column_count - 1
+            outputsize = 1
+            samplesize = row_count
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating CSV sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_json_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for JSON files"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+    
+            # Try to parse as JSON
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+            # Analyze JSON structure
+            if isinstance(data, list):
+                # Array of objects/samples
+                if len(data) == 0:
+                    return {'inputsize': 0, 'outputsize': 0, 'samplesize': 0}
+    
+                first_item = data[0]
+                if isinstance(first_item, dict):
+                    # Each item is an object with features
+                    keys = list(first_item.keys())
+                    # Assume 'target' or 'label' or last key is output, rest are inputs
+                    target_keys = ['target', 'label', 'output', 'y']
+                    output_key = None
+                    for key in reversed(keys):
+                        if key.lower() in target_keys:
+                            output_key = key
+                            break
+    
+                    if output_key:
+                        inputsize = len(keys) - 1
+                        outputsize = 1
+                    else:
+                        # No clear target column, assume all are inputs
+                        inputsize = len(keys)
+                        outputsize = 0
+    
+                    samplesize = len(data)
+                else:
+                    # Array of simple values
+                    inputsize = 1
+                    outputsize = 0
+                    samplesize = len(data)
+            elif isinstance(data, dict):
+                # Single object - treat as one sample
+                keys = list(data.keys())
                 target_keys = ['target', 'label', 'output', 'y']
                 output_key = None
                 for key in reversed(keys):
                     if key.lower() in target_keys:
                         output_key = key
                         break
-
+    
                 if output_key:
                     inputsize = len(keys) - 1
                     outputsize = 1
                 else:
-                    # No clear target column, assume all are inputs
                     inputsize = len(keys)
                     outputsize = 0
-
-                samplesize = len(data)
+                samplesize = 1
             else:
-                # Array of simple values
+                # Simple value
                 inputsize = 1
                 outputsize = 0
-                samplesize = len(data)
-        elif isinstance(data, dict):
-            # Single object - treat as one sample
-            keys = list(data.keys())
-            target_keys = ['target', 'label', 'output', 'y']
-            output_key = None
-            for key in reversed(keys):
-                if key.lower() in target_keys:
-                    output_key = key
-                    break
-
-            if output_key:
-                inputsize = len(keys) - 1
-                outputsize = 1
-            else:
-                inputsize = len(keys)
-                outputsize = 0
-            samplesize = 1
-        else:
-            # Simple value
-            inputsize = 1
-            outputsize = 0
-            samplesize = 1
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating JSON sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_xml_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for XML files"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        # Simple XML analysis - count elements and attributes
-        # This is a basic implementation
-        import re
-
-        # Count XML elements (rough estimate of features)
-        element_count = len(re.findall(r'<\w+', content))
-
-        # Count text content blocks (rough estimate of samples)
-        text_blocks = len(re.findall(r'>[^<]+<', content))
-
-        # For XML, we make some assumptions:
-        # - Each element could represent a feature
-        # - Text blocks could represent sample data
-        # - This is highly simplified and would need domain-specific logic
-
-        if element_count > 0:
-            # Assume some elements are targets/outputs
-            inputsize = max(1, element_count - 1)
-            outputsize = 1
-            samplesize = max(1, text_blocks // 10)  # Rough estimate
-        else:
-            inputsize = 1
-            outputsize = 0
-            samplesize = 1
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating XML sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_text_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for text files"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        # Analyze text structure
-        lines = content.split('\n')
-        non_empty_lines = [line for line in lines if line.strip()]
-
-        if not non_empty_lines:
-            return {'inputsize': 0, 'outputsize': 0, 'samplesize': 0}
-
-        # For text files, we treat each line as a sample
-        # Input size is based on word count per line (embeddings)
-        avg_words_per_line = sum(len(line.split()) for line in non_empty_lines) / len(non_empty_lines)
-
-        # Assume text classification task
-        inputsize = int(avg_words_per_line * 50)  # Rough embedding dimension estimate
-        outputsize = 1  # Classification target
-        samplesize = len(non_empty_lines)
-
-        return {'inputsize': max(1, inputsize), 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating text sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_document_sizes(self, file_path: str, doc_type: str) -> Dict[str, Any]:
-    """Calculate sizes for document files (PDF, DOCX, DOC)"""
-    try:
-        # For document files, we estimate based on file size and type
-        file_size = os.path.getsize(file_path)
-
-        # Rough estimates based on document type and size
-        if doc_type == 'pdf':
-            # PDFs typically contain structured text
-            estimated_pages = max(1, file_size // 2000)  # Rough page estimate
-            inputsize = 1000  # Text embeddings
-            outputsize = 1
-            samplesize = estimated_pages
-        elif doc_type == 'docx':
-            # DOCX files are XML-based
-            estimated_paragraphs = max(1, file_size // 500)
-            inputsize = 800  # Text embeddings
-            outputsize = 1
-            samplesize = estimated_paragraphs
-        elif doc_type == 'doc':
-            # Legacy DOC format
-            estimated_paragraphs = max(1, file_size // 300)
-            inputsize = 600  # Text embeddings
-            outputsize = 1
-            samplesize = estimated_paragraphs
-        else:
-            inputsize = 500
-            outputsize = 1
-            samplesize = 1
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating document sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_image_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for image files"""
-    try:
-        # For images, we extract basic properties
-        file_size = os.path.getsize(file_path)
-
-        # Try to get image dimensions (basic approach)
+                samplesize = 1
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating JSON sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_xml_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for XML files"""
         try:
-            # Simple header parsing for common formats
-            with open(file_path, 'rb') as f:
-                header = f.read(24)  # Read first 24 bytes
-
-            width, height = 224, 224  # Default fallback
-
-            # PNG format
-            if header.startswith(b'\x89PNG'):
-                if len(header) >= 24:
-                    width = int.from_bytes(header[16:20], 'big')
-                    height = int.from_bytes(header[20:24], 'big')
-            # JPEG format (SOF0 marker)
-            elif header.startswith(b'\xff\xd8'):
-                # Look for SOF0 marker
-                f.seek(0)
-                data = f.read()
-                sof0_pos = data.find(b'\xff\xc0')
-                if sof0_pos != -1 and sof0_pos + 9 < len(data):
-                    height = int.from_bytes(data[sof0_pos + 5:sof0_pos + 7], 'big')
-                    width = int.from_bytes(data[sof0_pos + 7:sof0_pos + 9], 'big')
-
-            # For images, input size is pixels * channels, output size depends on task
-            channels = 3  # Assume RGB
-            inputsize = width * height * channels
-            outputsize = 1000  # Classification outputs (e.g., ImageNet classes)
-            samplesize = 1  # Single image
-
-        except Exception:
-            # Fallback for unsupported formats
-            inputsize = 224 * 224 * 3  # Standard image size
-            outputsize = 1000
-            samplesize = 1
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating image sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_audio_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for audio files"""
-    try:
-        file_size = os.path.getsize(file_path)
-
-        # Basic audio format detection and size estimation
-        file_ext = os.path.splitext(file_path.lower())[1]
-
-        # Rough estimates based on format and file size
-        if file_ext in ['.wav', '.flac']:
-            # Uncompressed formats - can estimate duration
-            estimated_duration_sec = max(1, file_size // 176400)  # Rough WAV estimate (44.1kHz, 16-bit, stereo)
-            inputsize = 128 * estimated_duration_sec  # MFCC features over time
-            outputsize = 1  # Classification or regression target
-            samplesize = estimated_duration_sec  # One sample per second
-        elif file_ext == '.mp3':
-            # Compressed format
-            estimated_duration_sec = max(1, file_size // 16000)  # Rough MP3 estimate
-            inputsize = 128 * estimated_duration_sec
-            outputsize = 1
-            samplesize = estimated_duration_sec
-        elif file_ext == '.aac':
-            # AAC format
-            estimated_duration_sec = max(1, file_size // 12000)  # Rough AAC estimate
-            inputsize = 128 * estimated_duration_sec
-            outputsize = 1
-            samplesize = estimated_duration_sec
-        else:
-            # Unknown audio format
-            inputsize = 128 * 10  # 10 seconds default
-            outputsize = 1
-            samplesize = 10
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating audio sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
-    """Calculate sizes for video files"""
-    try:
-        file_size = os.path.getsize(file_path)
-
-        # Rough video analysis based on file size and format
-        file_ext = os.path.splitext(file_path.lower())[1]
-
-        # Estimate duration and frame rate
-        if file_ext in ['.mp4', '.mkv']:
-            # Compressed formats - rough estimates
-            estimated_duration_sec = max(1, file_size // 500000)  # Rough estimate: ~0.5MB per second
-            frames_per_sec = 30  # Assume 30 FPS
-            total_frames = estimated_duration_sec * frames_per_sec
-        elif file_ext in ['.avi', '.mov']:
-            # Other formats
-            estimated_duration_sec = max(1, file_size // 700000)  # Slightly higher bitrate
-            frames_per_sec = 25  # Assume 25 FPS
-            total_frames = estimated_duration_sec * frames_per_sec
-        else:
-            estimated_duration_sec = 10  # Default 10 seconds
-            total_frames = 300  # 30 FPS * 10 seconds
-
-        # For video, input size is frame pixels * channels, processed over time
-        frame_width, frame_height = 224, 224  # Standard frame size
-        channels = 3  # RGB
-        inputsize = frame_width * frame_height * channels
-        outputsize = 1000  # Classification outputs
-        samplesize = total_frames  # One sample per frame
-
-        return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
-
-    except Exception as e:
-        logger.error(f"Error calculating video sizes: {str(e)}")
-        return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-                    
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+    
+            # Simple XML analysis - count elements and attributes
+            # This is a basic implementation
+            import re
+    
+            # Count XML elements (rough estimate of features)
+            element_count = len(re.findall(r'<\w+', content))
+    
+            # Count text content blocks (rough estimate of samples)
+            text_blocks = len(re.findall(r'>[^<]+<', content))
+    
+            # For XML, we make some assumptions:
+            # - Each element could represent a feature
+            # - Text blocks could represent sample data
+            # - This is highly simplified and would need domain-specific logic
+    
+            if element_count > 0:
+                # Assume some elements are targets/outputs
+                inputsize = max(1, element_count - 1)
+                outputsize = 1
+                samplesize = max(1, text_blocks // 10)  # Rough estimate
+            else:
+                inputsize = 1
+                outputsize = 0
+                samplesize = 1
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating XML sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_text_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for text files"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+    
+            # Analyze text structure
+            lines = content.split('\n')
+            non_empty_lines = [line for line in lines if line.strip()]
+    
+            if not non_empty_lines:
+                return {'inputsize': 0, 'outputsize': 0, 'samplesize': 0}
+    
+            # For text files, we treat each line as a sample
+            # Input size is based on word count per line (embeddings)
+            avg_words_per_line = sum(len(line.split()) for line in non_empty_lines) / len(non_empty_lines)
+    
+            # Assume text classification task
+            inputsize = int(avg_words_per_line * 50)  # Rough embedding dimension estimate
+            outputsize = 1  # Classification target
+            samplesize = len(non_empty_lines)
+    
+            return {'inputsize': max(1, inputsize), 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating text sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_document_sizes(self, file_path: str, doc_type: str) -> Dict[str, Any]:
+        """Calculate sizes for document files (PDF, DOCX, DOC)"""
+        try:
+            # For document files, we estimate based on file size and type
+            file_size = os.path.getsize(file_path)
+    
+            # Rough estimates based on document type and size
+            if doc_type == 'pdf':
+                # PDFs typically contain structured text
+                estimated_pages = max(1, file_size // 2000)  # Rough page estimate
+                inputsize = 1000  # Text embeddings
+                outputsize = 1
+                samplesize = estimated_pages
+            elif doc_type == 'docx':
+                # DOCX files are XML-based
+                estimated_paragraphs = max(1, file_size // 500)
+                inputsize = 800  # Text embeddings
+                outputsize = 1
+                samplesize = estimated_paragraphs
+            elif doc_type == 'doc':
+                # Legacy DOC format
+                estimated_paragraphs = max(1, file_size // 300)
+                inputsize = 600  # Text embeddings
+                outputsize = 1
+                samplesize = estimated_paragraphs
+            else:
+                inputsize = 500
+                outputsize = 1
+                samplesize = 1
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating document sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_image_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for image files"""
+        try:
+            # For images, we extract basic properties
+            file_size = os.path.getsize(file_path)
+    
+            # Try to get image dimensions (basic approach)
+            try:
+                # Simple header parsing for common formats
+                with open(file_path, 'rb') as f:
+                    header = f.read(24)  # Read first 24 bytes
+    
+                width, height = 224, 224  # Default fallback
+    
+                # PNG format
+                if header.startswith(b'\x89PNG'):
+                    if len(header) >= 24:
+                        width = int.from_bytes(header[16:20], 'big')
+                        height = int.from_bytes(header[20:24], 'big')
+                # JPEG format (SOF0 marker)
+                elif header.startswith(b'\xff\xd8'):
+                    # Look for SOF0 marker
+                    f.seek(0)
+                    data = f.read()
+                    sof0_pos = data.find(b'\xff\xc0')
+                    if sof0_pos != -1 and sof0_pos + 9 < len(data):
+                        height = int.from_bytes(data[sof0_pos + 5:sof0_pos + 7], 'big')
+                        width = int.from_bytes(data[sof0_pos + 7:sof0_pos + 9], 'big')
+    
+                # For images, input size is pixels * channels, output size depends on task
+                channels = 3  # Assume RGB
+                inputsize = width * height * channels
+                outputsize = 1000  # Classification outputs (e.g., ImageNet classes)
+                samplesize = 1  # Single image
+    
+            except Exception:
+                # Fallback for unsupported formats
+                inputsize = 224 * 224 * 3  # Standard image size
+                outputsize = 1000
+                samplesize = 1
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating image sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_audio_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for audio files"""
+        try:
+            file_size = os.path.getsize(file_path)
+    
+            # Basic audio format detection and size estimation
+            file_ext = os.path.splitext(file_path.lower())[1]
+    
+            # Rough estimates based on format and file size
+            if file_ext in ['.wav', '.flac']:
+                # Uncompressed formats - can estimate duration
+                estimated_duration_sec = max(1, file_size // 176400)  # Rough WAV estimate (44.1kHz, 16-bit, stereo)
+                inputsize = 128 * estimated_duration_sec  # MFCC features over time
+                outputsize = 1  # Classification or regression target
+                samplesize = estimated_duration_sec  # One sample per second
+            elif file_ext == '.mp3':
+                # Compressed format
+                estimated_duration_sec = max(1, file_size // 16000)  # Rough MP3 estimate
+                inputsize = 128 * estimated_duration_sec
+                outputsize = 1
+                samplesize = estimated_duration_sec
+            elif file_ext == '.aac':
+                # AAC format
+                estimated_duration_sec = max(1, file_size // 12000)  # Rough AAC estimate
+                inputsize = 128 * estimated_duration_sec
+                outputsize = 1
+                samplesize = estimated_duration_sec
+            else:
+                # Unknown audio format
+                inputsize = 128 * 10  # 10 seconds default
+                outputsize = 1
+                samplesize = 10
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating audio sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+    def _calculate_video_sizes(self, file_path: str) -> Dict[str, Any]:
+        """Calculate sizes for video files"""
+        try:
+            file_size = os.path.getsize(file_path)
+    
+            # Rough video analysis based on file size and format
+            file_ext = os.path.splitext(file_path.lower())[1]
+    
+            # Estimate duration and frame rate
+            if file_ext in ['.mp4', '.mkv']:
+                # Compressed formats - rough estimates
+                estimated_duration_sec = max(1, file_size // 500000)  # Rough estimate: ~0.5MB per second
+                frames_per_sec = 30  # Assume 30 FPS
+                total_frames = estimated_duration_sec * frames_per_sec
+            elif file_ext in ['.avi', '.mov']:
+                # Other formats
+                estimated_duration_sec = max(1, file_size // 700000)  # Slightly higher bitrate
+                frames_per_sec = 25  # Assume 25 FPS
+                total_frames = estimated_duration_sec * frames_per_sec
+            else:
+                estimated_duration_sec = 10  # Default 10 seconds
+                total_frames = 300  # 30 FPS * 10 seconds
+    
+            # For video, input size is frame pixels * channels, processed over time
+            frame_width, frame_height = 224, 224  # Standard frame size
+            channels = 3  # RGB
+            inputsize = frame_width * frame_height * channels
+            outputsize = 1000  # Classification outputs
+            samplesize = total_frames  # One sample per frame
+    
+            return {'inputsize': inputsize, 'outputsize': outputsize, 'samplesize': samplesize}
+    
+        except Exception as e:
+            logger.error(f"Error calculating video sizes: {str(e)}")
+            return {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
+    
+                        
     def closeEvent(self, event):
         """Handle application close event with proper async cleanup"""
         try:

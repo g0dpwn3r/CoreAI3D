@@ -1596,6 +1596,14 @@ json APIServer::handleTrainAPI(const std::string& action, const json& parameters
             int maxSeqLen = parameters.value("max_seq_len", 512);
             int embeddingDim = parameters.value("embedding_dim", EMBEDDING_DIM);
 
+            // Allow setting network topology during load
+            if (parameters.contains("layers")) {
+                trainingModule->layers = parameters["layers"];
+            }
+            if (parameters.contains("neurons")) {
+                trainingModule->neurons = parameters["neurons"];
+            }
+
             // Validate normalization parameters
             if (minRange >= maxRange) {
                 return createErrorResponse("min_range must be less than max_range", 400);

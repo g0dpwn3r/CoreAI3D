@@ -1030,14 +1030,14 @@ void Training::preprocess(float minVal, float maxVal) {
 
     normalize(minVal, maxVal);
 
-    if (!core) { // Initialize CoreAI only if it hasn't been already
-        core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal, verbose);
-        core->trainer = this; // Set the trainer pointer in CoreAI
+    // Always re-initialize CoreAI to ensure dimensions match the current dataset
+    // This prevents the "input sample size must match inputSize" error when switching datasets
+    if (verbose) {
+        std::cout << "[DEBUG] Re-initializing CoreAI with Input Size: " << this->inputSize
+                  << ", Output Size: " << this->outputSize << std::endl;
     }
-    else {
-        // If core is already initialized, update its parameters if necessary
-        // core->updateParameters(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal); // Example update method
-    }
+    core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal, verbose);
+    core->trainer = this; // Set the trainer pointer in CoreAI
 
     core->setInput(inputs);
     core->setTarget(targets);
@@ -1571,10 +1571,14 @@ bool Training::loadModel(const int& datasetId) {
 
     this->inputSize = state.inputData[0].size();
     this->outputSize = state.outputData[0].size();
-    // Reinitialize CoreAI with loaded dimensions if not already
-    if (!core) {
-        core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, min, max, verbose);
+    // Always reinitialize CoreAI with loaded dimensions to ensure consistency
+    if (verbose) {
+        std::cout << "[DEBUG] Re-initializing CoreAI for model load with Input Size: " << this->inputSize
+                  << ", Output Size: " << this->outputSize << std::endl;
     }
+    core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, min, max, verbose);
+    core->trainer = this;
+
     // Set the loaded state to CoreAI
     core->setInput(state.inputData);
     core->setOutput(state.outputData); // This is likely the stored targets

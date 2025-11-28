@@ -973,8 +973,9 @@ void WebSocketServer::broadcastToAll(const json& message) {
 }
 
 void WebSocketServer::broadcastToGroup(const std::string& groupName, const json& message) {
-    // TODO: Implement group broadcasting
-    std::cout << "TODO: Implement broadcastToGroup for group: " << groupName << std::endl;
+    // For now, broadcast to all connected clients as group management is not yet fully implemented
+    // This ensures clients receive training updates
+    broadcastToAll(message);
 }
 
 void WebSocketServer::broadcastToClient(const std::string& clientId, const json& message) {
