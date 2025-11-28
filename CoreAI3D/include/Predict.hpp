@@ -58,12 +58,12 @@ private:
     double trainingTime_;
 
     // Helper methods
-    bool initializeTrainer(bool useOnlineMode,
-                          const std::string& dbHost,
+    bool initializeTrainer(const std::string& dbHost,
                           int dbPort,
                           const std::string& dbUser,
                           const std::string& dbPassword,
-                          const std::string& dbSchema);
+                          const std::string& dbSchema,
+                          bool isOfflineMode);
     bool loadData(const std::string& inputFile,
                  const std::string& targetFile,
                  int numSamples,

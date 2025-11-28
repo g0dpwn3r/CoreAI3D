@@ -402,14 +402,18 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 }
 
                 if (!value_processed && containsText) {
-                    // If it contains text, encode it. Assuming entire column or specific column is text.
-                    // For simplicity, let's assume the current cell is text if not numeric/date.
+                    // If it contains text, encode it. For CSV parsing, we use a single hash value
+                    // instead of full embeddings to maintain 1 value per cell structure
                     if (this->langProc) {
-                        std::vector<float> encoded_vec = this->langProc->encodeText(cell);
-                        current_processed_values.insert(current_processed_values.end(), encoded_vec.begin(), encoded_vec.end());
+                        // Use a simple hash of the text for CSV compatibility
+                        // This maintains the 1-value-per-cell structure expected by CSV parsing
+                        std::hash<std::string> hasher;
+                        size_t hash_value = hasher(cell);
+                        float normalized_hash = static_cast<float>(hash_value % 1000000) / 1000000.0f; // Normalize to 0-1 range
+                        current_processed_values.push_back(normalized_hash);
                         value_processed = true;
                         if (verbose) {
-                            std::cout << "text encoded (" << encoded_vec.size() << " values)";
+                            std::cout << "text hashed -> " << normalized_hash;
                         }
                     }
                     else {
@@ -603,7 +607,14 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                     }
                     targets[i].resize(this->outputSize, 0.0f);
                 }
-                dbManager->addDatasetRecord(currentDatasetId, i, inputs[i], targets[i]);
+                try {
+                    dbManager->addDatasetRecord(currentDatasetId, i, inputs[i], targets[i]);
+                    if (verbose && i % 100 == 0) {
+                        std::cout << "Saved dataset record " << i << " to database" << std::endl;
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "Error saving dataset record " << i << ": " << e.what() << std::endl;
+                }
             }
             if (verbose) {
                 std::cout << "All dataset records added to database for dataset ID: " << currentDatasetId << std::endl;
@@ -1210,6 +1221,7 @@ bool Training::startTraining(double learningRate, int epochs) {
                 }
 
                 currentEpoch = i + 1;
+                // Update progress bar with current epoch
                 printProgressBar("Training Progress", i + 1, epochs, barWidth);
                 core->forward(inputs);
                 core->train(inputs, targets, learningRate, numSamples);
@@ -1280,13 +1292,12 @@ bool Training::startTraining(double learningRate, int epochs) {
             }
 
             if (!trainingStopRequested.load()) {
-                // Only mark as completed if we didn't early stop (or if early stop is considered completion)
+                // Always show final progress
                 if (trainingStatus != "completed_early_stopping") {
-                     trainingStatus = "completed";
-                     if (epochs > 0) {
-                        printProgressBar("Training Progress", epochs, epochs, barWidth);
-                     }
+                    trainingStatus = "completed";
                 }
+                // Show final progress bar
+                printProgressBar("Training Progress", currentEpoch, totalEpochs, barWidth);
             }
 
             trainingActive = false;
@@ -1636,11 +1647,15 @@ bool Training::saveModel(int& datasetId) {
     }
 
 
-    dbManager->saveAIModelState(datasetId, inputData, outputData,
-        hiddenData, hiddenOutputData, hiddenErrorData,
-        weightsHiddenInput, weightsOutputHidden);
-
-    std::cout << "AI model state saved successfully." << std::endl;
+    try {
+        dbManager->saveAIModelState(datasetId, inputData, outputData,
+            hiddenData, hiddenOutputData, hiddenErrorData,
+            weightsHiddenInput, weightsOutputHidden);
+        std::cout << "AI model state saved successfully for dataset ID: " << datasetId << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving AI model state: " << e.what() << std::endl;
+        return false;
+    }
     return true;
 }
 #endif

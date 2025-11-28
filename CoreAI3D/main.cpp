@@ -618,12 +618,9 @@ int main(int argc, char* argv[]) {
             trainer->numSamples = numSamples_val;
 
             // Set embedding dimension for language processor
-            int embeddingDimension = 300; // Default embedding dimension
-            try {
-                embeddingDimension = std::stoi(inputSize); // Use inputSize as embedding dimension if provided
-            } catch (...) {
-                embeddingDimension = 300; // Fallback
-            }
+            int embeddingDimension = 300; // Default embedding dimension for language processing
+            // Note: inputSize is for neural network input size, not embedding dimension
+            // Embedding dimension should remain 300 for proper text encoding
 
             // Initialize CoreAI via trainer's preprocess if you want it managed there
             // Or create it directly here if API server doesn't use the full training pipeline.

@@ -47,23 +47,15 @@ bool Predict::runPrediction(const std::string& inputFile,
             std::cout << "[PREDICT] Starting prediction process..." << std::endl;
         }
 
-        // Determine if we need online mode (database access)
-        // Respect the offline mode flag first
-        bool useOnlineMode = !isOfflineMode && (datasetId != -1 || !loadModelId.empty());
-        
-        // If database parameters are provided AND not in offline mode, we can use online mode
-        if (!isOfflineMode && !dbHost.empty() && !dbUser.empty()) {
-             useOnlineMode = true;
-        }
-        
-        if (verbose_) {
-            std::cout << "[PREDICT] Running in " << (useOnlineMode ? "online" : "offline") << " mode" << std::endl;
-        }
-
-        // Initialize trainer
-        if (!initializeTrainer(useOnlineMode, dbHost, dbPort, dbUser, dbPassword, dbSchema)) {
+        // Initialize trainer with database if parameters provided
+        if (!initializeTrainer(dbHost, dbPort, dbUser, dbPassword, dbSchema, isOfflineMode)) {
             std::cerr << "[PREDICT] Failed to initialize trainer." << std::endl;
             return false;
+        }
+
+        bool useOnlineMode = !trainer_->isOfflineMode;
+        if (verbose_) {
+            std::cout << "[PREDICT] Running in " << (useOnlineMode ? "online" : "offline") << " mode" << std::endl;
         }
 
         // Set training parameters
@@ -146,29 +138,29 @@ bool Predict::runPrediction(const std::string& inputFile,
     }
 }
 
-bool Predict::initializeTrainer(bool useOnlineMode,
-                               const std::string& dbHost,
-                               int dbPort,
-                               const std::string& dbUser,
-                               const std::string& dbPassword,
-                               const std::string& dbSchema) {
+bool Predict::initializeTrainer(const std::string& dbHost,
+                                int dbPort,
+                                const std::string& dbUser,
+                                const std::string& dbPassword,
+                                const std::string& dbSchema,
+                                bool isOfflineMode) {
     try {
-#ifdef USE_MYSQL
-        if (useOnlineMode && !dbHost.empty()) {
+        bool hasDbParams = !dbHost.empty() && !dbUser.empty() && !dbSchema.empty() && !isOfflineMode;
+
+        if (hasDbParams) {
             // Online mode with database
             trainer_ = new Training(dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, true, verbose_, webSocketServer_);
+            if (verbose_) {
+                std::cout << "[PREDICT] Trainer initialized in online mode with database." << std::endl;
+            }
         } else {
             // Offline mode
             trainer_ = new Training(true, verbose_, webSocketServer_);
+            if (verbose_) {
+                std::cout << "[PREDICT] Trainer initialized in offline mode." << std::endl;
+            }
         }
-#else
-        // Always offline if no MySQL support
-        trainer_ = new Training(true, verbose_, webSocketServer_);
-#endif
 
-        if (verbose_) {
-            std::cout << "[PREDICT] Trainer initialized in " << (useOnlineMode ? "online" : "offline") << " mode." << std::endl;
-        }
         return true;
     } catch (const std::exception& e) {
         std::cerr << "[PREDICT] Failed to initialize trainer: " << e.what() << std::endl;
@@ -226,8 +218,11 @@ bool Predict::loadModel(const std::string& loadModelId, int datasetId) {
     // Try to load dataset from database
     if (trainer_->loadDatasetFromDB(modelIdToLoad)) {
         if (verbose_) {
-            std::cout << "[PREDICT] Dataset loaded from database." << std::endl;
+            std::cout << "[PREDICT] Dataset loaded from database with " << trainer_->numSamples << " samples." << std::endl;
         }
+    } else {
+        std::cerr << "[PREDICT] Failed to load dataset from database." << std::endl;
+        return false;
     }
 
 #ifdef USE_MYSQL
