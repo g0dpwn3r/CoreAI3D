@@ -35,7 +35,12 @@ bool Predict::runPrediction(const std::string& inputFile,
                            const std::string& datasetName,
                            bool hasHeader,
                            bool containsText,
-                           char delimiter) {
+                           char delimiter,
+                           const std::string& dbHost,
+                           int dbPort,
+                           const std::string& dbUser,
+                           const std::string& dbPassword,
+                           const std::string& dbSchema) {
     try {
         if (verbose_) {
             std::cout << "[PREDICT] Starting prediction process..." << std::endl;
@@ -43,9 +48,14 @@ bool Predict::runPrediction(const std::string& inputFile,
 
         // Determine if we need online mode (database access)
         bool useOnlineMode = (datasetId != -1 || !loadModelId.empty());
+        
+        // If database parameters are provided, we can use online mode even if not strictly required by ID
+        if (!dbHost.empty() && !dbUser.empty()) {
+             useOnlineMode = true;
+        }
 
         // Initialize trainer
-        if (!initializeTrainer(useOnlineMode)) {
+        if (!initializeTrainer(useOnlineMode, dbHost, dbPort, dbUser, dbPassword, dbSchema)) {
             std::cerr << "[PREDICT] Failed to initialize trainer." << std::endl;
             return false;
         }
@@ -86,6 +96,27 @@ bool Predict::runPrediction(const std::string& inputFile,
             return false;
         }
 
+#ifdef USE_MYSQL
+        // Save model if in online mode
+        if (useOnlineMode && datasetId != -1) {
+            if (verbose_) {
+                std::cout << "[PREDICT] Saving trained model to database..." << std::endl;
+            }
+            if (!trainer_->saveModel(datasetId)) {
+                std::cerr << "[PREDICT] Failed to save model to database." << std::endl;
+            }
+        } else if (useOnlineMode && trainer_->currentDatasetId != -1) {
+             // If datasetId was not passed but created during loadData
+             int currentId = trainer_->currentDatasetId;
+             if (verbose_) {
+                std::cout << "[PREDICT] Saving trained model to database (ID: " << currentId << ")..." << std::endl;
+            }
+             if (!trainer_->saveModel(currentId)) {
+                std::cerr << "[PREDICT] Failed to save model to database." << std::endl;
+            }
+        }
+#endif
+
         // Evaluate model
         if (!evaluateModel()) {
             std::cerr << "[PREDICT] Failed to evaluate model." << std::endl;
@@ -109,9 +140,26 @@ bool Predict::runPrediction(const std::string& inputFile,
     }
 }
 
-bool Predict::initializeTrainer(bool useOnlineMode) {
+bool Predict::initializeTrainer(bool useOnlineMode,
+                               const std::string& dbHost,
+                               int dbPort,
+                               const std::string& dbUser,
+                               const std::string& dbPassword,
+                               const std::string& dbSchema) {
     try {
-        trainer_ = new Training(useOnlineMode, verbose_);
+#ifdef USE_MYSQL
+        if (useOnlineMode && !dbHost.empty()) {
+            // Online mode with database
+            trainer_ = new Training(dbHost, dbPort, dbUser, dbPassword, dbSchema, 0, true, verbose_, webSocketServer_);
+        } else {
+            // Offline mode
+            trainer_ = new Training(true, verbose_, webSocketServer_);
+        }
+#else
+        // Always offline if no MySQL support
+        trainer_ = new Training(true, verbose_, webSocketServer_);
+#endif
+
         if (verbose_) {
             std::cout << "[PREDICT] Trainer initialized in " << (useOnlineMode ? "online" : "offline") << " mode." << std::endl;
         }

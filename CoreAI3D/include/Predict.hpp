@@ -32,7 +32,12 @@ public:
                       const std::string& datasetName = "online-1a",
                       bool hasHeader = true,
                       bool containsText = false,
-                      char delimiter = ',');
+                      char delimiter = ',',
+                      const std::string& dbHost = "",
+                      int dbPort = 0,
+                      const std::string& dbUser = "",
+                      const std::string& dbPassword = "",
+                      const std::string& dbSchema = "");
 
     // Get evaluation metrics
     float getRMSE() const { return rmse_; }
@@ -52,7 +57,12 @@ private:
     double trainingTime_;
 
     // Helper methods
-    bool initializeTrainer(bool useOnlineMode);
+    bool initializeTrainer(bool useOnlineMode,
+                          const std::string& dbHost,
+                          int dbPort,
+                          const std::string& dbUser,
+                          const std::string& dbPassword,
+                          const std::string& dbSchema);
     bool loadData(const std::string& inputFile,
                  const std::string& targetFile,
                  int numSamples,

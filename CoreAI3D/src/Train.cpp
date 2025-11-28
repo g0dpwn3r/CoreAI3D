@@ -1075,16 +1075,17 @@ void Training::train(double learningRate, int epochs) {
             patience_counter++;
             if (patience_counter >= patience) {
                 if (verbose) {
-                    std::cout << "\nEarly stopping at epoch " << i << " due to lack of improvement." << std::endl;
+                    std::cout << "\nEarly stopping at epoch " << i + 1 << " due to lack of improvement." << std::endl;
                 }
                 break;
             }
         }
         previous_loss = current_loss;
     }
-    if (epochs > 0) {
-        printProgressBar("Training Progress", epochs, epochs, barWidth);
-    }
+    // Only print 100% if we actually finished all epochs
+    // if (epochs > 0) {
+    //    printProgressBar("Training Progress", epochs, epochs, barWidth);
+    // }
     if (verbose) {
         std::cout << "\nTraining Complete!\n";
     }
@@ -1168,6 +1169,9 @@ bool Training::startTraining(double learningRate, int epochs) {
                     patience_counter++;
                     if (patience_counter >= patience) {
                         trainingStatus = "completed_early_stopping";
+                        if (verbose) {
+                             std::cout << "\nEarly stopping triggered at epoch " << i + 1 << std::endl;
+                        }
                         break;
                     }
                 }
@@ -1175,10 +1179,13 @@ bool Training::startTraining(double learningRate, int epochs) {
             }
 
             if (!trainingStopRequested.load()) {
-                if (epochs > 0) {
-                    printProgressBar("Training Progress", epochs, epochs, barWidth);
+                // Only mark as completed if we didn't early stop (or if early stop is considered completion)
+                if (trainingStatus != "completed_early_stopping") {
+                     trainingStatus = "completed";
+                     if (epochs > 0) {
+                        printProgressBar("Training Progress", epochs, epochs, barWidth);
+                     }
                 }
-                trainingStatus = "completed";
             }
 
             trainingActive = false;

@@ -474,7 +474,13 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if (std::abs(deriv) < 1e-6f) {
                     deriv = (deriv >= 0) ? 1e-6f : -1e-6f;
                 }
-                this->weigth_output_hidden[j][k] += learningRate * output_errors[j] * deriv;
+                
+                // Gradient clipping
+                float gradient = output_errors[j] * deriv;
+                if (gradient > 1.0f) gradient = 1.0f;
+                if (gradient < -1.0f) gradient = -1.0f;
+
+                this->weigth_output_hidden[j][k] += learningRate * gradient;
             }
         }
 
@@ -511,7 +517,13 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 if (std::abs(deriv) < 1e-6f) {
                     deriv = (deriv >= 0) ? 1e-6f : -1e-6f;
                 }
-                this->weigth_input_hidden[j][k] += learningRate * hidden_errors[j] * deriv;
+
+                // Gradient clipping
+                float gradient = hidden_errors[j] * deriv;
+                if (gradient > 1.0f) gradient = 1.0f;
+                if (gradient < -1.0f) gradient = -1.0f;
+
+                this->weigth_input_hidden[j][k] += learningRate * gradient;
             }
         }
     }
@@ -632,49 +644,52 @@ float CoreAI::xTransform2(float x, float e, float n, float m)
 {
     // Improved transform function that produces meaningful values
     // Use a combination of linear and non-linear terms for better learning
+    // Added scaling factor 0.1 to prevent saturation
     float linear_term = x * m;
     float non_linear_term = std::pow(x, 2.0f) * n / 10.0f;
-    float result = linear_term + non_linear_term + e;
+    float result = (linear_term + non_linear_term + e) * 0.1f;
     return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
 }
 
 float CoreAI::yTransform2(float y, float e, float n, float m)
 {
     // Improved transform function that produces meaningful values
+    // Added scaling factor 0.1 to prevent saturation
     float linear_term = y * m;
     float non_linear_term = std::pow(y, 2.0f) * n / 10.0f;
-    float result = linear_term + non_linear_term + e;
+    float result = (linear_term + non_linear_term + e) * 0.1f;
     return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
 }
 
 float CoreAI::zTransform2(float z, float e, float n, float m)
 {
     // Improved transform function that produces meaningful values
+    // Added scaling factor 0.1 to prevent saturation
     float linear_term = z * m;
     float non_linear_term = std::pow(z, 2.0f) * n / 10.0f;
-    float result = linear_term + non_linear_term + e;
+    float result = (linear_term + non_linear_term + e) * 0.1f;
     return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
 }
 
 float CoreAI::xTransform2_derivative_m(float x, float e_arg, float n, float m)
 {
     // Simple derivative for the improved transform function
-    // Derivative of (x*m + x^2*n/10 + e) with respect to m is x
-    float result = x;
+    // Derivative of (x*m + x^2*n/10 + e) * 0.1 with respect to m is x * 0.1
+    float result = x * 0.1f;
     return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
 }
 
 float CoreAI::yTransform2_derivative_m(float y, float e_arg, float n, float m)
 {
     // Simple derivative for the improved transform function
-    float result = y;
+    float result = y * 0.1f;
     return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
 }
 
 float CoreAI::zTransform2_derivative_m(float z, float e_arg, float n, float m)
 {
     // Simple derivative for the improved transform function
-    float result = z;
+    float result = z * 0.1f;
     return (std::isnan(result) || std::isinf(result)) ? 0.1f : result;
 }
 

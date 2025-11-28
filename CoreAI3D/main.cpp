@@ -534,7 +534,8 @@ int main(int argc, char* argv[]) {
                 layers_val, neurons_val, minRange_val, maxRange_val,
                 inputSize_val, outputSize_val, numSamples_val,
                 learningRate_val, epochs_val, embeddingFile, language,
-                datasetName, hasHeader, containsText, delimiter_char
+                datasetName, hasHeader, containsText, delimiter_char,
+                dbHost, dbPort_val, dbUser, dbPassword, dbSchema
             );
 
             if (!success) {
