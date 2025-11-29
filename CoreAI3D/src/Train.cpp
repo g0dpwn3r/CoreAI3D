@@ -4580,4 +4580,179 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
 }
 #endif
 
+// Data augmentation methods implementation
+
+void Training::initializeDataAugmentation(const DataAugmentation::AugmentationConfig& config) {
+    if (dataAugmentation) {
+        dataAugmentation->setConfig(config);
+    }
+}
+
+void Training::enableRotation(bool enable) {
+    if (dataAugmentation) {
+        dataAugmentation->enableRotation(enable);
+    }
+}
+
+void Training::enableScaling(bool enable) {
+    if (dataAugmentation) {
+        dataAugmentation->enableScaling(enable);
+    }
+}
+
+void Training::enableNoise(bool enable) {
+    if (dataAugmentation) {
+        dataAugmentation->enableNoise(enable);
+    }
+}
+
+void Training::enableSymmetry(bool enable) {
+    if (dataAugmentation) {
+        dataAugmentation->enableSymmetry(enable);
+    }
+}
+
+void Training::setRotationMaxAngle(float angle) {
+    if (dataAugmentation) {
+        dataAugmentation->setRotationMaxAngle(angle);
+    }
+}
+
+void Training::setScalingRange(float minScale, float maxScale) {
+    if (dataAugmentation) {
+        dataAugmentation->setScalingRange(minScale, maxScale);
+    }
+}
+
+void Training::setNoiseStdDev(float stdDev) {
+    if (dataAugmentation) {
+        dataAugmentation->setNoiseStdDev(stdDev);
+    }
+}
+
+void Training::setSymmetryProbability(float probability) {
+    if (dataAugmentation) {
+        dataAugmentation->setSymmetryProbability(probability);
+    }
+}
+
+const DataAugmentation::AugmentationConfig& Training::getAugmentationConfig() const {
+    static DataAugmentation::AugmentationConfig defaultConfig;
+    if (dataAugmentation) {
+        return dataAugmentation->getConfig();
+    }
+    return defaultConfig;
+}
+
+void Training::applyDataAugmentation() {
+    if (!dataAugmentation || inputs.empty()) {
+        return;
+    }
+
+    if (verbose) {
+        std::cout << "Applying data augmentation to " << inputs.size() << " samples..." << std::endl;
+    }
+
+    // Apply augmentation to each sample
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        // Assume 3D coordinates are triplets (x, y, z)
+        // Process each triplet in the input vector
+        for (size_t j = 0; j < inputs[i].size(); j += 3) {
+            if (j + 2 < inputs[i].size()) {
+                std::vector<float> point = {inputs[i][j], inputs[i][j + 1], inputs[i][j + 2]};
+                std::vector<float> augmentedPoint = dataAugmentation->augmentCoordinates(point);
+                inputs[i][j] = augmentedPoint[0];
+                inputs[i][j + 1] = augmentedPoint[1];
+                inputs[i][j + 2] = augmentedPoint[2];
+            }
+        }
+    }
+
+    if (verbose) {
+        std::cout << "Data augmentation completed." << std::endl;
+    }
+}
+// Hyperparameter tuning integration methods
+void Training::setHyperparameters(const std::map<std::string, float>& float_params,
+                                 const std::map<std::string, int>& int_params,
+                                 const std::map<std::string, std::string>& categorical_params) {
+    // Apply float parameters
+    if (float_params.count("learning_rate")) {
+        learningRate = float_params.at("learning_rate");
+    }
+    if (float_params.count("l2_lambda")) {
+        if (core) core->setRegularizationParams(float_params.at("l2_lambda"));
+    }
+    if (float_params.count("dropout_rate")) {
+        if (core) core->setRegularizationParams(-1.0f, float_params.at("dropout_rate"));
+    }
+
+    // Apply int parameters
+    if (int_params.count("layers")) {
+        layers = int_params.at("layers");
+    }
+    if (int_params.count("neurons")) {
+        neurons = int_params.at("neurons");
+    }
+
+    // Apply categorical parameters
+    if (categorical_params.count("optimizer")) {
+        // Note: This would need to be implemented in CoreAI to change optimizer type
+        // For now, just store the type
+    }
+    if (categorical_params.count("activation")) {
+        // Note: This would need to be implemented in CoreAI to change activation type
+        // For now, just store the type
+    }
+}
+
+void Training::setLearningRateForTuning(double lr) {
+    learningRate = lr;
+}
+
+void Training::setNetworkArchitectureForTuning(int layers_param, int neurons_param) {
+    layers = layers_param;
+    neurons = neurons_param;
+    // Reinitialize core with new architecture
+    if (verbose) {
+        std::cout << "[DEBUG] Re-initializing CoreAI for hyperparameter tuning with layers="
+                  << layers << ", neurons=" << neurons << std::endl;
+    }
+    core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, verbose);
+    core->trainer = this;
+}
+
+void Training::setOptimizerForTuning(const std::string& optimizer_type) {
+    // This would need to be implemented in CoreAI to support different optimizers
+    // For now, just log the change
+    if (verbose) {
+        std::cout << "[DEBUG] Setting optimizer to: " << optimizer_type << std::endl;
+    }
+}
+
+void Training::setActivationForTuning(const std::string& activation_type) {
+    // This would need to be implemented in CoreAI to support different activations
+    // For now, just log the change
+    if (verbose) {
+        std::cout << "[DEBUG] Setting activation to: " << activation_type << std::endl;
+    }
+}
+
+void Training::setRegularizationForTuning(float l2_lambda, float dropout_rate) {
+    if (core) {
+        core->setRegularizationParams(l2_lambda, dropout_rate);
+    }
+}
+
+float Training::evaluateForTuning(int max_epochs) {
+    if (!core || inputs.empty() || targets.empty()) {
+        return std::numeric_limits<float>::max();
+    }
+
+    // Quick training for evaluation
+    train(learningRate, std::min(max_epochs, 10)); // Limit to 10 epochs max for tuning
+
+    // Return the final loss as the score (lower is better)
+    return calculateMSE();
+}
 

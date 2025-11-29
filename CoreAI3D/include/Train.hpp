@@ -247,6 +247,20 @@ public:
     bool saveModelStateJSON(int datasetId, const nlohmann::json& modelState);
     bool saveComprehensiveTrainingData(int datasetId, const std::string& datasetName);
     int getDecimalPlacesInString(float value, int precision_for_conversion);
+    // NEW: Helper method to denormalize a matrix
+
+    // Hyperparameter tuning integration methods
+    void setHyperparameters(const std::map<std::string, float>& float_params,
+                           const std::map<std::string, int>& int_params,
+                           const std::map<std::string, std::string>& categorical_params);
+    void setLearningRateForTuning(double lr);
+    void setNetworkArchitectureForTuning(int layers, int neurons);
+    void setOptimizerForTuning(const std::string& optimizer_type);
+    void setActivationForTuning(const std::string& activation_type);
+    void setRegularizationForTuning(float l2_lambda, float dropout_rate);
+    float evaluateForTuning(int max_epochs = 10); // Quick evaluation for hyperparameter tuning
+
+};
     std::string formatValueForDisplay(float value, int customPrecision) const;
     static std::vector<std::string> parseCSVLine(const std::string& line, char delimiter);
 

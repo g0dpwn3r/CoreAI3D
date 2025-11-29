@@ -27,7 +27,8 @@ public:
     };
 
     // Constructor
-    DataAugmentation(const AugmentationConfig& config = AugmentationConfig());
+    DataAugmentation();
+    explicit DataAugmentation(const AugmentationConfig& config);
 
     // Main augmentation method - applies all enabled augmentations
     std::vector<float> augmentCoordinates(const std::vector<float>& coordinates);

@@ -208,12 +208,7 @@ def perform_git_operations(branch, remotes):
         logging.info("Performing git commit")
         subprocess.run(['git', 'commit', '-m', 'Another successful build with Git LFS support'], check=True)
 
-        # Check and convert origin remote to SSH if it's HTTPS
-        origin_url = get_remote_url('origin')
-        if is_https_url(origin_url):
-            ssh_url = convert_to_ssh(origin_url)
-            logging.info(f"Converting origin remote from HTTPS to SSH: {ssh_url}")
-            subprocess.run(['git', 'remote', 'set-url', 'origin', ssh_url], check=True)
+    
         # Check SSH connectivity before pushing
         if not check_ssh_connectivity():
             logging.error("SSH connectivity to Bitbucket failed. Skipping push operations.")

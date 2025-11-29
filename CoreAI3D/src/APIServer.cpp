@@ -419,6 +419,12 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to training module" << std::endl;
             return handleTrainAPI(action, requestData, method);
         }
+        else if (module == "tuning" || module == "hyperparameter") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to hyperparameter tuning module" << std::endl;
+            return handleHyperparameterTuningAPI(action, requestData, method);
+        }
+        else if (module == "training") {
+        }
         else if (module == "sessions") {
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to sessions module" << std::endl;
             return handleSessionsAPI(action, requestData, method);
@@ -3344,6 +3350,182 @@ bool APIServer::addMathModule(const std::string& name, std::unique_ptr<MathModul
     return true;
 }
 
+// Hyperparameter tuning API implementation
+json APIServer::handleHyperparameterTuningAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (!hyperparameterTuner) {
+            // Initialize hyperparameter tuner if not already done
+            if (!trainingModule) {
+                return createErrorResponse("Training module not available", 503);
+            }
+
+            // Create a copy of the training module for tuning
+            auto tuningTraining = std::make_unique<Training>(*trainingModule);
+            hyperparameterTuner = std::make_unique<HyperparameterTuner>(
+                std::move(tuningTraining),
+                std::map<std::string, ParameterDefinition>() // Will be set via API
+            );
+
+            // Set database if available
+            if (database) {
+                hyperparameterTuner->setDatabase(std::make_unique<Database>(*database));
+            }
+        }
+
+        if (action == "start" && method == "POST") {
+            // Start hyperparameter tuning
+            std::string searchMethod = parameters.value("search_method", "grid_search");
+            int maxEvaluations = parameters.value("max_evaluations", 100);
+            bool parallel = parameters.value("parallel", true);
+            int maxParallel = parameters.value("max_parallel", 4);
+
+            // Set up parameter space
+            std::map<std::string, ParameterDefinition> paramSpace;
+
+            if (parameters.contains("parameters")) {
+                for (const auto& param : parameters["parameters"]) {
+                    std::string name = param.value("name", "");
+                    std::string type = param.value("type", "");
+                    ParameterDefinition def;
+                    def.name = name;
+
+                    if (type == "float_range") {
+                        def.type = ParameterType::FLOAT_RANGE;
+                        def.float_range = {param.value("min", 0.0f), param.value("max", 1.0f)};
+                        def.num_samples = param.value("num_samples", 10);
+                    } else if (type == "int_range") {
+                        def.type = ParameterType::INT_RANGE;
+                        def.int_range = {param.value("min", 1), param.value("max", 10)};
+                    } else if (type == "categorical") {
+                        def.type = ParameterType::CATEGORICAL;
+                        def.categories = param.value("categories", std::vector<std::string>{});
+                    } else if (type == "log_scale") {
+                        def.type = ParameterType::LOG_SCALE;
+                        def.float_range = {param.value("min", 0.001f), param.value("max", 1.0f)};
+                        def.log_base = param.value("log_base", 10.0f);
+                        def.num_samples = param.value("num_samples", 10);
+                    }
+
+                    paramSpace[name] = def;
+                }
+            }
+
+            // Set parameter space
+            for (const auto& param : paramSpace) {
+                hyperparameterTuner->addParameter(param.first, param.second);
+            }
+
+            // Configure tuning
+            TuningConfig config;
+            if (searchMethod == "grid_search") {
+                config.method = SearchMethod::GRID_SEARCH;
+            } else if (searchMethod == "random_search") {
+                config.method = SearchMethod::RANDOM_SEARCH;
+            } else if (searchMethod == "bayesian") {
+                config.method = SearchMethod::BAYESIAN_OPTIMIZATION;
+            }
+            config.max_evaluations = max_evaluations;
+            config.parallel_evaluation = parallel;
+            config.max_parallel_jobs = maxParallel;
+
+            hyperparameterTuner->setTuningConfig(config);
+
+            // Start tuning
+            bool started = hyperparameterTuner->startTuning();
+
+            if (!started) {
+                return createErrorResponse("Failed to start hyperparameter tuning", 500);
+            }
+
+            json response = {
+                {"status", "started"},
+                {"search_method", searchMethod},
+                {"max_evaluations", max_evaluations},
+                {"parallel", parallel},
+                {"max_parallel", maxParallel},
+                {"message", "Hyperparameter tuning started successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+
+        } else if (action == "status" && method == "GET") {
+            // Get tuning status
+            bool isActive = hyperparameterTuner->isTuning();
+            std::string status = hyperparameterTuner->getTuningStatus();
+
+            json response = {
+                {"is_active", isActive},
+                {"status", status},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+
+        } else if (action == "stop" && method == "POST") {
+            // Stop tuning
+            bool stopped = hyperparameterTuner->stopTuning();
+
+            json response = {
+                {"stopped", stopped},
+                {"message", stopped ? "Hyperparameter tuning stopped successfully" : "Failed to stop tuning"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+
+        } else if (action == "results" && method == "GET") {
+            // Get tuning results
+            TuningResults results = hyperparameterTuner->getCurrentResults();
+
+            json response = {
+                {"total_evaluations", results.total_evaluations},
+                {"total_time", results.total_time},
+                {"timestamp", results.timestamp},
+                {"best_score", results.best_parameters.score},
+                {"convergence_history", json::array()}
+            };
+
+            // Add best parameters
+            json bestParams;
+            for (const auto& param : results.best_parameters.float_params) {
+                bestParams["float_params"][param.first] = param.second;
+            }
+            for (const auto& param : results.best_parameters.int_params) {
+                bestParams["int_params"][param.first] = param.second;
+            }
+            for (const auto& param : results.best_parameters.categorical_params) {
+                bestParams["categorical_params"][param.first] = param.second;
+            }
+            response["best_parameters"] = bestParams;
+
+            // Add convergence history
+            for (const auto& point : results.convergence_history) {
+                response["convergence_history"].push_back({point.first, point.second});
+            }
+
+            return response;
+
+        } else if (action == "save_results" && method == "POST") {
+            // Save tuning results
+            std::string filepath = parameters.value("filepath", "tuning_results.json");
+            TuningResults results = hyperparameterTuner->getCurrentResults();
+
+            bool saved = hyperparameterTuner->saveResults(results, filepath);
+
+            json response = {
+                {"saved", saved},
+                {"filepath", filepath},
+                {"message", saved ? "Results saved successfully" : "Failed to save results"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+
+        } else {
+            return createErrorResponse("Unknown hyperparameter tuning action: " + action, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Hyperparameter tuning API error: " + std::string(e.what()), 500);
+    }
+}
 void APIServer::setTrainingModule(std::unique_ptr<Training> training) {
     trainingModule = std::move(training);
 }

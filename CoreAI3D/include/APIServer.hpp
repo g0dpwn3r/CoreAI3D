@@ -29,8 +29,10 @@ using json = nlohmann::json;
 
 class APIServer {
 private:
+#include "HyperparameterTuner.hpp"
     std::unique_ptr<ModuleOrchestrator> orchestrator;
     std::unique_ptr<Training> trainingModule;
+    std::unique_ptr<HyperparameterTuner> hyperparameterTuner;
     std::unique_ptr<Predict> predictModule;
     std::string serverName;
     bool isInitialized;
@@ -77,6 +79,7 @@ protected:
     virtual json handleSystemAPI(const std::string& action, const json& parameters);
     virtual json handleWebAPI(const std::string& action, const json& parameters);
     virtual json handleMathAPI(const std::string& action, const json& parameters);
+    virtual json handleHyperparameterTuningAPI(const std::string& action, const json& parameters, const std::string& method);
     virtual json handleNeuralAPI(const std::string& action, const json& parameters);
     virtual json handleOrchestratorAPI(const std::string& action, const json& parameters);
     virtual json handleSessionsAPI(const std::string& action, const json& parameters, const std::string& method);

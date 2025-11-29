@@ -2,6 +2,13 @@
 #include <algorithm>
 #include <iostream>
 
+// Default constructor
+DataAugmentation::DataAugmentation()
+    : gen_(std::random_device{}()),
+      noiseDist_(0.0f, 0.01f), uniformDist_(0.0f, 1.0f) {
+}
+
+// Constructor with config
 DataAugmentation::DataAugmentation(const AugmentationConfig& config)
     : config_(config), gen_(std::random_device{}()),
       noiseDist_(0.0f, config.noiseStdDev),

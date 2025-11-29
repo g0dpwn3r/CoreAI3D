@@ -192,6 +192,7 @@ set(SOURCE_FILES
     src/Gemini.cpp
     src/Optimizer.cpp
     src/LearningRateScheduler.cpp
+    src/HyperparameterTuner.cpp
 )
 
 # Add Linux-specific modules only on Linux
