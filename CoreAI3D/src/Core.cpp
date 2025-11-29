@@ -1032,7 +1032,17 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         std::vector<std::vector<float>> batch_targets(normalized_targets.begin() + batch_start,
                                                      normalized_targets.begin() + batch_end);
 
+        if (verbose) {
+            std::cout << "[DEBUG TRAIN] Batch inputs size: " << batch_inputs.size()
+                      << ", batch targets size: " << batch_targets.size() << std::endl;
+        }
+
         auto batch_results = this->forward(batch_inputs, true); // training = true
+
+        if (verbose) {
+            std::cout << "[DEBUG TRAIN] After forward pass - hidden size: " << this->hidden.size()
+                      << ", results size: " << batch_results.size() << std::endl;
+        }
 
         // Backpropagation for the current batch
         for (size_t batch_sample = 0; batch_sample < current_batch_size; ++batch_sample) {
@@ -1096,6 +1106,9 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 for (int k = 0; k < this->neurons; ++k) {
                     if(!safe2DIndex(this->weigth_output_hidden, j, k)) {
                         throw std::out_of_range("CoreAI::train: Index out of range during weight update");
+                    }
+                    if (!safe2DIndex(this->hidden, batch_sample, k)) {
+                        throw std::out_of_range("CoreAI::train: Hidden layer index out of range in output gradients");
                     }
                     // Standard backpropagation: gradient = error * activation
                     float gradient = output_errors[j] * this->hidden[batch_sample][k];

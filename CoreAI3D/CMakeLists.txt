@@ -395,7 +395,12 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
 
 # Add post-build automation script (disabled for now due to path issues)
 add_custom_command(TARGET CoreAI3D POST_BUILD
-    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${CMAKE_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
+    COMMAND ${CMAKE_COMMAND} -E echo "SKIP_POST_BUILD=$ENV{SKIP_POST_BUILD}"
+    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py
+        --source-dir ${PROJECT_SOURCE_DIR}
+        --build-dir $<TARGET_FILE_DIR:CoreAI3D>
+        --target-executable $<TARGET_FILE:CoreAI3D>
+        --skip-post "$ENV{SKIP_POST_BUILD}" # <--- ADDED ARGUMENT
     COMMENT "Running post-build automation script"
     VERBATIM
 )

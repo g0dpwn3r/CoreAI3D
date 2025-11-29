@@ -247,13 +247,17 @@ def main():
     parser.add_argument('--source-dir', required=True, help='Source directory to copy')
     parser.add_argument('--build-dir', required=True, help='Build directory (for reference)')
     parser.add_argument('--target-executable', required=True, help='Target executable file path')
-
+    parser.add_argument('--skip-post', default='ON', help='If set to ON, skips all post-build operations.')
     args = parser.parse_args()
+
+    logging.info(f"Post-build automation called with skip-post='{args.skip_post}'")
 
     source_dir = Path(args.source_dir)
     build_dir = Path(args.build_dir)
     target_executable = Path(args.target_executable)
-
+    if args.skip_post.upper() == 'ON':
+        logging.info("Skipping post-build automation as requested by --skip-post flag.")
+        return
     # Validate inputs
     if not source_dir.exists() or not source_dir.is_dir():
         logging.error(f"Source directory does not exist: {source_dir}")

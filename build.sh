@@ -8,6 +8,7 @@ set -e
 # Default build type
 BUILD_TYPE="debug"
 USE_MYSQL="ON"
+SKIP_POST_BUILD="ON"
 export CMAKE_LINKER=mold
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
       USE_MYSQL="OFF"
       shift
       ;;
+    --post) 
+      SKIP_POST_BUILD="OFF"
+      shift
+      ;;
     --clean)
       echo "Cleaning CMake build artifacts..."
       find . -maxdepth 1 -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null
@@ -34,10 +39,11 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --help)
-      echo "Usage: $0 [--debug|--release] [--no-mysql] [--clean]"
+      echo "Usage: $0 [--debug|--release] [--no-mysql] [--post] [--clean]"
       echo "  --debug    Build in Debug mode (default)"
       echo "  --release  Build in Release mode"
       echo "  --no-mysql Disable MySQL support"
+      echo "  --post     Run post-build automation (copy files, git operations)"
       echo "  --clean    Clean CMake build artifacts"
       exit 0
       ;;
@@ -50,7 +56,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "Building CoreAI3D in $BUILD_TYPE mode with MySQL=$USE_MYSQL"
-
+echo "SKIP_POST_BUILD=$SKIP_POST_BUILD"
+export SKIP_POST_BUILD
 # Create build directory based on build type
 BUILD_DIR="out/build/linux-$BUILD_TYPE"
 if [ ! -d "$BUILD_DIR" ]; then
