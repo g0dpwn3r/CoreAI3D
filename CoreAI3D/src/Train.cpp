@@ -932,90 +932,93 @@ void Training::normalize(float minRange, float maxRange) {
     this->original_target_global_min = targetMin;
     this->original_target_global_max = targetMax;
 
-    // DEBUG: Log normalization parameters
-    if (verbose) {
-        std::cout << "[DEBUG NORMALIZE] Input range: [" << inputMin << ", " << inputMax << "]" << std::endl;
-        std::cout << "[DEBUG NORMALIZE] Target range: [" << targetMin << ", " << targetMax << "]" << std::endl;
-        std::cout << "[DEBUG NORMALIZE] Target range: [" << minRange << ", " << maxRange << "]" << std::endl;
-    }
+    // Store command line ranges for scaling and denormalization
+    // If --min --max were specified and different from default [0,1], use them for scaling
+    if (minRange != 0.0f || maxRange != 1.0f) {
+        this->min = minRange;
+        this->max = maxRange;
+        // Use command line ranges for scaling instead of [0,1]
+        float scaleMin = minRange;
+        float scaleMax = maxRange;
+        float scaleRange = scaleMax - scaleMin;
 
-    // Handle edge cases for inputs
-    if (!inputDataFound || std::abs(inputMax - inputMin) < std::numeric_limits<float>::epsilon()) {
-        if (verbose) {
-            std::cerr << "[DEBUG NORMALIZE] WARNING: Input data range is zero or no valid input data found." << std::endl;
-        }
-        for (auto& row : inputs) {
-            for (float& val : row) {
-                if (std::isinf(val)) {
-                    val = maxRange;
-                }
-                else if (std::isnan(val)) {
-                    val = minRange;
-                }
-                else {
-                    val = minRange;
+        // Scale inputs to [scaleMin, scaleMax] using actual data ranges
+        if (inputDataFound && std::abs(inputMax - inputMin) > std::numeric_limits<float>::epsilon()) {
+            for (auto& row : inputs) {
+                for (float& val : row) {
+                    if (std::isinf(val)) {
+                        val = scaleMin;
+                    } else if (std::isnan(val)) {
+                        val = scaleMin;
+                    } else {
+                        val = scaleMin + ((val - inputMin) / (inputMax - inputMin)) * scaleRange;
+                    }
                 }
             }
+        }
+
+        // Scale targets to [scaleMin, scaleMax] using actual data ranges
+        if (targetDataFound && std::abs(targetMax - targetMin) > std::numeric_limits<float>::epsilon()) {
+            for (auto& row : targets) {
+                for (float& val : row) {
+                    if (std::isinf(val)) {
+                        val = scaleMin;
+                    } else if (std::isnan(val)) {
+                        val = scaleMin;
+                    } else {
+                        val = scaleMin + ((val - targetMin) / (targetMax - targetMin)) * scaleRange;
+                    }
+                }
+            }
+        }
+
+        if (verbose) {
+            std::cout << "[DEBUG NORMALIZE] Using command line ranges [" << scaleMin << ", " << scaleMax << "] for scaling" << std::endl;
         }
     } else {
-        // Scale inputs to [minRange, maxRange]
-        float inputRangeDiff = inputMax - inputMin;
-        float targetRangeDiff = maxRange - minRange;
+        // Default behavior: scale to [0,1] using actual data ranges
+        this->min = std::min(inputMin, targetMin);
+        this->max = std::max(inputMax, targetMax);
 
-        for (auto& row : inputs) {
-            for (float& val : row) {
-                if (std::isinf(val)) {
-                    val = maxRange;
-                }
-                else if (std::isnan(val)) {
-                    val = minRange;
-                }
-                else {
-                    val = minRange + ((val - inputMin) * targetRangeDiff) / inputRangeDiff;
+        // Scale inputs to [0, 1] using actual data range
+        if (inputDataFound && std::abs(inputMax - inputMin) > std::numeric_limits<float>::epsilon()) {
+            float inputRangeDiff = inputMax - inputMin;
+            for (auto& row : inputs) {
+                for (float& val : row) {
+                    if (std::isinf(val)) {
+                        val = 0.0f;
+                    } else if (std::isnan(val)) {
+                        val = 0.0f;
+                    } else {
+                        val = (val - inputMin) / inputRangeDiff;
+                    }
                 }
             }
         }
-    }
 
-    // Handle edge cases for targets
-    if (!targetDataFound || std::abs(targetMax - targetMin) < std::numeric_limits<float>::epsilon()) {
+        // Scale targets to [0, 1] using actual data range
+        if (targetDataFound && std::abs(targetMax - targetMin) > std::numeric_limits<float>::epsilon()) {
+            float targetRangeDiff = targetMax - targetMin;
+            for (auto& row : targets) {
+                for (float& val : row) {
+                    if (std::isinf(val)) {
+                        val = 0.0f;
+                    } else if (std::isnan(val)) {
+                        val = 0.0f;
+                    } else {
+                        val = (val - targetMin) / targetRangeDiff;
+                    }
+                }
+            }
+        }
+
         if (verbose) {
-            std::cerr << "[DEBUG NORMALIZE] WARNING: Target data range is zero or no valid target data found." << std::endl;
-        }
-        for (auto& row : targets) {
-            for (float& val : row) {
-                if (std::isinf(val)) {
-                    val = maxRange;
-                }
-                else if (std::isnan(val)) {
-                    val = minRange;
-                }
-                else {
-                    val = minRange;
-                }
-            }
-        }
-    } else {
-        // Scale targets to [minRange, maxRange]
-        float targetRangeDiff = maxRange - minRange;
-
-        for (auto& row : targets) {
-            for (float& val : row) {
-                if (std::isinf(val)) {
-                    val = maxRange;
-                }
-                else if (std::isnan(val)) {
-                    val = minRange;
-                }
-                else {
-                    val = minRange + ((val - targetMin) * targetRangeDiff) / (targetMax - targetMin);
-                }
-            }
+            std::cout << "[DEBUG NORMALIZE] Using default [0,1] scaling with actual data ranges" << std::endl;
         }
     }
 
     if (verbose) {
-        std::cout << "Data Normalized!\n";
+        std::cout << "Data Normalized to [0,1] range!\n";
     }
 }
 
@@ -1054,11 +1057,12 @@ void Training::preprocess(float minVal, float maxVal) {
 
     // Always re-initialize CoreAI to ensure dimensions match the current dataset
     // This prevents the "input sample size must match inputSize" error when switching datasets
+    // Since we now scale data to [0,1], initialize CoreAI with 0.0 and 1.0
     if (verbose) {
         std::cout << "[DEBUG] Re-initializing CoreAI with Input Size: " << this->inputSize
-                  << ", Output Size: " << this->outputSize << std::endl;
+                  << ", Output Size: " << this->outputSize << " (scaled to [0,1])" << std::endl;
     }
-    core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, minVal, maxVal, verbose);
+    core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, 0.0f, 1.0f, verbose);
     core->trainer = this; // Set the trainer pointer in CoreAI
 
     core->setInput(inputs);
