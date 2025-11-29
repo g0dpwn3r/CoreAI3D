@@ -1076,7 +1076,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                     // Standard backpropagation: sum += output_errors[k] * weight
                     sum += output_errors[k] * this->weigth_output_hidden[k][j];
                 }
-                float hidden_activation = this->hidden[global_sample][j];
+                float hidden_activation = this->hidden[batch_sample][j];
                 hidden_errors[j] = sum * hidden_activation * (1.0f - hidden_activation); // Derivative of sigmoid
 
                 // DEBUG: Log hidden error calculation
@@ -1094,7 +1094,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                         throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                     }
                     // Standard backpropagation: gradient = error * activation
-                    float gradient = output_errors[j] * this->hidden[global_sample][k];
+                    float gradient = output_errors[j] * this->hidden[batch_sample][k];
 
                     // Add L2 regularization gradient: 2 * lambda * weight
                     if (use_l2_reg) {

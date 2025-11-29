@@ -180,19 +180,19 @@ bool Predict::initializeTrainer(const std::string& dbHost,
 }
 
 bool Predict::loadData(const std::string& inputFile,
-                      const std::string& targetFile,
-                      int numSamples,
-                      int outputSize,
-                      bool hasHeader,
-                      bool containsText,
-                      char delimiter,
-                      const std::string& datasetName) {
+                       const std::string& targetFile,
+                       int numSamples,
+                       int outputSize,
+                       bool hasHeader,
+                       bool containsText,
+                       char delimiter,
+                       const std::string& datasetName) {
     if (verbose_) {
         std::cout << "[PREDICT] Loading data from: " << inputFile << std::endl;
     }
 
-    // Load main input data
-    if (!trainer_->loadCSV(inputFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName)) {
+    // Load main input data - use outputSize=0 to treat all columns as inputs
+    if (!trainer_->loadCSV(inputFile, numSamples, 0, hasHeader, containsText, delimiter, datasetName)) {
         std::cerr << "[PREDICT] Failed to load CSV data from " << inputFile << std::endl;
         return false;
     }
@@ -206,6 +206,9 @@ bool Predict::loadData(const std::string& inputFile,
             std::cerr << "[PREDICT] Failed to load target CSV data from " << targetFile << std::endl;
             return false;
         }
+    } else {
+        // If no target file provided, set outputSize based on the neural network output size
+        trainer_->outputSize = outputSize;
     }
 
     if (verbose_) {

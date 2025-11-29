@@ -285,8 +285,8 @@ def main():
                         delete_directory(dest)
                     dest.mkdir(parents=True, exist_ok=True)
                     # Use sudo to copy the executable
-                    result = subprocess.run(['sudo', 'cp', str(target_executable), str(dest / target_executable.name)],
-                                          capture_output=True, text=True)
+                    result = subprocess.run(['pkexec', 'cp', str(target_executable), str(dest / target_executable.name)],
+                    capture_output=True, text=True)
                     if result.returncode == 0:
                         logging.info(f"Successfully copied executable to {dest}")
                     else:
