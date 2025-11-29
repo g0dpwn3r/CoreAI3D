@@ -1076,6 +1076,10 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                     // Standard backpropagation: sum += output_errors[k] * weight
                     sum += output_errors[k] * this->weigth_output_hidden[k][j];
                 }
+                // Use batch_results to get hidden activations instead of this->hidden
+                if (!safe2DIndex(this->hidden, batch_sample, j)) {
+                    throw std::out_of_range("CoreAI::train: Hidden layer index out of range");
+                }
                 float hidden_activation = this->hidden[batch_sample][j];
                 hidden_errors[j] = sum * hidden_activation * (1.0f - hidden_activation); // Derivative of sigmoid
 
