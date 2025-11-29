@@ -167,9 +167,19 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
 
     // Initialize activation configurations (default to sigmoid for backward compatibility)
-    layer_activations.resize(layer_sizes.size(), {ActivationType::SIGMOID, 1.0f, 0.1f, 1.0f});
-}
+    ActivationConfig default_config;
+    default_config.type = ActivationType::SIGMOID;
+    default_config.alpha = 1.0f;
+    default_config.beta = 0.1f;
+    default_config.spatial_weight = 1.0f;
+    default_config.calculus_config = {10, 1.0f, 1.0f};
+    layer_activation_configs.resize(layer_sizes.size(), default_config);
     std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
+
+    // Initialize thread pool with number of hardware threads
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4; // fallback
+    threadPool = std::make_unique<ThreadPool>(num_threads);
 }
 std::vector<std::vector<float>>& CoreAI::getInput()
 {
@@ -218,10 +228,6 @@ void CoreAI::setOutput(const std::vector<std::vector<float> >& data)
     this->output = data; // Assuming this is for targets, or actual model output
 }
 
-float CoreAI::sigmoid(float x)
-{
-    return 1.0f / (1.0f + std::exp(-x));
-}
 float CoreAI::sigmoid(float x)
 {
     return 1.0f / (1.0f + std::exp(-x));
@@ -329,6 +335,112 @@ float CoreAI::spatial_leaky_relu_derivative(float x, float distance, float alpha
     return base_derivative * spatial_factor;
 }
 
+// Calculus-based activation functions using numerical integration
+
+float CoreAI::simpsons_rule(float a, float b, int n, std::function<float(float)> f)
+{
+    // Simpson's rule for numerical integration with numerical stability checks
+    if (n <= 0) n = 2; // Minimum 2 intervals
+    if (n > 1000) n = 1000; // Maximum to prevent excessive computation
+
+    // Ensures n is even
+    if (n % 2 != 0) n++;
+
+    // Handle edge case where a == b
+    if (std::abs(b - a) < std::numeric_limits<float>::epsilon()) {
+        return 0.0f;
+    }
+
+    float h = (b - a) / n;
+    float sum = f(a) + f(b);
+
+    // Sum for odd indices (4x multiplier)
+    for (int i = 1; i < n; i += 2) {
+        float x = a + i * h;
+        // Clamp x to prevent overflow in function evaluation
+        x = std::max(-100.0f, std::min(100.0f, x));
+        sum += 4.0f * f(x);
+    }
+
+    // Sum for even indices (2x multiplier)
+    for (int i = 2; i < n; i += 2) {
+        float x = a + i * h;
+        // Clamp x to prevent overflow in function evaluation
+        x = std::max(-100.0f, std::min(100.0f, x));
+        sum += 2.0f * f(x);
+    }
+
+    float result = (h / 3.0f) * sum;
+    // Clamp result to prevent extreme values
+    return std::max(-1e6f, std::min(1e6f, result));
+}
+
+float CoreAI::integral_sigmoid(float x, const CalculusConfig& config)
+{
+    // Integral of sigmoid from 0 to x using Simpson's rule
+    // ∫ sigmoid(t) dt from 0 to x
+    auto sigmoid_func = [this](float t) { return sigmoid(t); };
+
+    // Clamp x to reasonable range for numerical stability
+    float clamped_x = std::max(-10.0f, std::min(10.0f, x));
+
+    float integral = simpsons_rule(0.0f, clamped_x, config.N, sigmoid_func);
+    float result = config.a * config.SM * integral;
+
+    // Additional clamping for final result
+    return std::max(-1e3f, std::min(1e3f, result));
+}
+
+float CoreAI::integral_sigmoid_derivative(float x, const CalculusConfig& config)
+{
+    // Derivative of integral_sigmoid is just sigmoid(x) scaled
+    return config.a * config.SM * sigmoid(x);
+}
+
+float CoreAI::integral_relu(float x, const CalculusConfig& config)
+{
+    // Integral of ReLU from 0 to x using Simpson's rule
+    // ∫ max(0, t) dt from 0 to x
+    auto relu_func = [](float t) { return std::max(0.0f, t); };
+
+    // Clamp x to reasonable range for numerical stability
+    float clamped_x = std::max(-10.0f, std::min(10.0f, x));
+
+    float integral = simpsons_rule(0.0f, clamped_x, config.N, relu_func);
+    float result = config.a * config.SM * integral;
+
+    // Additional clamping for final result
+    return std::max(-1e3f, std::min(1e3f, result));
+}
+
+float CoreAI::integral_relu_derivative(float x, const CalculusConfig& config)
+{
+    // Derivative of integral_relu is just ReLU(x) scaled
+    return config.a * config.SM * std::max(0.0f, x);
+}
+
+float CoreAI::integral_tanh(float x, const CalculusConfig& config)
+{
+    // Integral of tanh from 0 to x using Simpson's rule
+    // ∫ tanh(t) dt from 0 to x
+    auto tanh_func = [](float t) { return std::tanh(t); };
+
+    // Clamp x to reasonable range for numerical stability
+    float clamped_x = std::max(-10.0f, std::min(10.0f, x));
+
+    float integral = simpsons_rule(0.0f, clamped_x, config.N, tanh_func);
+    float result = config.a * config.SM * integral;
+
+    // Additional clamping for final result
+    return std::max(-1e3f, std::min(1e3f, result));
+}
+
+float CoreAI::integral_tanh_derivative(float x, const CalculusConfig& config)
+{
+    // Derivative of integral_tanh is just tanh(x) scaled
+    return config.a * config.SM * std::tanh(x);
+}
+
 // Unified activation function interface
 float CoreAI::activate(float x, const ActivationConfig& config, float distance)
 {
@@ -349,6 +461,12 @@ float CoreAI::activate(float x, const ActivationConfig& config, float distance)
             return spatial_elu(x, distance, config.alpha, config.spatial_weight);
         case ActivationType::SPATIAL_LEAKY_RELU:
             return spatial_leaky_relu(x, distance, config.alpha, config.spatial_weight);
+        case ActivationType::INTEGRAL_SIGMOID:
+            return integral_sigmoid(x, config.calculus_config);
+        case ActivationType::INTEGRAL_RELU:
+            return integral_relu(x, config.calculus_config);
+        case ActivationType::INTEGRAL_TANH:
+            return integral_tanh(x, config.calculus_config);
         default:
             return sigmoid(x); // fallback
     }
@@ -373,6 +491,12 @@ float CoreAI::activate_derivative(float x, const ActivationConfig& config, float
             return spatial_elu_derivative(x, distance, config.alpha, config.spatial_weight);
         case ActivationType::SPATIAL_LEAKY_RELU:
             return spatial_leaky_relu_derivative(x, distance, config.alpha, config.spatial_weight);
+        case ActivationType::INTEGRAL_SIGMOID:
+            return integral_sigmoid_derivative(x, config.calculus_config);
+        case ActivationType::INTEGRAL_RELU:
+            return integral_relu_derivative(x, config.calculus_config);
+        case ActivationType::INTEGRAL_TANH:
+            return integral_tanh_derivative(x, config.calculus_config);
         default:
             return x * (1.0f - x); // sigmoid derivative fallback
     }
@@ -768,7 +892,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
 
 void CoreAI::train(const std::vector<std::vector<float> >& inputs,
     const std::vector<std::vector<float> >& targets,
-    double learningRate, int& numSamples)
+    double learningRate, int& numSamples, int batchSize)
 {
     // Parameter validation
     if (learningRate <= 0.0 || learningRate > 1.0) {
@@ -875,145 +999,198 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         }
     }
 
-    // Backpropagation - accumulate gradients over all samples
-    for (size_t sample = 0; sample < normalized_inputs.size(); ++sample)
-    {
+    // Batched training with multi-threading
+    size_t total_samples = normalized_inputs.size();
+    size_t num_batches = (total_samples + batchSize - 1) / batchSize; // Ceiling division
 
-        // DEBUG: Log transform function inputs
-        if (verbose && sample == 0) {
-            std::cout << "[DEBUG TRAIN] Transform function inputs - x: " << this->x
-                      << ", y: " << this->y << ", z: " << this->z
-                      << ", epsilon: " << this->epsilon << std::endl;
-        }
-
-        // Output layer error
-        std::vector<float> output_errors(this->outputSize, 0.0f);
-        for (int j = 0; j < this->outputSize; ++j)
-        {
-            if (!safe2DIndex(this->results, sample, j) || !safe2DIndex(normalized_targets, sample, j)) {
-                throw std::out_of_range("CoreAI::train: Index out of range during backpropagation");
-            }
-
-            float output = this->results[sample][j];
-            float target = normalized_targets[sample][j];
-
-            // DEBUG: Log error calculation components
-            if (verbose && sample == 0 && j == 0) {
-                std::cout << "[DEBUG TRAIN] Sample 0, Output 0 - output: " << output
-                          << ", target: " << target << std::endl;
-            }
-
-            // Standard backpropagation: error = (target - output) * derivative
-            output_errors[j] = (target - output) * output * (1.0f - output); // Derivative of sigmoid
-
-        }
-
-        // Hidden layer error
-        std::vector<float> hidden_errors(this->neurons, 0.0f);
-        for (int j = 0; j < this->neurons; ++j)
-        {
-            float sum = 0.0f;
-            for (int k = 0; k < this->outputSize; ++k)
-            {
-                if (!safe2DIndex(this->weigth_output_hidden, k, j)) {
-                    throw std::out_of_range("CoreAI::train: Index out of range during hidden error calculation");
-                }
-                // Standard backpropagation: sum += output_errors[k] * weight
-                sum += output_errors[k] * this->weigth_output_hidden[k][j];
-            }
-            float hidden = this->hidden[sample][j];
-            hidden_errors[j] = sum * hidden * (1.0f - hidden); // Derivative of sigmoid
-
-            // DEBUG: Log hidden error calculation
-            if (verbose && sample == 0 && j == 0) {
-                std::cout << "[DEBUG TRAIN] Sample 0, Hidden 0 - sum: " << sum
-                          << ", hidden activation: " << hidden
-                          << ", hidden error: " << hidden_errors[j] << std::endl;
-            }
-        }
-
-        // Accumulate gradients for output to hidden weights
-        for (int j = 0; j < this->outputSize; ++j)
-        {
-            for (int k = 0; k < this->neurons; ++k)
-            {
-                if(!safe2DIndex(this->weigth_output_hidden, j, k)) {
-                    throw std::out_of_range("CoreAI::train: Index out of range during weight update");
-                }
-                // Standard backpropagation: gradient = error * activation
-                float gradient = output_errors[j] * hidden[sample][k];
-
-                // Add L2 regularization gradient: 2 * lambda * weight
-                if (use_l2_reg) {
-                    gradient += 2.0f * l2_lambda * this->weigth_output_hidden[j][k];
-                }
-
-                // Gradient clipping to prevent exploding gradients
-                if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
-                    gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
-                }
-
-                output_hidden_gradients[j][k] += gradient;
-            }
-        }
-
-        // Accumulate gradients for input to hidden weights with stable 3D transforms
-        for (int j = 0; j < this->neurons; ++j)
-        {
-            for (size_t k = 0; k < normalized_inputs[sample].size(); ++k)
-            {
-                if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
-                    throw std::out_of_range("CoreAI::train: Index out of range during weight update");
-                }
-
-                // Get triplet coordinates for spatial context
-                size_t triplet_base = (k / 3) * 3;
-                float x = (triplet_base < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base] : 0.0f;
-                float y = (triplet_base + 1 < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base + 1] : 0.0f;
-                float z = (triplet_base + 2 < normalized_inputs[sample].size()) ? normalized_inputs[sample][triplet_base + 2] : 0.0f;
-
-                // Compute spatial features for consistency with forward pass
-                float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
-
-                // Derivative of stable transform w.r.t weight is the input coordinate
-                int coord_type = k % 3;
-                float transform_derivative;
-                if (coord_type == 0) {
-                    transform_derivative = x;  // d/dw(x*w + ...) = x
-                } else if (coord_type == 1) {
-                    transform_derivative = y;  // d/dw(y*w + ...) = y
-                } else {
-                    transform_derivative = z;  // d/dw(z*w + ...) = z
-                }
-
-                // Backpropagation with stable 3D transform: gradient = error * transform_derivative
-                float gradient = hidden_errors[j] * transform_derivative;
-
-                // Add L2 regularization gradient: 2 * lambda * weight
-                if (use_l2_reg) {
-                    gradient += 2.0f * l2_lambda * this->weigth_input_hidden[j][k];
-                }
-
-                // Gradient clipping to prevent exploding gradients
-                if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
-                    gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
-                }
-
-                input_hidden_gradients[j][k] += gradient;
-            }
-        }
+    if (verbose) {
+        std::cout << "[DEBUG TRAIN] Training with batch size: " << batchSize
+                  << ", total samples: " << total_samples
+                  << ", number of batches: " << num_batches << std::endl;
     }
 
-    // Average gradients over the batch
-    size_t num_samples = normalized_inputs.size();
-    for (auto& row : output_hidden_gradients) {
-        for (float& grad : row) {
-            grad /= num_samples;
+    // Process samples in batches
+    for (size_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
+        size_t batch_start = batch_idx * batchSize;
+        size_t batch_end = std::min(batch_start + batchSize, total_samples);
+        size_t current_batch_size = batch_end - batch_start;
+
+        if (verbose) {
+            std::cout << "[DEBUG TRAIN] Processing batch " << (batch_idx + 1) << "/" << num_batches
+                      << " (samples " << batch_start << " to " << (batch_end - 1) << ")" << std::endl;
         }
-    }
-    for (auto& row : input_hidden_gradients) {
-        for (float& grad : row) {
-            grad /= num_samples;
+
+        // Reset gradients for this batch
+        std::fill(output_hidden_gradients.begin(), output_hidden_gradients.end(),
+                  std::vector<float>(this->neurons, 0.0f));
+        std::fill(input_hidden_gradients.begin(), input_hidden_gradients.end(),
+                  std::vector<float>(this->inputSize, 0.0f));
+
+        // Forward pass for the current batch
+        std::vector<std::vector<float>> batch_inputs(normalized_inputs.begin() + batch_start,
+                                                    normalized_inputs.begin() + batch_end);
+        std::vector<std::vector<float>> batch_targets(normalized_targets.begin() + batch_start,
+                                                     normalized_targets.begin() + batch_end);
+
+        auto batch_results = this->forward(batch_inputs, true); // training = true
+
+        // Backpropagation for the current batch
+        for (size_t batch_sample = 0; batch_sample < current_batch_size; ++batch_sample) {
+            size_t global_sample = batch_start + batch_sample;
+
+            // DEBUG: Log transform function inputs
+            if (verbose && global_sample == 0) {
+                std::cout << "[DEBUG TRAIN] Transform function inputs - x: " << this->x
+                          << ", y: " << this->y << ", z: " << this->z
+                          << ", epsilon: " << this->epsilon << std::endl;
+            }
+
+            // Output layer error
+            std::vector<float> output_errors(this->outputSize, 0.0f);
+            for (int j = 0; j < this->outputSize; ++j) {
+                if (!safe2DIndex(batch_results, batch_sample, j) || !safe2DIndex(batch_targets, batch_sample, j)) {
+                    throw std::out_of_range("CoreAI::train: Index out of range during backpropagation");
+                }
+
+                float output = batch_results[batch_sample][j];
+                float target = batch_targets[batch_sample][j];
+
+                // DEBUG: Log error calculation components
+                if (verbose && global_sample == 0 && j == 0) {
+                    std::cout << "[DEBUG TRAIN] Sample 0, Output 0 - output: " << output
+                              << ", target: " << target << std::endl;
+                }
+
+                // Standard backpropagation: error = (target - output) * derivative
+                output_errors[j] = (target - output) * output * (1.0f - output); // Derivative of sigmoid
+            }
+
+            // Hidden layer error
+            std::vector<float> hidden_errors(this->neurons, 0.0f);
+            for (int j = 0; j < this->neurons; ++j) {
+                float sum = 0.0f;
+                for (int k = 0; k < this->outputSize; ++k) {
+                    if (!safe2DIndex(this->weigth_output_hidden, k, j)) {
+                        throw std::out_of_range("CoreAI::train: Index out of range during hidden error calculation");
+                    }
+                    // Standard backpropagation: sum += output_errors[k] * weight
+                    sum += output_errors[k] * this->weigth_output_hidden[k][j];
+                }
+                float hidden_activation = this->hidden[global_sample][j];
+                hidden_errors[j] = sum * hidden_activation * (1.0f - hidden_activation); // Derivative of sigmoid
+
+                // DEBUG: Log hidden error calculation
+                if (verbose && global_sample == 0 && j == 0) {
+                    std::cout << "[DEBUG TRAIN] Sample 0, Hidden 0 - sum: " << sum
+                              << ", hidden activation: " << hidden_activation
+                              << ", hidden error: " << hidden_errors[j] << std::endl;
+                }
+            }
+
+            // Accumulate gradients for output to hidden weights
+            for (int j = 0; j < this->outputSize; ++j) {
+                for (int k = 0; k < this->neurons; ++k) {
+                    if(!safe2DIndex(this->weigth_output_hidden, j, k)) {
+                        throw std::out_of_range("CoreAI::train: Index out of range during weight update");
+                    }
+                    // Standard backpropagation: gradient = error * activation
+                    float gradient = output_errors[j] * this->hidden[global_sample][k];
+
+                    // Add L2 regularization gradient: 2 * lambda * weight
+                    if (use_l2_reg) {
+                        gradient += 2.0f * l2_lambda * this->weigth_output_hidden[j][k];
+                    }
+
+                    // Gradient clipping to prevent exploding gradients
+                    if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
+                        gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
+                    }
+
+                    output_hidden_gradients[j][k] += gradient;
+                }
+            }
+
+            // Accumulate gradients for input to hidden weights with stable 3D transforms
+            for (int j = 0; j < this->neurons; ++j) {
+                for (size_t k = 0; k < batch_inputs[batch_sample].size(); ++k) {
+                    if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
+                        throw std::out_of_range("CoreAI::train: Index out of range during weight update");
+                    }
+
+                    // Get triplet coordinates for spatial context
+                    size_t triplet_base = (k / 3) * 3;
+                    float x = (triplet_base < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base] : 0.0f;
+                    float y = (triplet_base + 1 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 1] : 0.0f;
+                    float z = (triplet_base + 2 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 2] : 0.0f;
+
+                    // Compute spatial features for consistency with forward pass
+                    float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
+
+                    // Derivative of stable transform w.r.t weight is the input coordinate
+                    int coord_type = k % 3;
+                    float transform_derivative;
+                    if (coord_type == 0) {
+                        transform_derivative = x;  // d/dw(x*w + ...) = x
+                    } else if (coord_type == 1) {
+                        transform_derivative = y;  // d/dw(y*w + ...) = y
+                    } else {
+                        transform_derivative = z;  // d/dw(z*w + ...) = z
+                    }
+
+                    // Backpropagation with stable 3D transform: gradient = error * transform_derivative
+                    float gradient = hidden_errors[j] * transform_derivative;
+
+                    // Add L2 regularization gradient: 2 * lambda * weight
+                    if (use_l2_reg) {
+                        gradient += 2.0f * l2_lambda * this->weigth_input_hidden[j][k];
+                    }
+
+                    // Gradient clipping to prevent exploding gradients
+                    if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
+                        gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
+                    }
+
+                    input_hidden_gradients[j][k] += gradient;
+                }
+            }
+        }
+
+        // Average gradients over the current batch
+        for (auto& row : output_hidden_gradients) {
+            for (float& grad : row) {
+                grad /= current_batch_size;
+            }
+        }
+        for (auto& row : input_hidden_gradients) {
+            for (float& grad : row) {
+                grad /= current_batch_size;
+            }
+        }
+
+        // Update weights after each batch
+        if (optimizer) {
+            optimizer->update(this->weigth_output_hidden, output_hidden_gradients);
+            optimizer->update(this->weigth_input_hidden, input_hidden_gradients);
+
+            if (verbose) {
+                std::cout << "[DEBUG TRAIN] Weights updated using " << optimizer->getName() << " optimizer for batch " << (batch_idx + 1) << std::endl;
+            }
+        } else {
+            // Fallback to basic gradient descent if no optimizer set
+            for (int j = 0; j < this->outputSize; ++j) {
+                for (int k = 0; k < this->neurons; ++k) {
+                    this->weigth_output_hidden[j][k] += currentLearningRate * output_hidden_gradients[j][k];
+                }
+            }
+            for (int j = 0; j < this->neurons; ++j) {
+                for (size_t k = 0; k < this->inputSize; ++k) {
+                    this->weigth_input_hidden[j][k] += currentLearningRate * input_hidden_gradients[j][k];
+                }
+            }
+
+            if (verbose) {
+                std::cout << "[DEBUG TRAIN] Weights updated using basic gradient descent for batch " << (batch_idx + 1) << std::endl;
+            }
         }
     }
 
@@ -1248,58 +1425,8 @@ void CoreAI::setRegularizationParams(float l2_lambda, float dropout_rate,
 }
 
 void CoreAI::enableRegularization(bool dropout, bool batch_norm,
-                                 bool l2_reg, bool grad_clip) {
+                                  bool l2_reg, bool grad_clip) {
     this->use_dropout = dropout;
-void CoreAI::setLayerNeurons(int layer_index, int neurons) {
-    if (layer_index < 0 || layer_index >= static_cast<int>(layer_sizes.size())) {
-        throw std::invalid_argument("CoreAI::setLayerNeurons: Invalid layer index");
-    }
-    if (neurons <= 0) {
-        throw std::invalid_argument("CoreAI::setLayerNeurons: Neurons must be positive");
-    }
-
-    layer_sizes[layer_index] = neurons;
-
-    // Reinitialize weights
-    initializeMultiLayerWeights();
-
-    if (verbose) {
-        std::cout << "[DEBUG LAYER] Set layer " << layer_index << " to " << neurons << " neurons" << std::endl;
-    }
-}
-
-// Activation function configuration methods
-void CoreAI::setLayerActivation(int layer_index, ActivationType type, float alpha, float beta, float spatial_weight) {
-    if (layer_index < 0 || layer_index >= static_cast<int>(layer_sizes.size())) {
-        throw std::invalid_argument("CoreAI::setLayerActivation: Invalid layer index");
-    }
-
-    if (layer_activations.size() != layer_sizes.size()) {
-        layer_activations.resize(layer_sizes.size());
-    }
-
-    layer_activations[layer_index] = {type, alpha, beta, spatial_weight};
-
-    if (verbose) {
-        std::cout << "[DEBUG ACTIVATION] Set layer " << layer_index << " activation to type " << static_cast<int>(type)
-                  << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight << std::endl;
-    }
-}
-
-void CoreAI::setAllLayerActivations(ActivationType type, float alpha, float beta, float spatial_weight) {
-    if (layer_activations.size() != layer_sizes.size()) {
-        layer_activations.resize(layer_sizes.size());
-    }
-
-    for (size_t i = 0; i < layer_activations.size(); ++i) {
-        layer_activations[i] = {type, alpha, beta, spatial_weight};
-    }
-
-    if (verbose) {
-        std::cout << "[DEBUG ACTIVATION] Set all layers to activation type " << static_cast<int>(type)
-                  << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight << std::endl;
-    }
-}
     this->use_batch_norm = batch_norm;
     this->use_l2_reg = l2_reg;
     this->use_grad_clip = grad_clip;
@@ -1455,5 +1582,50 @@ void CoreAI::setLayerNeurons(int layer_index, int neurons) {
 
     if (verbose) {
         std::cout << "[DEBUG LAYER] Set layer " << layer_index << " to " << neurons << " neurons" << std::endl;
+    }
+}
+
+// Activation function configuration methods
+void CoreAI::setLayerActivation(int layer_index, ActivationType type, float alpha, float beta, float spatial_weight,
+                               int calculus_N, float calculus_SM, float calculus_a) {
+    if (layer_index < 0 || layer_index >= static_cast<int>(layer_sizes.size())) {
+        throw std::invalid_argument("CoreAI::setLayerActivation: Invalid layer index");
+    }
+
+    if (layer_activation_configs.size() != layer_sizes.size()) {
+        layer_activation_configs.resize(layer_sizes.size());
+    }
+
+    layer_activation_configs[layer_index].type = type;
+    layer_activation_configs[layer_index].alpha = alpha;
+    layer_activation_configs[layer_index].beta = beta;
+    layer_activation_configs[layer_index].spatial_weight = spatial_weight;
+    layer_activation_configs[layer_index].calculus_config = {calculus_N, calculus_SM, calculus_a};
+
+    if (verbose) {
+        std::cout << "[DEBUG ACTIVATION] Set layer " << layer_index << " activation to type " << static_cast<int>(type)
+                  << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight
+                  << ", calculus_N=" << calculus_N << ", calculus_SM=" << calculus_SM << ", calculus_a=" << calculus_a << std::endl;
+    }
+}
+
+void CoreAI::setAllLayerActivations(ActivationType type, float alpha, float beta, float spatial_weight,
+                                   int calculus_N, float calculus_SM, float calculus_a) {
+    if (layer_activation_configs.size() != layer_sizes.size()) {
+        layer_activation_configs.resize(layer_sizes.size());
+    }
+
+    for (size_t i = 0; i < layer_activation_configs.size(); ++i) {
+        layer_activation_configs[i].type = type;
+        layer_activation_configs[i].alpha = alpha;
+        layer_activation_configs[i].beta = beta;
+        layer_activation_configs[i].spatial_weight = spatial_weight;
+        layer_activation_configs[i].calculus_config = {calculus_N, calculus_SM, calculus_a};
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG ACTIVATION] Set all layers to activation type " << static_cast<int>(type)
+                  << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight
+                  << ", calculus_N=" << calculus_N << ", calculus_SM=" << calculus_SM << ", calculus_a=" << calculus_a << std::endl;
     }
 }

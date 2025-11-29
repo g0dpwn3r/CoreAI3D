@@ -48,6 +48,12 @@ struct option long_options[] = {
     {"db-password", required_argument, 0, 'D'},
     {"db-port", required_argument, 0, 'R'},
     {"db-schema", required_argument, 0, 'S'},
+    {"batch-size", required_argument, 0, 'b'},
+    {"calculus-activation", no_argument, 0, 'C'},
+    {"contains-text", no_argument, 0, 0},
+    {"contains-header", no_argument, 0, 0},
+    {"contains-date", no_argument, 0, 0},
+    {"threads", required_argument, 0, 'j'},
     {0, 0, 0, 0}
 };
 int main(int argc, char* argv[]) {
@@ -84,6 +90,12 @@ int main(int argc, char* argv[]) {
     bool isOfflineMode = false;
     bool enableWebsocket = false;
     bool createTableFlag = false;
+    std::string batchSize = "32";
+    bool calculusActivation = false;
+    bool containsTextFlag = false;
+    bool containsHeader = false;
+    bool containsDate = false;
+    std::string threads = "1";
 
     // Helper function to check if next argument is a value (not a flag)
     auto hasValue = [&](int idx) -> bool {
@@ -280,6 +292,38 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --learning-rate <rate> or -r <rate>\n";
             std::cout << "    Dependencies: Used in prediction/training mode\n";
             std::cout << "    Example: --learning-rate 0.001 or -r 0.001\n\n";
+            std::cout << "  --batch-size, -b <number>\n";
+            std::cout << "    Set the batch size for training.\n";
+            std::cout << "    Expected value: Integer (default: 32)\n";
+            std::cout << "    Usage: --batch-size <number> or -b <number>\n";
+            std::cout << "    Dependencies: Used in training mode\n";
+            std::cout << "    Example: --batch-size 64 or -b 64\n\n";
+            std::cout << "  --calculus-activation\n";
+            std::cout << "    Enable calculus-based activation functions.\n";
+            std::cout << "    Usage: --calculus-activation or -C\n";
+            std::cout << "    Dependencies: Used in neural network computations\n";
+            std::cout << "    Example: --calculus-activation\n\n";
+            std::cout << "  --contains-text\n";
+            std::cout << "    Indicate that the dataset contains text data.\n";
+            std::cout << "    Usage: --contains-text\n";
+            std::cout << "    Dependencies: Used for data preprocessing\n";
+            std::cout << "    Example: --contains-text\n\n";
+            std::cout << "  --contains-header\n";
+            std::cout << "    Indicate that the dataset contains header rows.\n";
+            std::cout << "    Usage: --contains-header\n";
+            std::cout << "    Dependencies: Used for data parsing\n";
+            std::cout << "    Example: --contains-header\n\n";
+            std::cout << "  --contains-date\n";
+            std::cout << "    Indicate that the dataset contains date columns.\n";
+            std::cout << "    Usage: --contains-date\n";
+            std::cout << "    Dependencies: Used for data preprocessing\n";
+            std::cout << "    Example: --contains-date\n\n";
+            std::cout << "  --threads, -j <number>\n";
+            std::cout << "    Set the number of threads for parallel processing.\n";
+            std::cout << "    Expected value: Integer (default: 1)\n";
+            std::cout << "    Usage: --threads <number> or -j <number>\n";
+            std::cout << "    Dependencies: Used for multi-threading\n";
+            std::cout << "    Example: --threads 4 or -j 4\n\n";
             std::cout << "MODEL OPTIONS:\n";
             std::cout << "  --load-model <id_or_name>\n";
             std::cout << "    Load a pre-trained model from the database by ID or name.\n";
@@ -387,6 +431,20 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--dataset-id") {
             std::string value = extractValue(i, "--dataset-id", arg);
             if (!value.empty()) datasetId = value;
+        } else if (arg == "--batch-size" || arg == "-b") {
+            std::string value = extractValue(i, "--batch-size", arg);
+            if (!value.empty()) batchSize = value;
+        } else if (arg == "--calculus-activation" || arg == "-C") {
+            calculusActivation = true;
+        } else if (arg == "--contains-text") {
+            containsTextFlag = true;
+        } else if (arg == "--contains-header") {
+            containsHeader = true;
+        } else if (arg == "--contains-date") {
+            containsDate = true;
+        } else if (arg == "--threads" || arg == "-j") {
+            std::string value = extractValue(i, "--threads", arg);
+            if (!value.empty()) threads = value;
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
@@ -577,10 +635,14 @@ int main(int argc, char* argv[]) {
 
             // Create Predict instance and run prediction
             Predict predictor(verbose, nullptr);
+            int batchSize_val = 32;
+            try { batchSize_val = std::stoi(batchSize); }
+            catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for batch-size. Defaulting to 32.\n"; batchSize_val = 32; }
+
             bool success = predictor.runPrediction(
                 inputFile, outputCsvFile, targetFile, loadModelId, datasetId_val,
                 layers_val, neurons_val, minRange_val, maxRange_val,
-                inputSize_val, outputSize_val, numSamples_val,
+                inputSize_val, outputSize_val, numSamples_val, batchSize_val,
                 learningRate_val, epochs_val, embeddingFile, language,
                 datasetName, hasHeader, containsText, delimiter_char,
                 isOfflineMode, dbHost, dbPort_val, dbUser, dbPassword, dbSchema

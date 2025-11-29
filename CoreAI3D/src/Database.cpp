@@ -399,11 +399,11 @@ void Database::addDatasetRecord(int& datasetId, int rowIndex,
         auto labelBlob = vectorToBlob(labelValues);
 
         session->sql("INSERT INTO " + dbSchema + ".dataset_records (dataset_id, row_index, feature_values, label_values) "
-                       "VALUES (?, ?, ?, ?)")
+                        "VALUES (?, ?, ?, ?)")
                  .bind(datasetId)
                  .bind(rowIndex)
-                 .bind(featureBlob.data(), featureBlob.size())
-                 .bind(labelBlob.data(), labelBlob.size())
+                 .bind(std::string(featureBlob.begin(), featureBlob.end()))
+                 .bind(std::string(labelBlob.begin(), labelBlob.end()))
                  .execute();
 
         // Only log every 100th record to avoid spam during data loading
@@ -498,7 +498,7 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
         auto labelBlob = vectorToBlob(labelValues);
 
         session->sql("UPDATE " + dbSchema + ".dataset_records SET label_values = ? WHERE dataset_id = ? AND row_index = ?")
-                .bind(labelBlob.data(), labelBlob.size())
+                .bind(std::string(labelBlob.begin(), labelBlob.end()))
                 .bind(datasetId)
                 .bind(rowIndex)
                 .execute();
@@ -557,13 +557,13 @@ void Database::saveAIModelState(int& datasetId,
                       "hidden_output_data, hidden_error_data, weights_hidden_input, weights_output_hidden) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(datasetId)
-                .bind(inputBlob.data(), inputBlob.size())
-                .bind(outputBlob.data(), outputBlob.size())
-                .bind(hiddenBlob.data(), hiddenBlob.size())
-                .bind(hiddenOutputBlob.data(), hiddenOutputBlob.size())
-                .bind(hiddenErrorBlob.data(), hiddenErrorBlob.size())
-                .bind(weightsHiddenInputBlob.data(), weightsHiddenInputBlob.size())
-                .bind(weightsOutputHiddenBlob.data(), weightsOutputHiddenBlob.size())
+                .bind(std::string(inputBlob.begin(), inputBlob.end()))
+                .bind(std::string(outputBlob.begin(), outputBlob.end()))
+                .bind(std::string(hiddenBlob.begin(), hiddenBlob.end()))
+                .bind(std::string(hiddenOutputBlob.begin(), hiddenOutputBlob.end()))
+                .bind(std::string(hiddenErrorBlob.begin(), hiddenErrorBlob.end()))
+                .bind(std::string(weightsHiddenInputBlob.begin(), weightsHiddenInputBlob.end()))
+                .bind(std::string(weightsOutputHiddenBlob.begin(), weightsOutputHiddenBlob.end()))
                 .execute();
 
         std::cout << "Saved AI model state for dataset " << datasetId << std::endl;
@@ -651,9 +651,9 @@ void Database::savePredictionResults(int& datasetId, int sampleIndex,
                       "VALUES (?, ?, ?, ?, ?)")
                 .bind(datasetId)
                 .bind(sampleIndex)
-                .bind(inputBlob.data(), inputBlob.size())
-                .bind(actualBlob.data(), actualBlob.size())
-                .bind(predictedBlob.data(), predictedBlob.size())
+                .bind(std::string(inputBlob.begin(), inputBlob.end()))
+                .bind(std::string(actualBlob.begin(), actualBlob.end()))
+                .bind(std::string(predictedBlob.begin(), predictedBlob.end()))
                 .execute();
 
         std::cout << "Saved prediction results for dataset " << datasetId << ", sample " << sampleIndex << std::endl;

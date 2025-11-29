@@ -13,10 +13,6 @@
 #include <atomic>
 #include <future>
 
-// Forward declarations
-class Training;
-class Database;
-
 // Hyperparameter search methods
 enum class SearchMethod {
     GRID_SEARCH,
@@ -204,9 +200,9 @@ public:
     std::map<std::string, std::string> extractCategoricalParams(const ParameterSet& params) const;
 
     // Parameter sampling
-    float sampleFloatParameter(const ParameterDefinition& param) const;
-    int sampleIntParameter(const ParameterDefinition& param) const;
-    std::string sampleCategoricalParameter(const ParameterDefinition& param) const;
+    float sampleFloatParameter(const ParameterDefinition& param);
+    int sampleIntParameter(const ParameterDefinition& param);
+    std::string sampleCategoricalParameter(const ParameterDefinition& param);
 
     // Gaussian process utilities for Bayesian optimization
     float gaussianKernel(const std::vector<float>& x1, const std::vector<float>& x2, float length_scale = 1.0f) const;

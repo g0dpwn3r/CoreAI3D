@@ -61,7 +61,7 @@ const TuningConfig& HyperparameterTuner::getTuningConfig() const {
 }
 
 // Parameter sampling
-float HyperparameterTuner::sampleFloatParameter(const ParameterDefinition& param) const {
+float HyperparameterTuner::sampleFloatParameter(const ParameterDefinition& param) {
     if (param.type == ParameterType::LOG_SCALE) {
         float log_min = std::log(param.float_range[0]) / std::log(param.log_base);
         float log_max = std::log(param.float_range[1]) / std::log(param.log_base);
@@ -72,12 +72,12 @@ float HyperparameterTuner::sampleFloatParameter(const ParameterDefinition& param
     }
 }
 
-int HyperparameterTuner::sampleIntParameter(const ParameterDefinition& param) const {
+int HyperparameterTuner::sampleIntParameter(const ParameterDefinition& param) {
     std::uniform_int_distribution<int> dist(param.int_range[0], param.int_range[1]);
     return dist(rng_);
 }
 
-std::string HyperparameterTuner::sampleCategoricalParameter(const ParameterDefinition& param) const {
+std::string HyperparameterTuner::sampleCategoricalParameter(const ParameterDefinition& param) {
     std::uniform_int_distribution<size_t> dist(0, param.categories.size() - 1);
     return param.categories[dist(rng_)];
 }

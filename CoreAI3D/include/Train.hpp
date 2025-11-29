@@ -16,6 +16,20 @@ class CoreAI;
 class Database;
 class VisionModule;
 
+// Checkpoint configuration structure
+struct CheckpointConfig {
+    int checkpointFrequencyEpochs = 10;        // Save checkpoint every N epochs
+    bool bestModelTrackingEnabled = true;      // Enable best model tracking
+    int bestModelPatienceEpochs = 5;           // Patience for no improvement before saving best model
+    float bestModelMinImprovement = 0.001f;    // Minimum improvement threshold for best model
+    std::string checkpointDirectory = "checkpoints"; // Directory for checkpoints
+    std::string checkpointPrefix = "checkpoint";     // Prefix for checkpoint files
+    std::string bestModelPrefix = "best_model";      // Prefix for best model files
+    int maxCheckpointsToKeep = 5;              // Maximum number of checkpoints to keep
+    bool saveOptimizerState = true;            // Save optimizer state in checkpoints
+    bool saveTrainingMetadata = true;          // Save training metadata
+};
+
 class Training {
 public:
     // Constructor for online mode (with database) - only if USE_MYSQL is defined
@@ -47,13 +61,14 @@ public:
     void normalize(float minRange, float maxRange);
     int getMinInputColumns() const;
     void preprocess(float minRange, float maxRange);
-    void train(double learningRate, int epochs); // Changed samples to epochs
+    void train(double learningRate, int epochs, int batchSize = 32); // Changed samples to epochs, added batch size
 
     int numSamples; // Renamed from 'samples' for clarity
     int inputSize; // Will be set dynamically after loading data
     int outputSize; // Will be set dynamically after loading data
     int layers;
     int neurons;
+    int batchSize; // Batch size for training
     double learningRate;
     float min, max;
 
@@ -64,6 +79,19 @@ public:
     float calculateMSE();
     float calculateAccuracy(float threshold = 0.1f);
     const std::vector<std::vector<float>>& getTargets() const { return targets; }
+    const std::vector<std::vector<float>>& getInputs() const { return inputs; }
+    // K-fold cross-validation structure
+    struct CrossValidationResults {
+        float avgRMSE;
+        float avgMSE;
+        float avgAccuracy;
+        std::vector<float> foldRMSEs;
+        std::vector<float> foldMSEs;
+        std::vector<float> foldAccuracies;
+    };
+
+    // K-fold cross-validation method
+    CrossValidationResults performKFoldCrossValidation(int k = 5, double learningRate = 0.01, int epochs = 100);
 
     CoreAI* getCore();
     Language* getLanguage();
@@ -79,6 +107,10 @@ public:
     void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);
     float original_data_global_min;                 // Stores global min from original data for denorm
     float original_data_global_max;                 // Stores global max from original data for denorm
+    float original_input_global_min;                // Stores input min for separate scaling
+    float original_input_global_max;                // Stores input max for separate scaling
+    float original_target_global_min;               // Stores target min for separate scaling
+    float original_target_global_max;               // Stores target max for separate scaling
 
 
     // New method to save results to CSV
@@ -91,6 +123,18 @@ public:
     std::string getTrainingStatus() const;
     bool stopTraining();
     void resetTrainingState();
+    // Checkpointing methods
+    void configureCheckpointing(const CheckpointConfig& config);
+    void enableCheckpointing(bool enable);
+    bool saveCheckpoint(int epoch, float loss);
+    bool saveBestModel(float currentLoss);
+    bool loadCheckpoint(const std::string& checkpointPath);
+    std::string getCheckpointFilename(int epoch) const;
+    std::string getBestModelFilename() const;
+    void initializeCheckpointing();
+
+    // Utility methods
+    std::string getTimestampString() const;
 
     // Data augmentation methods
     void initializeDataAugmentation(const DataAugmentation::AugmentationConfig& config = DataAugmentation::AugmentationConfig());
@@ -128,6 +172,15 @@ public:
     int totalEpochs;
     float currentLoss;
     std::chrono::steady_clock::time_point trainingStartTime;
+    // Checkpointing configuration and state
+    CheckpointConfig checkpointConfig;
+    bool checkpointingEnabled;
+
+    // Checkpointing state variables
+    float bestValidationLoss;
+    int epochsSinceBestModel;
+    int lastCheckpointEpoch;
+    std::vector<std::string> checkpointFiles;
 
  public:
     // Database manager - only if USE_MYSQL is defined
@@ -260,10 +313,7 @@ public:
     void setRegularizationForTuning(float l2_lambda, float dropout_rate);
     float evaluateForTuning(int max_epochs = 10); // Quick evaluation for hyperparameter tuning
 
-};
+    // Utility methods
     std::string formatValueForDisplay(float value, int customPrecision) const;
     static std::vector<std::string> parseCSVLine(const std::string& line, char delimiter);
-
-    // NEW: Helper method to denormalize a matrix
-
 };

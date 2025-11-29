@@ -11,11 +11,12 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
     dataAugmentation(std::make_unique<DataAugmentation>()),
     isOfflineMode(false), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
-    layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    layers(0), neurons(0), batchSize(32), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
     webSocketServer(wsServer), // Initialize WebSocket server
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking
+    checkpointingEnabled(false), bestValidationLoss(std::numeric_limits<float>::max()), epochsSinceBestModel(0), lastCheckpointEpoch(0),
     gen(std::random_device{}()) // Initialize random number generator
 {
     // Parameter validation
@@ -33,10 +34,13 @@ Training::Training(bool isOffline, bool verbose, WebSocketServer* wsServer)
     : dataAugmentation(std::make_unique<DataAugmentation>()),
     isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
-    layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    original_input_global_min(std::numeric_limits<float>::max()), original_input_global_max(std::numeric_limits<float>::lowest()), // Initialize
+    original_target_global_min(std::numeric_limits<float>::max()), original_target_global_max(std::numeric_limits<float>::lowest()), // Initialize
+    layers(0), neurons(0), batchSize(32), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
     webSocketServer(wsServer), // Initialize WebSocket server
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
+    checkpointingEnabled(false), bestValidationLoss(std::numeric_limits<float>::max()), epochsSinceBestModel(0), lastCheckpointEpoch(0),
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking
     gen(std::random_device{}()) // Initialize random number generator
 {
@@ -892,46 +896,53 @@ void Training::normalize(float minRange, float maxRange) {
         throw std::invalid_argument("Training::normalize: minRange must be less than maxRange");
     }
 
-    float tempGlobalMin = std::numeric_limits<float>::max();
-    float tempGlobalMax = std::numeric_limits<float>::lowest();
-
-    bool data_found_for_scaling = false;
+    // Calculate separate min/max for inputs
+    float inputMin = std::numeric_limits<float>::max();
+    float inputMax = std::numeric_limits<float>::lowest();
+    bool inputDataFound = false;
 
     for (const auto& row : inputs) {
         for (float val : row) {
             if (!std::isnan(val) && !std::isinf(val)) {
-                tempGlobalMin = std::min(tempGlobalMin, val);
-                tempGlobalMax = std::max(tempGlobalMax, val);
-                data_found_for_scaling = true;
+                inputMin = std::min(inputMin, val);
+                inputMax = std::max(inputMax, val);
+                inputDataFound = true;
             }
         }
     }
+
+    // Calculate separate min/max for targets
+    float targetMin = std::numeric_limits<float>::max();
+    float targetMax = std::numeric_limits<float>::lowest();
+    bool targetDataFound = false;
 
     for (const auto& row : targets) {
         for (float val : row) {
             if (!std::isnan(val) && !std::isinf(val)) {
-                tempGlobalMin = std::min(tempGlobalMin, val);
-                tempGlobalMax = std::max(tempGlobalMax, val);
-                data_found_for_scaling = true;
+                targetMin = std::min(targetMin, val);
+                targetMax = std::max(targetMax, val);
+                targetDataFound = true;
             }
         }
     }
 
-    this->original_data_global_min = tempGlobalMin;
-    this->original_data_global_max = tempGlobalMax;
+    // Store original min/max values
+    this->original_input_global_min = inputMin;
+    this->original_input_global_max = inputMax;
+    this->original_target_global_min = targetMin;
+    this->original_target_global_max = targetMax;
 
     // DEBUG: Log normalization parameters
     if (verbose) {
-        std::cout << "[DEBUG NORMALIZE] original_data_global_min: " << this->original_data_global_min
-                  << ", original_data_global_max: " << this->original_data_global_max
-                  << ", range: " << (this->original_data_global_max - this->original_data_global_min)
-                  << ", data_found_for_scaling: " << data_found_for_scaling << std::endl;
+        std::cout << "[DEBUG NORMALIZE] Input range: [" << inputMin << ", " << inputMax << "]" << std::endl;
+        std::cout << "[DEBUG NORMALIZE] Target range: [" << targetMin << ", " << targetMax << "]" << std::endl;
+        std::cout << "[DEBUG NORMALIZE] Target range: [" << minRange << ", " << maxRange << "]" << std::endl;
     }
 
-    if (!data_found_for_scaling || std::abs(tempGlobalMax - tempGlobalMin) < std::numeric_limits<float>::epsilon()) {
+    // Handle edge cases for inputs
+    if (!inputDataFound || std::abs(inputMax - inputMin) < std::numeric_limits<float>::epsilon()) {
         if (verbose) {
-            std::cerr << "[DEBUG NORMALIZE] CRITICAL: Data range is zero or no valid data found. This will cause zero predictions!" << std::endl;
-            std::cerr << "Warning: Data is constant or contains only NaN/Inf. Mapping all values to target range based on NaN/Inf rules." << std::endl;
+            std::cerr << "[DEBUG NORMALIZE] WARNING: Input data range is zero or no valid input data found." << std::endl;
         }
         for (auto& row : inputs) {
             for (float& val : row) {
@@ -946,6 +957,31 @@ void Training::normalize(float minRange, float maxRange) {
                 }
             }
         }
+    } else {
+        // Scale inputs to [minRange, maxRange]
+        float inputRangeDiff = inputMax - inputMin;
+        float targetRangeDiff = maxRange - minRange;
+
+        for (auto& row : inputs) {
+            for (float& val : row) {
+                if (std::isinf(val)) {
+                    val = maxRange;
+                }
+                else if (std::isnan(val)) {
+                    val = minRange;
+                }
+                else {
+                    val = minRange + ((val - inputMin) * targetRangeDiff) / inputRangeDiff;
+                }
+            }
+        }
+    }
+
+    // Handle edge cases for targets
+    if (!targetDataFound || std::abs(targetMax - targetMin) < std::numeric_limits<float>::epsilon()) {
+        if (verbose) {
+            std::cerr << "[DEBUG NORMALIZE] WARNING: Target data range is zero or no valid target data found." << std::endl;
+        }
         for (auto& row : targets) {
             for (float& val : row) {
                 if (std::isinf(val)) {
@@ -959,74 +995,27 @@ void Training::normalize(float minRange, float maxRange) {
                 }
             }
         }
-        return;
-    }
+    } else {
+        // Scale targets to [minRange, maxRange]
+        float targetRangeDiff = maxRange - minRange;
 
-    const int barWidth = 70;
-    long long current_sample = 0;
-    long long total_samples = inputs.size();
-
-    if (verbose) {
-        std::cout << "\nNormalizing Data...\n";
-    }
-    float dataRangeDiff = tempGlobalMax - tempGlobalMin;
-    float targetRangeDiff = maxRange - minRange;
-
-    // DEBUG: Log normalization formula parameters
-    if (verbose) {
-        std::cout << "[DEBUG NORMALIZE] dataRangeDiff: " << dataRangeDiff
-                  << ", targetRangeDiff: " << targetRangeDiff
-                  << ", minRange: " << minRange << ", maxRange: " << maxRange << std::endl;
-    }
-
-    for (size_t i = 0; i < inputs.size(); ++i) { // Use size_t
-        for (size_t j = 0; j < inputs[i].size(); ++j) { // Use size_t
-            float val = inputs[i][j];
-            float original_val = val;
-            if (std::isinf(val)) {
-                inputs[i][j] = maxRange;
-            }
-            else if (std::isnan(val)) {
-                inputs[i][j] = minRange;
-            }
-            else {
-                inputs[i][j] = minRange + ((val - tempGlobalMin) * targetRangeDiff) / dataRangeDiff;
-            }
-            // DEBUG: Log first few normalizations
-            if (verbose && i < 3 && j < 3) {
-                std::cout << "[DEBUG NORMALIZE] input[" << i << "][" << j << "] "
-                          << original_val << " -> " << inputs[i][j] << std::endl;
-            }
-        }
-
-        if (i < targets.size()) {
-            for (size_t j = 0; j < targets[i].size(); ++j) { // Use size_t
-                float val = targets[i][j];
-                float original_val = val;
+        for (auto& row : targets) {
+            for (float& val : row) {
                 if (std::isinf(val)) {
-                    targets[i][j] = maxRange;
+                    val = maxRange;
                 }
                 else if (std::isnan(val)) {
-                    targets[i][j] = minRange;
+                    val = minRange;
                 }
                 else {
-                    targets[i][j] = minRange + ((val - tempGlobalMin) * targetRangeDiff) / dataRangeDiff;
-                }
-                // DEBUG: Log first few target normalizations
-                if (verbose && i < 3 && j < 3) {
-                    std::cout << "[DEBUG NORMALIZE] target[" << i << "][" << j << "] "
-                              << original_val << " -> " << targets[i][j] << std::endl;
+                    val = minRange + ((val - targetMin) * targetRangeDiff) / (targetMax - targetMin);
                 }
             }
         }
-        current_sample++;
-        printProgressBar("Normalizing Data", current_sample, total_samples, barWidth);
     }
-    if (total_samples > 0) {
-        printProgressBar("Normalizing Data", total_samples, total_samples, barWidth);
-    }
+
     if (verbose) {
-        std::cout << "\nData Normalized!\n";
+        std::cout << "Data Normalized!\n";
     }
 }
 
@@ -1076,7 +1065,7 @@ void Training::preprocess(float minVal, float maxVal) {
     core->setTarget(targets);
 }
 
-void Training::train(double learningRate, int epochs) {
+void Training::train(double learningRate, int epochs, int batchSize) {
     if (!core) {
         std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
         return;
@@ -1110,11 +1099,11 @@ void Training::train(double learningRate, int epochs) {
     for (int i = 0; i < epochs; ++i) {
         printProgressBar("Training Progress", i + 1, epochs, barWidth);
         core->forward(inputs);
-        core->train(inputs, targets, learningRate, numSamples);
+        core->train(inputs, targets, learningRate, numSamples, batchSize);
 
         // Calculate current loss for convergence monitoring
         float current_loss = calculateMSE();
-        
+
         // DEBUG: Check for exactly 0.0 loss (likely numerical issue)
         if (current_loss == 0.0f && verbose) {
             std::cout << "\n[WARNING] Loss is exactly 0.0 at epoch " << (i + 1) << std::endl;
@@ -1123,7 +1112,7 @@ void Training::train(double learningRate, int epochs) {
             std::cout << "    - Predictions collapsed to constant value" << std::endl;
             std::cout << "    - Check Core.cpp transform functions for NaN/Inf" << std::endl;
         }
-        
+
         // Track best loss
         if (current_loss < best_loss) {
             best_loss = current_loss;
@@ -1131,7 +1120,17 @@ void Training::train(double learningRate, int epochs) {
         } else {
             epochs_since_best++;
         }
-        
+
+        // Checkpointing: Save checkpoint at regular intervals
+        if (checkpointingEnabled && (i + 1) % checkpointConfig.checkpointFrequencyEpochs == 0) {
+            saveCheckpoint(i + 1, current_loss);
+        }
+
+        // Checkpointing: Save best model if enabled
+        if (checkpointingEnabled) {
+            saveBestModel(current_loss);
+        }
+
         // Verbose logging every 10 epochs
         if (verbose && i % 10 == 0) {
             std::cout << "\nEpoch " << (i + 1) << "/" << epochs
@@ -1226,11 +1225,11 @@ bool Training::startTraining(double learningRate, int epochs) {
                 // Update progress bar with current epoch
                 printProgressBar("Training Progress", i + 1, epochs, barWidth);
                 core->forward(inputs);
-                core->train(inputs, targets, learningRate, numSamples);
+                core->train(inputs, targets, learningRate, numSamples, batchSize);
 
                 // Calculate current loss
                 currentLoss = calculateMSE();
-                
+
                 // DEBUG: Check for exactly 0.0 loss (likely numerical issue)
                 if (currentLoss == 0.0f && verbose) {
                     std::cout << "\n[WARNING] Loss is exactly 0.0 at epoch " << (i + 1) << std::endl;
@@ -1239,13 +1238,23 @@ bool Training::startTraining(double learningRate, int epochs) {
                     std::cout << "    - Predictions collapsed to constant value" << std::endl;
                     std::cout << "    - Check Core.cpp transform functions for NaN/Inf" << std::endl;
                 }
-                
+
                 // Track best loss
                 if (currentLoss < best_loss) {
                     best_loss = currentLoss;
                     epochs_since_best = 0;
                 } else {
                     epochs_since_best++;
+                }
+
+                // Checkpointing: Save checkpoint at regular intervals
+                if (checkpointingEnabled && (i + 1) % checkpointConfig.checkpointFrequencyEpochs == 0) {
+                    saveCheckpoint(i + 1, currentLoss);
+                }
+
+                // Checkpointing: Save best model if enabled
+                if (checkpointingEnabled) {
+                    saveBestModel(currentLoss);
                 }
 
                 // Broadcast progress via WebSocket
@@ -1260,7 +1269,7 @@ bool Training::startTraining(double learningRate, int epochs) {
                     };
                     webSocketServer->broadcastToGroup("training", progressUpdate.dump());
                 }
-                
+
                 // Verbose logging every 10 epochs
                 if (verbose && i % 10 == 0) {
                     std::cout << "\nEpoch " << (i + 1) << "/" << epochs
@@ -4754,5 +4763,297 @@ float Training::evaluateForTuning(int max_epochs) {
 
     // Return the final loss as the score (lower is better)
     return calculateMSE();
+
 }
+
+// Checkpointing implementation
+void Training::configureCheckpointing(const CheckpointConfig& config) {
+    checkpointConfig = config;
+    checkpointingEnabled = true;
+    initializeCheckpointing();
+}
+
+void Training::enableCheckpointing(bool enable) {
+    checkpointingEnabled = enable;
+    if (enable) {
+        initializeCheckpointing();
+    }
+}
+
+void Training::initializeCheckpointing() {
+    if (!checkpointingEnabled) return;
+
+    // Create checkpoint directory if it doesn't exist
+    try {
+        std::filesystem::create_directories(checkpointConfig.checkpointDirectory);
+        if (verbose) {
+            std::cout << "Checkpoint directory initialized: " << checkpointConfig.checkpointDirectory << std::endl;
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error creating checkpoint directory: " << e.what() << std::endl;
+        checkpointingEnabled = false;
+        return;
+    }
+
+    // Initialize state
+    bestValidationLoss = std::numeric_limits<float>::max();
+    epochsSinceBestModel = 0;
+    lastCheckpointEpoch = 0;
+    checkpointFiles.clear();
+}
+
+bool Training::saveCheckpoint(int epoch, float loss) {
+    if (!checkpointingEnabled || !core) {
+        return false;
+    }
+
+    try {
+        // Create checkpoint filename
+        std::string filename = getCheckpointFilename(epoch);
+        std::string filepath = checkpointConfig.checkpointDirectory + "/" + filename;
+
+        // Create checkpoint data
+        nlohmann::json checkpointData;
+        checkpointData["epoch"] = epoch;
+        checkpointData["loss"] = loss;
+        checkpointData["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+        checkpointData["inputSize"] = inputSize;
+        checkpointData["outputSize"] = outputSize;
+        checkpointData["layers"] = layers;
+        checkpointData["neurons"] = neurons;
+        checkpointData["learningRate"] = learningRate;
+        checkpointData["min"] = min;
+        checkpointData["max"] = max;
+
+        // Save model weights
+        checkpointData["weights"] = {
+            {"input_hidden", core->getWeightsHiddenInput()},
+            {"hidden_output", core->getWeightsOutputHidden()}
+        };
+
+        // Save training metadata if enabled
+        if (checkpointConfig.saveTrainingMetadata) {
+            checkpointData["training_metadata"] = {
+                {"current_epoch", currentEpoch},
+                {"total_epochs", totalEpochs},
+                {"current_loss", currentLoss},
+                {"best_loss", bestValidationLoss},
+                {"epochs_since_best", epochsSinceBestModel}
+            };
+        }
+
+        // Save to file
+        std::ofstream file(filepath);
+        if (!file.is_open()) {
+            std::cerr << "Error opening checkpoint file for writing: " << filepath << std::endl;
+            return false;
+        }
+        file << checkpointData.dump(4);
+        file.close();
+
+        // Track checkpoint files for cleanup
+        checkpointFiles.push_back(filename);
+
+        // Clean up old checkpoints if we have too many
+        if (checkpointFiles.size() > static_cast<size_t>(checkpointConfig.maxCheckpointsToKeep)) {
+            std::string oldestFile = checkpointFiles.front();
+            checkpointFiles.erase(checkpointFiles.begin());
+
+            std::string oldestPath = checkpointConfig.checkpointDirectory + "/" + oldestFile;
+            try {
+                std::filesystem::remove(oldestPath);
+                if (verbose) {
+                    std::cout << "Removed old checkpoint: " << oldestFile << std::endl;
+                }
+            } catch (const std::filesystem::filesystem_error& e) {
+                std::cerr << "Warning: Could not remove old checkpoint file: " << e.what() << std::endl;
+            }
+        }
+
+        lastCheckpointEpoch = epoch;
+
+        if (verbose) {
+            std::cout << "Checkpoint saved: " << filename << " (epoch " << epoch << ", loss: " << loss << ")" << std::endl;
+        }
+
+        // Send WebSocket update if available
+        if (webSocketServer) {
+            nlohmann::json wsUpdate = {
+                {"type", "checkpoint_saved"},
+                {"epoch", epoch},
+                {"loss", loss},
+                {"filename", filename},
+                {"timestamp", getTimestampString()}
+            };
+            webSocketServer->broadcastToGroup("training", wsUpdate.dump());
+        }
+
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error saving checkpoint: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool Training::saveBestModel(float currentLoss) {
+    if (!checkpointingEnabled || !checkpointConfig.bestModelTrackingEnabled || !core) {
+        return false;
+    }
+
+    // Check if this is the best model
+    bool isBestModel = false;
+    if (currentLoss < bestValidationLoss - checkpointConfig.bestModelMinImprovement) {
+        isBestModel = true;
+        bestValidationLoss = currentLoss;
+        epochsSinceBestModel = 0;
+    } else {
+        epochsSinceBestModel++;
+    }
+
+    // Save best model if it's the best or if patience is exceeded
+    if (isBestModel || epochsSinceBestModel >= checkpointConfig.bestModelPatienceEpochs) {
+        try {
+            std::string filename = getBestModelFilename();
+            std::string filepath = checkpointConfig.checkpointDirectory + "/" + filename;
+
+            // Create best model data
+            nlohmann::json bestModelData;
+            bestModelData["epoch"] = currentEpoch;
+            bestModelData["loss"] = currentLoss;
+            bestModelData["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+            bestModelData["inputSize"] = inputSize;
+            bestModelData["outputSize"] = outputSize;
+            bestModelData["layers"] = layers;
+            bestModelData["neurons"] = neurons;
+            bestModelData["learningRate"] = learningRate;
+            bestModelData["min"] = min;
+            bestModelData["max"] = max;
+
+            // Save model weights
+            bestModelData["weights"] = {
+                {"input_hidden", core->getWeightsHiddenInput()},
+                {"hidden_output", core->getWeightsOutputHidden()}
+            };
+
+            // Save training metadata
+            bestModelData["training_metadata"] = {
+                {"current_epoch", currentEpoch},
+                {"total_epochs", totalEpochs},
+                {"current_loss", currentLoss},
+                {"best_loss", bestValidationLoss},
+                {"epochs_since_best", epochsSinceBestModel}
+            };
+
+            // Save to file
+            std::ofstream file(filepath);
+            if (!file.is_open()) {
+                std::cerr << "Error opening best model file for writing: " << filepath << std::endl;
+                return false;
+            }
+            file << bestModelData.dump(4);
+            file.close();
+
+            if (verbose) {
+                std::cout << "Best model saved: " << filename << " (loss: " << currentLoss << ")" << std::endl;
+            }
+
+            // Send WebSocket update if available
+            if (webSocketServer) {
+                nlohmann::json wsUpdate = {
+                    {"type", "best_model_saved"},
+                    {"loss", currentLoss},
+                    {"filename", filename},
+                    {"timestamp", getTimestampString()}
+                };
+                webSocketServer->broadcastToGroup("training", wsUpdate.dump());
+            }
+
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Error saving best model: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    return false;
+}
+
+bool Training::loadCheckpoint(const std::string& checkpointPath) {
+    try {
+        std::ifstream file(checkpointPath);
+        if (!file.is_open()) {
+            std::cerr << "Error opening checkpoint file for reading: " << checkpointPath << std::endl;
+            return false;
+        }
+
+        nlohmann::json checkpointData;
+        file >> checkpointData;
+        file.close();
+
+        // Extract model parameters
+        int loadedInputSize = checkpointData.value("inputSize", 0);
+        int loadedOutputSize = checkpointData.value("outputSize", 0);
+        int loadedLayers = checkpointData.value("layers", 0);
+        int loadedNeurons = checkpointData.value("neurons", 0);
+        double loadedLearningRate = checkpointData.value("learningRate", 0.01);
+        float loadedMin = checkpointData.value("min", 0.0f);
+        float loadedMax = checkpointData.value("max", 1.0f);
+
+        // Reinitialize core with loaded parameters
+        core = std::make_unique<CoreAI>(loadedInputSize, loadedLayers, loadedNeurons, loadedOutputSize, loadedMin, loadedMax, verbose);
+        core->trainer = this;
+
+        // Load weights
+        if (checkpointData.contains("weights")) {
+            auto weights = checkpointData["weights"];
+            if (weights.contains("input_hidden")) {
+                core->setWeightsHiddenInput(weights["input_hidden"]);
+            }
+            if (weights.contains("hidden_output")) {
+                core->setWeightsOutputHidden(weights["hidden_output"]);
+            }
+        }
+
+        // Update training state
+        currentEpoch = checkpointData.value("epoch", 0);
+        currentLoss = checkpointData.value("loss", 0.0f);
+        learningRate = loadedLearningRate;
+        inputSize = loadedInputSize;
+        outputSize = loadedOutputSize;
+        layers = loadedLayers;
+        neurons = loadedNeurons;
+        min = loadedMin;
+        max = loadedMax;
+
+        if (verbose) {
+            std::cout << "Checkpoint loaded from: " << checkpointPath << " (epoch " << currentEpoch << ")" << std::endl;
+        }
+
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error loading checkpoint: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+std::string Training::getCheckpointFilename(int epoch) const {
+    std::stringstream ss;
+    ss << checkpointConfig.checkpointPrefix << "_epoch_" << epoch << ".json";
+    return ss.str();
+}
+
+std::string Training::getBestModelFilename() const {
+    std::stringstream ss;
+    ss << checkpointConfig.bestModelPrefix << ".json";
+    return ss.str();
+}
+
+std::string Training::getTimestampString() const {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
 

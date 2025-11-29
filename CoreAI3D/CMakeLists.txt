@@ -192,7 +192,8 @@ set(SOURCE_FILES
     src/Gemini.cpp
     src/Optimizer.cpp
     src/LearningRateScheduler.cpp
-    src/HyperparameterTuner.cpp
+    src/DataAugmentation.cpp
+    # src/HyperparameterTuner.cpp
 )
 
 # Add Linux-specific modules only on Linux
@@ -394,7 +395,7 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
 
 # Add post-build automation script (disabled for now due to path issues)
 add_custom_command(TARGET CoreAI3D POST_BUILD
-    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${PROJECT_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
+    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py --source-dir ${CMAKE_SOURCE_DIR} --build-dir ${CMAKE_BINARY_DIR} --target-executable $<TARGET_FILE:CoreAI3D>
     COMMENT "Running post-build automation script"
     VERBATIM
 )

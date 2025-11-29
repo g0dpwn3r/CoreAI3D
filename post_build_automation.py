@@ -235,10 +235,12 @@ def perform_git_operations(branch, remotes):
                 logging.warning(f"Continuing with other operations despite push failure to {remote}")
 
         logging.info("Git operations completed successfully")
-    except subprocess.CalledProcessError as e:
+
+    except Exception as e:
         logging.error(f"Git operation failed: {e}")
         # Don't raise exception to avoid failing the build
         logging.warning("Git operations failed, but build will continue")
+
 
 def main():
     parser = argparse.ArgumentParser(description='Post-build automation script')

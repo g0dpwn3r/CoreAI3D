@@ -3,12 +3,24 @@
 
 #include "CoreAI3DCommon.hpp"
 #include <memory>
+#include <thread>
+#include <future>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 #include "Train.hpp"
 #include "Language.hpp"
 #include "Database.hpp"
 #include "Optimizer.hpp"
 #include "LearningRateScheduler.hpp"
+
+// Calculus-based activation configuration
+struct CalculusConfig {
+    int N = 10;      // Number of integration points
+    float SM = 1.0f; // Simpson's method multiplier
+    float a = 1.0f;  // Alpha scaling parameter
+};
 
 // Activation function types
 enum class ActivationType {
@@ -19,7 +31,10 @@ enum class ActivationType {
     SWISH,      // Swish activation
     GELU,       // Gaussian Error Linear Unit
     SPATIAL_ELU, // Spatial-aware ELU for coordinate data
-    SPATIAL_LEAKY_RELU // Spatial-aware Leaky ReLU for coordinate data
+    SPATIAL_LEAKY_RELU, // Spatial-aware Leaky ReLU for coordinate data
+    INTEGRAL_SIGMOID,   // Calculus-based: integral of sigmoid
+    INTEGRAL_RELU,      // Calculus-based: integral of ReLU
+    INTEGRAL_TANH       // Calculus-based: integral of tanh
 };
 
 // Activation configuration structure
@@ -28,6 +43,7 @@ struct ActivationConfig {
     float alpha = 1.0f;  // For ELU, Leaky ReLU
     float beta = 0.1f;   // For Parametric ReLU
     float spatial_weight = 1.0f; // For spatial activations
+    CalculusConfig calculus_config; // For calculus-based activations
 };
 
 
@@ -43,10 +59,7 @@ private:
     float epsilon = std::numeric_limits<float>::epsilon();
     double e = std::exp(1.0);
     double defaultLearningRate = 0.001; // Default learning rate for stable convergence
-    // Member variables for the transform functions (added for compilation)
-    float x;
-    float y;
-    float z;
+   
     // Advanced 3D transform parameters
     bool enable_polynomial;
     bool enable_trigonometric;
@@ -134,7 +147,11 @@ public:
 
     float minVal;
     float maxVal;
-
+    
+     // Member variables for the transform functions (added for compilation)
+    float x;
+    float y;
+    float z;
     // Methods to get internal state for saving
 
     std::vector<std::vector<float>>& getInput();
@@ -175,7 +192,63 @@ public:
     std::vector<std::vector<float>> dropout_masks;
 
     // Activation function configurations per layer
-    std::vector<ActivationConfig> layer_activations; // One config per layer (including output)
+    std::vector<ActivationConfig> layer_activation_configs; // One config per layer (including output)
+
+    // Thread pool for parallel batch processing
+    class ThreadPool {
+    private:
+        std::vector<std::thread> workers;
+        std::queue<std::function<void()>> tasks;
+        std::mutex queue_mutex;
+        std::condition_variable condition;
+        bool stop;
+
+    public:
+        ThreadPool(size_t threads) : stop(false) {
+            for(size_t i = 0; i < threads; ++i) {
+                workers.emplace_back([this] {
+                    for(;;) {
+                        std::function<void()> task;
+                        {
+                            std::unique_lock<std::mutex> lock(this->queue_mutex);
+                            this->condition.wait(lock, [this]{ return this->stop || !this->tasks.empty(); });
+                            if(this->stop && this->tasks.empty()) return;
+                            task = std::move(this->tasks.front());
+                            this->tasks.pop();
+                        }
+                        task();
+                    }
+                });
+            }
+        }
+
+        template<class F, class... Args>
+        auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+            using return_type = typename std::result_of<F(Args...)>::type;
+            auto task = std::make_shared<std::packaged_task<return_type()>>(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+            std::future<return_type> res = task->get_future();
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex);
+                if(stop) throw std::runtime_error("enqueue on stopped ThreadPool");
+                tasks.emplace([task](){ (*task)(); });
+            }
+            condition.notify_one();
+            return res;
+        }
+
+        ~ThreadPool() {
+            {
+                std::unique_lock<std::mutex> lock(queue_mutex);
+                stop = true;
+            }
+            condition.notify_all();
+            for(std::thread &worker: workers) {
+                worker.join();
+            }
+        }
+    };
+
+    std::unique_ptr<ThreadPool> threadPool;
 
     // Methods to set internal state for loading
     void setInput(const std::vector<std::vector<float> >& data);
@@ -202,12 +275,38 @@ public:
         forward(const std::vector<std::vector<float> >& inputData, bool training = false);
     void train(const std::vector<std::vector<float> >& inputData,
         const std::vector<std::vector<float> >& targetData,
-        double learningRate, int& numSamples);
+        double learningRate, int& numSamples, int batchSize = 32);
     void normalizeInput(float min_val, float max_val);
     void normalizeOutput(float min_val,
         float max_val); // This is likely normalizing targets
     void denormalizeOutput();
+    // Activation functions
     float sigmoid(float x);
+    float elu(float x, float alpha);
+    float elu_derivative(float x, float alpha);
+    float leaky_relu(float x, float alpha);
+    float leaky_relu_derivative(float x, float alpha);
+    float parametric_relu(float x, float beta);
+    float parametric_relu_derivative(float x, float beta);
+    float swish(float x);
+    float swish_derivative(float x);
+    float gelu(float x);
+    float gelu_derivative(float x);
+    float spatial_elu(float x, float distance, float alpha, float spatial_weight);
+    float spatial_elu_derivative(float x, float distance, float alpha, float spatial_weight);
+    float spatial_leaky_relu(float x, float distance, float alpha, float spatial_weight);
+    float spatial_leaky_relu_derivative(float x, float distance, float alpha, float spatial_weight);
+    // Calculus-based activation functions
+    float integral_sigmoid(float x, const CalculusConfig& config);
+    float integral_sigmoid_derivative(float x, const CalculusConfig& config);
+    float integral_relu(float x, const CalculusConfig& config);
+    float integral_relu_derivative(float x, const CalculusConfig& config);
+    float integral_tanh(float x, const CalculusConfig& config);
+    float integral_tanh_derivative(float x, const CalculusConfig& config);
+    // Numerical integration helper
+    float simpsons_rule(float a, float b, int n, std::function<float(float)> f);
+    float activate(float x, const ActivationConfig& config, float distance);
+    float activate_derivative(float x, const ActivationConfig& config, float distance);
 
     // Optimizer and scheduler configuration
     void setOptimizer(const std::string& optimizerType, float learningRate,
@@ -230,8 +329,13 @@ public:
     void configureAttention(bool enable, float temperature = 1.0f, float weight = 1.0f);
     void setLayerNeurons(int layer_index, int neurons);
     // Activation function configuration
-    void setLayerActivation(int layer_index, ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f);
-    void setAllLayerActivations(ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f);
+    void setLayerActivation(int layer_index, ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f,
+                           int calculus_N = 10, float calculus_SM = 1.0f, float calculus_a = 1.0f);
+    void setAllLayerActivations(ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f,
+                               int calculus_N = 10, float calculus_SM = 1.0f, float calculus_a = 1.0f);
+    // Multi-layer weight initialization
+    void initializeMultiLayerWeights();
+    void initializeAttentionWeights();
 };
 
 #endif // CORE_HPP

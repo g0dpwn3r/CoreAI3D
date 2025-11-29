@@ -27,6 +27,7 @@ public:
                        int inputSize = 1,
                        int outputSize = 1,
                        int numSamples = 0,
+                       int batchSize = 32,
                        double learningRate = 0.01,
                        int epochs = 10,
                        const std::string& embeddingFile = "embedding.txt",
@@ -43,29 +44,29 @@ public:
                        const std::string& dbSchema = "");
 
     // Ensemble prediction method
-    bool runEnsemblePrediction(const std::string& inputFile,
-                              const std::string& outputCsvFile,
-                              const std::string& targetFile = "",
-                              int datasetId = -1,
-                              int layers = 3,
-                              int neurons = 10,
-                              float minRange = 0.0f,
-                              float maxRange = 1.0f,
-                              int inputSize = 1,
-                              int outputSize = 1,
-                              int numSamples = 0,
-                              double learningRate = 0.01,
-                              int epochs = 10,
-                              const std::string& datasetName = "online-1a",
-                              bool hasHeader = true,
-                              char delimiter = ',',
-                              EnsembleMethod ensembleMethod = EnsembleMethod::SIMPLE_AVERAGING,
-                              int numEnsembleModels = 5,
-                              const std::string& dbHost = "",
-                              int dbPort = 0,
-                              const std::string& dbUser = "",
-                              const std::string& dbPassword = "",
-                              const std::string& dbSchema = "");
+    // bool runEnsemblePrediction(const std::string& inputFile,
+    //                            const std::string& outputCsvFile,
+    //                            const std::string& targetFile = "",
+    //                            int datasetId = -1,
+    //                            int layers = 3,
+    //                            int neurons = 10,
+    //                            float minRange = 0.0f,
+    //                            float maxRange = 1.0f,
+    //                            int inputSize = 1,
+    //                            int outputSize = 1,
+    //                            int numSamples = 0,
+    //                            double learningRate = 0.01,
+    //                            int epochs = 10,
+    //                            const std::string& datasetName = "online-1a",
+    //                            bool hasHeader = true,
+    //                            char delimiter = ',',
+    //                            EnsembleMethod ensembleMethod = EnsembleMethod::SIMPLE_AVERAGING,
+    //                            int numEnsembleModels = 5,
+    //                            const std::string& dbHost = "",
+    //                            int dbPort = 0,
+    //                            const std::string& dbUser = "",
+    //                            const std::string& dbPassword = "",
+    //                            const std::string& dbSchema = "");
 
     // Get evaluation metrics
     float getRMSE() const { return rmse_; }
@@ -77,7 +78,7 @@ private:
     bool verbose_;
     Training* trainer_;
     WebSocketServer* webSocketServer_;
-    std::unique_ptr<Ensemble> ensemble_;
+    // std::unique_ptr<Ensemble> ensemble_;
 
     // Evaluation results
     float rmse_;
@@ -102,10 +103,14 @@ private:
                   const std::string& datasetName);
     bool loadModel(const std::string& loadModelId, int datasetId);
     bool preprocessData(float minRange, float maxRange);
-    bool trainModel(double learningRate, int epochs);
+    bool trainModel(double learningRate, int epochs, int batchSize);
     bool evaluateModel();
     bool saveResults(const std::string& outputCsvFile,
                      const std::string& inputFile,
                      bool hasHeader,
                      char delimiter);
+    // bool saveEnsembleResults(const std::string& outputCsvFile,
+    //                         const std::string& inputFile,
+    //                         bool hasHeader,
+    //                         char delimiter);
 };

@@ -28,6 +28,7 @@ bool Predict::runPrediction(const std::string& inputFile,
                            int inputSize,
                            int outputSize,
                            int numSamples,
+                           int batchSize,
                            double learningRate,
                            int epochs,
                            const std::string& embeddingFile,
@@ -89,7 +90,7 @@ bool Predict::runPrediction(const std::string& inputFile,
         }
 
         // Train model
-        if (!trainModel(learningRate, epochs)) {
+        if (!trainModel(learningRate, epochs, batchSize)) {
             std::cerr << "[PREDICT] Failed to train model." << std::endl;
             return false;
         }
@@ -281,14 +282,14 @@ bool Predict::preprocessData(float minRange, float maxRange) {
     }
 }
 
-bool Predict::trainModel(double learningRate, int epochs) {
+bool Predict::trainModel(double learningRate, int epochs, int batchSize) {
     if (verbose_) {
         std::cout << "[PREDICT] Starting model training..." << std::endl;
     }
 
     try {
         auto start_time = std::chrono::high_resolution_clock::now();
-        trainer_->train(learningRate, epochs);
+        trainer_->train(learningRate, epochs, batchSize);
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> training_duration = end_time - start_time;
         trainingTime_ = training_duration.count();
@@ -350,170 +351,170 @@ bool Predict::saveResults(const std::string& outputCsvFile,
         return false;
     }
 }
-bool Predict::runEnsemblePrediction(const std::string& inputFile,
-                                   const std::string& outputCsvFile,
-                                   const std::string& targetFile,
-                                   int datasetId,
-                                   int layers,
-                                   int neurons,
-                                   float minRange,
-                                   float maxRange,
-                                   int inputSize,
-                                   int outputSize,
-                                   int numSamples,
-                                   double learningRate,
-                                   int epochs,
-                                   const std::string& datasetName,
-                                   bool hasHeader,
-                                   char delimiter,
-                                   EnsembleMethod ensembleMethod,
-                                   int numEnsembleModels,
-                                   const std::string& dbHost,
-                                   int dbPort,
-                                   const std::string& dbUser,
-                                   const std::string& dbPassword,
-                                   const std::string& dbSchema) {
-    try {
-        if (verbose_) {
-            std::cout << "[ENSEMBLE PREDICT] Starting ensemble prediction process..." << std::endl;
-        }
+// bool Predict::runEnsemblePrediction(const std::string& inputFile,
+//                                    const std::string& outputCsvFile,
+//                                    const std::string& targetFile,
+//                                    int datasetId,
+//                                    int layers,
+//                                    int neurons,
+//                                    float minRange,
+//                                    float maxRange,
+//                                    int inputSize,
+//                                    int outputSize,
+//                                    int numSamples,
+//                                    double learningRate,
+//                                    int epochs,
+//                                    const std::string& datasetName,
+//                                    bool hasHeader,
+//                                    char delimiter,
+//                                    EnsembleMethod ensembleMethod,
+//                                    int numEnsembleModels,
+//                                    const std::string& dbHost,
+//                                    int dbPort,
+//                                    const std::string& dbUser,
+//                                    const std::string& dbPassword,
+//                                    const std::string& dbSchema) {
+//     try {
+//         if (verbose_) {
+//             std::cout << "[ENSEMBLE PREDICT] Starting ensemble prediction process..." << std::endl;
+//         }
 
-        // Initialize trainer (offline mode for ensemble)
-        if (!initializeTrainer(dbHost, dbPort, dbUser, dbPassword, dbSchema, true)) {
-            std::cerr << "[ENSEMBLE PREDICT] Failed to initialize trainer." << std::endl;
-            return false;
-        }
+//         // Initialize trainer (offline mode for ensemble)
+//         if (!initializeTrainer(dbHost, dbPort, dbUser, dbPassword, dbSchema, true)) {
+//             std::cerr << "[ENSEMBLE PREDICT] Failed to initialize trainer." << std::endl;
+//             return false;
+//         }
 
-        // Set training parameters
-        trainer_->layers = layers;
-        trainer_->neurons = neurons;
-        trainer_->min = minRange;
-        trainer_->max = maxRange;
-        trainer_->outputSize = outputSize;
-        trainer_->inputSize = inputSize;
-        trainer_->numSamples = numSamples;
+//         // Set training parameters
+//         trainer_->layers = layers;
+//         trainer_->neurons = neurons;
+//         trainer_->min = minRange;
+//         trainer_->max = maxRange;
+//         trainer_->outputSize = outputSize;
+//         trainer_->inputSize = inputSize;
+//         trainer_->numSamples = numSamples;
 
-        // Load data
-        if (!loadData(inputFile, targetFile, numSamples, outputSize, hasHeader, false, delimiter, datasetName)) {
-            std::cerr << "[ENSEMBLE PREDICT] Failed to load data." << std::endl;
-            return false;
-        }
+//         // Load data
+//         if (!loadData(inputFile, targetFile, numSamples, outputSize, hasHeader, false, delimiter, datasetName)) {
+//             std::cerr << "[ENSEMBLE PREDICT] Failed to load data." << std::endl;
+//             return false;
+//         }
 
-        // Preprocess data
-        if (!preprocessData(minRange, maxRange)) {
-            std::cerr << "[ENSEMBLE PREDICT] Failed to preprocess data." << std::endl;
-            return false;
-        }
+//         // Preprocess data
+//         if (!preprocessData(minRange, maxRange)) {
+//             std::cerr << "[ENSEMBLE PREDICT] Failed to preprocess data." << std::endl;
+//             return false;
+//         }
 
-        // Initialize ensemble
-        EnsembleConfig config;
-        config.method = ensembleMethod;
-        config.numModels = numEnsembleModels;
-        config.verbose = verbose_;
+//         // Initialize ensemble
+//         EnsembleConfig config;
+//         config.method = ensembleMethod;
+//         config.numModels = numEnsembleModels;
+//         config.verbose = verbose_;
 
-        ensemble_ = std::make_unique<Ensemble>(inputSize, outputSize, layers, neurons,
-                                             minRange, maxRange, config);
+//         ensemble_ = std::make_unique<Ensemble>(inputSize, outputSize, layers, neurons,
+//                                              minRange, maxRange, config);
 
-        // Train ensemble
-        auto start_time = std::chrono::high_resolution_clock::now();
-        if (!ensemble_->train(trainer_->getInput(), trainer_->getTargets(), learningRate, epochs)) {
-            std::cerr << "[ENSEMBLE PREDICT] Failed to train ensemble." << std::endl;
-            return false;
-        }
-        auto end_time = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> training_duration = end_time - start_time;
-        trainingTime_ = training_duration.count();
+//         // Train ensemble
+//         auto start_time = std::chrono::high_resolution_clock::now();
+//         if (!ensemble_->train(trainer_->getInputs(), trainer_->getTargets(), learningRate, epochs)) {
+//             std::cerr << "[ENSEMBLE PREDICT] Failed to train ensemble." << std::endl;
+//             return false;
+//         }
+//         auto end_time = std::chrono::high_resolution_clock::now();
+//         std::chrono::duration<double> training_duration = end_time - start_time;
+//         trainingTime_ = training_duration.count();
 
-        // Evaluate ensemble
-        if (!trainer_->getTargets().empty()) {
-            rmse_ = ensemble_->calculateEnsembleError(trainer_->getInput(), trainer_->getTargets());
-            mse_ = rmse_ * rmse_;
-            accuracy_ = 1.0f - rmse_; // Simple accuracy approximation
+//         // Evaluate ensemble
+//         if (!trainer_->getTargets().empty()) {
+//             rmse_ = ensemble_->calculateEnsembleError(trainer_->getInputs(), trainer_->getTargets());
+//             mse_ = rmse_ * rmse_;
+//             accuracy_ = 1.0f - rmse_; // Simple accuracy approximation
 
-            if (verbose_) {
-                std::cout << "\n[ENSEMBLE PREDICT] Evaluation Metrics:" << std::endl;
-                std::cout << "RMSE: " << rmse_ << std::endl;
-                std::cout << "MSE: " << mse_ << std::endl;
-                std::cout << "Accuracy: " << accuracy_ * 100.0f << "%" << std::endl;
-                std::cout << "Training Execution Time: " << trainingTime_ << " seconds" << std::endl;
-            }
-        }
+//             if (verbose_) {
+//                 std::cout << "\n[ENSEMBLE PREDICT] Evaluation Metrics:" << std::endl;
+//                 std::cout << "RMSE: " << rmse_ << std::endl;
+//                 std::cout << "MSE: " << mse_ << std::endl;
+//                 std::cout << "Accuracy: " << accuracy_ * 100.0f << "%" << std::endl;
+//                 std::cout << "Training Execution Time: " << trainingTime_ << " seconds" << std::endl;
+//             }
+//         }
 
-        // Save results
-        if (!saveEnsembleResults(outputCsvFile, inputFile, hasHeader, delimiter)) {
-            std::cerr << "[ENSEMBLE PREDICT] Failed to save results." << std::endl;
-            return false;
-        }
+//         // Save results
+//         if (!saveEnsembleResults(outputCsvFile, inputFile, hasHeader, delimiter)) {
+//             std::cerr << "[ENSEMBLE PREDICT] Failed to save results." << std::endl;
+//             return false;
+//         }
 
-        if (verbose_) {
-            std::cout << "[ENSEMBLE PREDICT] Ensemble prediction process completed successfully." << std::endl;
-        }
+//         if (verbose_) {
+//             std::cout << "[ENSEMBLE PREDICT] Ensemble prediction process completed successfully." << std::endl;
+//         }
 
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "[ENSEMBLE PREDICT] Exception during ensemble prediction: " << e.what() << std::endl;
-        return false;
-    }
-}
+//         return true;
+//     } catch (const std::exception& e) {
+//         std::cerr << "[ENSEMBLE PREDICT] Exception during ensemble prediction: " << e.what() << std::endl;
+//         return false;
+//     }
+// }
 
-bool Predict::saveEnsembleResults(const std::string& outputCsvFile,
-                                 const std::string& inputFile,
-                                 bool hasHeader,
-                                 char delimiter) {
-    if (verbose_) {
-        std::cout << "[ENSEMBLE PREDICT] Saving ensemble prediction results to: " << outputCsvFile << std::endl;
-    }
+// bool Predict::saveEnsembleResults(const std::string& outputCsvFile,
+//                                  const std::string& inputFile,
+//                                  bool hasHeader,
+//                                  char delimiter) {
+//     if (verbose_) {
+//         std::cout << "[ENSEMBLE PREDICT] Saving ensemble prediction results to: " << outputCsvFile << std::endl;
+//     }
 
-    try {
-        // Get ensemble predictions
-        auto predictions = ensemble_->predict(trainer_->getInput());
+//     try {
+//         // Get ensemble predictions
+//         auto predictions = ensemble_->predict(trainer_->getInputs());
 
-        // Denormalize predictions if trainer has normalization info
-        if (!predictions.empty() && trainer_->original_data_global_min != trainer_->original_data_global_max) {
-            for (auto& sample : predictions) {
-                for (float& val : sample) {
-                    val = ((val - trainer_->min) / (trainer_->max - trainer_->min)) *
-                          (trainer_->original_data_global_max - trainer_->original_data_global_min) +
-                          trainer_->original_data_global_min;
-                }
-            }
-        }
+//         // Denormalize predictions if trainer has normalization info
+//         if (!predictions.empty() && trainer_->original_data_global_min != trainer_->original_data_global_max) {
+//             for (auto& sample : predictions) {
+//                 for (float& val : sample) {
+//                     val = ((val - trainer_->min) / (trainer_->max - trainer_->min)) *
+//                           (trainer_->original_data_global_max - trainer_->original_data_global_min) +
+//                           trainer_->original_data_global_min;
+//                 }
+//             }
+//         }
 
-        // Save to CSV (simplified version - you might want to extend this)
-        std::ofstream file(outputCsvFile);
-        if (!file.is_open()) {
-            std::cerr << "[ENSEMBLE PREDICT] Cannot open output file: " << outputCsvFile << std::endl;
-            return false;
-        }
+//         // Save to CSV (simplified version - you might want to extend this)
+//         std::ofstream file(outputCsvFile);
+//         if (!file.is_open()) {
+//             std::cerr << "[ENSEMBLE PREDICT] Cannot open output file: " << outputCsvFile << std::endl;
+//             return false;
+//         }
 
-        // Write header if needed
-        if (hasHeader) {
-            file << "prediction_1";
-            for (size_t i = 1; i < predictions[0].size(); ++i) {
-                file << delimiter << "prediction_" << (i + 1);
-            }
-            file << "\n";
-        }
+//         // Write header if needed
+//         if (hasHeader) {
+//             file << "prediction_1";
+//             for (size_t i = 1; i < predictions[0].size(); ++i) {
+//                 file << delimiter << "prediction_" << (i + 1);
+//             }
+//             file << "\n";
+//         }
 
-        // Write predictions
-        for (const auto& sample : predictions) {
-            if (!sample.empty()) {
-                file << sample[0];
-                for (size_t i = 1; i < sample.size(); ++i) {
-                    file << delimiter << sample[i];
-                }
-                file << "\n";
-            }
-        }
+//         // Write predictions
+//         for (const auto& sample : predictions) {
+//             if (!sample.empty()) {
+//                 file << sample[0];
+//                 for (size_t i = 1; i < sample.size(); ++i) {
+//                     file << delimiter << sample[i];
+//                 }
+//                 file << "\n";
+//             }
+//         }
 
-        file.close();
+//         file.close();
 
-        if (verbose_) {
-            std::cout << "[ENSEMBLE PREDICT] Ensemble results saved successfully." << std::endl;
-        }
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "[ENSEMBLE PREDICT] Failed to save ensemble results: " << e.what() << std::endl;
-        return false;
-    }
-}
+//         if (verbose_) {
+//             std::cout << "[ENSEMBLE PREDICT] Ensemble results saved successfully." << std::endl;
+//         }
+//         return true;
+//     } catch (const std::exception& e) {
+//         std::cerr << "[ENSEMBLE PREDICT] Failed to save ensemble results: " << e.what() << std::endl;
+//         return false;
+//     }
+// }

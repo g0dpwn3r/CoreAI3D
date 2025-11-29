@@ -419,16 +419,10 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to training module" << std::endl;
             return handleTrainAPI(action, requestData, method);
         }
-        else if (module == "tuning" || module == "hyperparameter") {
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to hyperparameter tuning module" << std::endl;
-            return handleHyperparameterTuningAPI(action, requestData, method);
-        }
-        else if (module == "training") {
-        }
-        else if (module == "sessions") {
-            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to sessions module" << std::endl;
-            return handleSessionsAPI(action, requestData, method);
-        }
+        // else if (module == "tuning" || module == "hyperparameter") {
+        //     std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to hyperparameter tuning module" << std::endl;
+        //     return handleHyperparameterTuningAPI(action, requestData, method);
+        // }
         else if (module == "performance") {
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to performance module" << std::endl;
             if (action == "load_test") {
@@ -1304,6 +1298,166 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
             };
             return response;
         }
+        else if (action == "set_calculus_config") {
+            // Set calculus activation configuration for a specific layer
+            int layerIndex = parameters.value("layer_index", 0);
+            int N = parameters.value("N", 10);
+            float SM = parameters.value("SM", 1.0f);
+            float a = parameters.value("a", 1.0f);
+
+            // Validate parameters
+            if (layerIndex < 0) {
+                return createErrorResponse("Layer index must be non-negative", 400);
+            }
+            if (N <= 0 || N > 1000) {
+                return createErrorResponse("N (integration points) must be between 1 and 1000", 400);
+            }
+            if (SM <= 0.0f) {
+                return createErrorResponse("SM (Simpson's method multiplier) must be positive", 400);
+            }
+            if (a <= 0.0f) {
+                return createErrorResponse("a (alpha scaling parameter) must be positive", 400);
+            }
+
+            // Set calculus configuration for the layer
+            if (trainingModule->getCore()) {
+                trainingModule->getCore()->setLayerActivation(layerIndex, ActivationType::INTEGRAL_SIGMOID, 1.0f, 0.1f, 1.0f, N, SM, a);
+            } else {
+                return createErrorResponse("CoreAI not initialized", 500);
+            }
+
+            json response = {
+                {"status", "configured"},
+                {"layer_index", layerIndex},
+                {"activation_type", "INTEGRAL_SIGMOID"},
+                {"calculus_config", {
+                    {"N", N},
+                    {"SM", SM},
+                    {"a", a}
+                }},
+                {"message", "Calculus activation configuration set successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "get_calculus_config") {
+            // Get calculus activation configuration for a specific layer
+            int layerIndex = parameters.value("layer_index", 0);
+
+            if (!trainingModule->getCore()) {
+                return createErrorResponse("CoreAI not initialized", 500);
+            }
+            if (layerIndex < 0 || layerIndex >= static_cast<int>(trainingModule->getCore()->layer_activation_configs.size())) {
+                return createErrorResponse("Invalid layer index", 400);
+            }
+
+            const ActivationConfig& config = trainingModule->getCore()->layer_activation_configs[layerIndex];
+
+            json response = {
+                {"layer_index", layerIndex},
+                {"activation_type", static_cast<int>(config.type)},
+                {"calculus_config", {
+                    {"N", config.calculus_config.N},
+                    {"SM", config.calculus_config.SM},
+                    {"a", config.calculus_config.a}
+                }},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "set_all_calculus_activations") {
+            // Set calculus activation for all layers
+            std::string activationType = parameters.value("activation_type", "INTEGRAL_SIGMOID");
+            int N = parameters.value("N", 10);
+            float SM = parameters.value("SM", 1.0f);
+            float a = parameters.value("a", 1.0f);
+
+            // Validate parameters
+            if (N <= 0 || N > 1000) {
+                return createErrorResponse("N (integration points) must be between 1 and 1000", 400);
+            }
+            if (SM <= 0.0f) {
+                return createErrorResponse("SM (Simpson's method multiplier) must be positive", 400);
+            }
+            if (a <= 0.0f) {
+                return createErrorResponse("a (alpha scaling parameter) must be positive", 400);
+            }
+
+            // Map string to ActivationType
+            ActivationType type = ActivationType::INTEGRAL_SIGMOID;
+            if (activationType == "INTEGRAL_RELU") {
+                type = ActivationType::INTEGRAL_RELU;
+            } else if (activationType == "INTEGRAL_TANH") {
+                type = ActivationType::INTEGRAL_TANH;
+            }
+
+            // Set calculus activation for all layers
+            if (trainingModule->getCore()) {
+                trainingModule->getCore()->setAllLayerActivations(type, 1.0f, 0.1f, 1.0f, N, SM, a);
+            } else {
+                return createErrorResponse("CoreAI not initialized", 500);
+            }
+
+            json response = {
+                {"status", "configured"},
+                {"activation_type", activationType},
+                {"calculus_config", {
+                    {"N", N},
+                    {"SM", SM},
+                    {"a", a}
+                }},
+                {"message", "Calculus activation configuration set for all layers"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "test_calculus_activation") {
+            // Test calculus activation function with sample input
+            float testInput = parameters.value("input", 1.0f);
+            std::string activationType = parameters.value("activation_type", "INTEGRAL_SIGMOID");
+            int N = parameters.value("N", 10);
+            float SM = parameters.value("SM", 1.0f);
+            float a = parameters.value("a", 1.0f);
+
+            // Create test configuration
+            CalculusConfig calcConfig{N, SM, a};
+            ActivationConfig config;
+            config.calculus_config = calcConfig;
+
+            if (activationType == "INTEGRAL_SIGMOID") {
+                config.type = ActivationType::INTEGRAL_SIGMOID;
+            } else if (activationType == "INTEGRAL_RELU") {
+                config.type = ActivationType::INTEGRAL_RELU;
+            } else if (activationType == "INTEGRAL_TANH") {
+                config.type = ActivationType::INTEGRAL_TANH;
+            } else {
+                return createErrorResponse("Unknown activation type: " + activationType, 400);
+            }
+
+            // Test the activation function
+            float result = 0.0f;
+            float derivative = 0.0f;
+            if (trainingModule->getCore()) {
+                result = trainingModule->getCore()->activate(testInput, config, 0.0f); // distance = 0 for simplicity
+                derivative = trainingModule->getCore()->activate_derivative(testInput, config, 0.0f);
+            } else {
+                return createErrorResponse("CoreAI not initialized", 500);
+            }
+
+            json response = {
+                {"input", testInput},
+                {"activation_type", activationType},
+                {"calculus_config", {
+                    {"N", N},
+                    {"SM", SM},
+                    {"a", a}
+                }},
+                {"output", result},
+                {"derivative", derivative},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
         else {
             return createErrorResponse("Unknown neural action: " + action, 400);
         }
@@ -1631,10 +1785,10 @@ json APIServer::handlePredictAPI(const std::string& action, const json& paramete
 
             // Run prediction
             bool success = predictModule->runPrediction(processedInputFile, outputCsvFile, targetFile, loadModelId,
-                                                      datasetId, layers, neurons, minRange, maxRange,
-                                                      inputSize, outputSize, numSamples, learningRate,
-                                                      epochs, embeddingFile, language, datasetName,
-                                                      hasHeader, containsText, delimiter);
+                                                       datasetId, layers, neurons, minRange, maxRange,
+                                                       inputSize, outputSize, numSamples, 32, learningRate,
+                                                       epochs, embeddingFile, language, datasetName,
+                                                       hasHeader, containsText, delimiter);
 
             // Clean up temporary file if created
             if (inputType == "text" && processedInputFile != inputFile) {
@@ -3350,182 +3504,182 @@ bool APIServer::addMathModule(const std::string& name, std::unique_ptr<MathModul
     return true;
 }
 
-// Hyperparameter tuning API implementation
-json APIServer::handleHyperparameterTuningAPI(const std::string& action, const json& parameters, const std::string& method) {
-    try {
-        if (!hyperparameterTuner) {
-            // Initialize hyperparameter tuner if not already done
-            if (!trainingModule) {
-                return createErrorResponse("Training module not available", 503);
-            }
-
-            // Create a copy of the training module for tuning
-            auto tuningTraining = std::make_unique<Training>(*trainingModule);
-            hyperparameterTuner = std::make_unique<HyperparameterTuner>(
-                std::move(tuningTraining),
-                std::map<std::string, ParameterDefinition>() // Will be set via API
-            );
-
-            // Set database if available
-            if (database) {
-                hyperparameterTuner->setDatabase(std::make_unique<Database>(*database));
-            }
-        }
-
-        if (action == "start" && method == "POST") {
-            // Start hyperparameter tuning
-            std::string searchMethod = parameters.value("search_method", "grid_search");
-            int maxEvaluations = parameters.value("max_evaluations", 100);
-            bool parallel = parameters.value("parallel", true);
-            int maxParallel = parameters.value("max_parallel", 4);
-
-            // Set up parameter space
-            std::map<std::string, ParameterDefinition> paramSpace;
-
-            if (parameters.contains("parameters")) {
-                for (const auto& param : parameters["parameters"]) {
-                    std::string name = param.value("name", "");
-                    std::string type = param.value("type", "");
-                    ParameterDefinition def;
-                    def.name = name;
-
-                    if (type == "float_range") {
-                        def.type = ParameterType::FLOAT_RANGE;
-                        def.float_range = {param.value("min", 0.0f), param.value("max", 1.0f)};
-                        def.num_samples = param.value("num_samples", 10);
-                    } else if (type == "int_range") {
-                        def.type = ParameterType::INT_RANGE;
-                        def.int_range = {param.value("min", 1), param.value("max", 10)};
-                    } else if (type == "categorical") {
-                        def.type = ParameterType::CATEGORICAL;
-                        def.categories = param.value("categories", std::vector<std::string>{});
-                    } else if (type == "log_scale") {
-                        def.type = ParameterType::LOG_SCALE;
-                        def.float_range = {param.value("min", 0.001f), param.value("max", 1.0f)};
-                        def.log_base = param.value("log_base", 10.0f);
-                        def.num_samples = param.value("num_samples", 10);
-                    }
-
-                    paramSpace[name] = def;
-                }
-            }
-
-            // Set parameter space
-            for (const auto& param : paramSpace) {
-                hyperparameterTuner->addParameter(param.first, param.second);
-            }
-
-            // Configure tuning
-            TuningConfig config;
-            if (searchMethod == "grid_search") {
-                config.method = SearchMethod::GRID_SEARCH;
-            } else if (searchMethod == "random_search") {
-                config.method = SearchMethod::RANDOM_SEARCH;
-            } else if (searchMethod == "bayesian") {
-                config.method = SearchMethod::BAYESIAN_OPTIMIZATION;
-            }
-            config.max_evaluations = max_evaluations;
-            config.parallel_evaluation = parallel;
-            config.max_parallel_jobs = maxParallel;
-
-            hyperparameterTuner->setTuningConfig(config);
-
-            // Start tuning
-            bool started = hyperparameterTuner->startTuning();
-
-            if (!started) {
-                return createErrorResponse("Failed to start hyperparameter tuning", 500);
-            }
-
-            json response = {
-                {"status", "started"},
-                {"search_method", searchMethod},
-                {"max_evaluations", max_evaluations},
-                {"parallel", parallel},
-                {"max_parallel", maxParallel},
-                {"message", "Hyperparameter tuning started successfully"},
-                {"timestamp", getTimestampString()}
-            };
-            return response;
-
-        } else if (action == "status" && method == "GET") {
-            // Get tuning status
-            bool isActive = hyperparameterTuner->isTuning();
-            std::string status = hyperparameterTuner->getTuningStatus();
-
-            json response = {
-                {"is_active", isActive},
-                {"status", status},
-                {"timestamp", getTimestampString()}
-            };
-            return response;
-
-        } else if (action == "stop" && method == "POST") {
-            // Stop tuning
-            bool stopped = hyperparameterTuner->stopTuning();
-
-            json response = {
-                {"stopped", stopped},
-                {"message", stopped ? "Hyperparameter tuning stopped successfully" : "Failed to stop tuning"},
-                {"timestamp", getTimestampString()}
-            };
-            return response;
-
-        } else if (action == "results" && method == "GET") {
-            // Get tuning results
-            TuningResults results = hyperparameterTuner->getCurrentResults();
-
-            json response = {
-                {"total_evaluations", results.total_evaluations},
-                {"total_time", results.total_time},
-                {"timestamp", results.timestamp},
-                {"best_score", results.best_parameters.score},
-                {"convergence_history", json::array()}
-            };
-
-            // Add best parameters
-            json bestParams;
-            for (const auto& param : results.best_parameters.float_params) {
-                bestParams["float_params"][param.first] = param.second;
-            }
-            for (const auto& param : results.best_parameters.int_params) {
-                bestParams["int_params"][param.first] = param.second;
-            }
-            for (const auto& param : results.best_parameters.categorical_params) {
-                bestParams["categorical_params"][param.first] = param.second;
-            }
-            response["best_parameters"] = bestParams;
-
-            // Add convergence history
-            for (const auto& point : results.convergence_history) {
-                response["convergence_history"].push_back({point.first, point.second});
-            }
-
-            return response;
-
-        } else if (action == "save_results" && method == "POST") {
-            // Save tuning results
-            std::string filepath = parameters.value("filepath", "tuning_results.json");
-            TuningResults results = hyperparameterTuner->getCurrentResults();
-
-            bool saved = hyperparameterTuner->saveResults(results, filepath);
-
-            json response = {
-                {"saved", saved},
-                {"filepath", filepath},
-                {"message", saved ? "Results saved successfully" : "Failed to save results"},
-                {"timestamp", getTimestampString()}
-            };
-            return response;
-
-        } else {
-            return createErrorResponse("Unknown hyperparameter tuning action: " + action, 400);
-        }
-    }
-    catch (const std::exception& e) {
-        return createErrorResponse("Hyperparameter tuning API error: " + std::string(e.what()), 500);
-    }
-}
+// // Hyperparameter tuning API implementation
+// json APIServer::handleHyperparameterTuningAPI(const std::string& action, const json& parameters, const std::string& method) {
+//     try {
+//         if (!hyperparameterTuner) {
+//             // Initialize hyperparameter tuner if not already done
+//             if (!trainingModule) {
+//                 return createErrorResponse("Training module not available", 503);
+//             }
+//
+//             // Create a copy of the training module for tuning
+//             auto tuningTraining = std::make_unique<Training>(*trainingModule);
+//             hyperparameterTuner = std::make_unique<HyperparameterTuner>(
+//                 std::move(tuningTraining),
+//                 std::map<std::string, ParameterDefinition>() // Will be set via API
+//             );
+//
+//             // Set database if available
+//             if (database) {
+//                 hyperparameterTuner->setDatabase(std::make_unique<Database>(*database));
+//             }
+//         }
+//
+//         if (action == "start" && method == "POST") {
+//             // Start hyperparameter tuning
+//             std::string searchMethod = parameters.value("search_method", "grid_search");
+//             int maxEvaluations = parameters.value("max_evaluations", 100);
+//             bool parallel = parameters.value("parallel", true);
+//             int maxParallel = parameters.value("max_parallel", 4);
+//
+//             // Set up parameter space
+//             std::map<std::string, ParameterDefinition> paramSpace;
+//
+//             if (parameters.contains("parameters")) {
+//                 for (const auto& param : parameters["parameters"]) {
+//                     std::string name = param.value("name", "");
+//                     std::string type = param.value("type", "");
+//                     ParameterDefinition def;
+//                     def.name = name;
+//
+//                     if (type == "float_range") {
+//                         def.type = ParameterType::FLOAT_RANGE;
+//                         def.float_range = {param.value("min", 0.0f), param.value("max", 1.0f)};
+//                         def.num_samples = param.value("num_samples", 10);
+//                     } else if (type == "int_range") {
+//                         def.type = ParameterType::INT_RANGE;
+//                         def.int_range = {param.value("min", 1), param.value("max", 10)};
+//                     } else if (type == "categorical") {
+//                         def.type = ParameterType::CATEGORICAL;
+//                         def.categories = param.value("categories", std::vector<std::string>{});
+//                     } else if (type == "log_scale") {
+//                         def.type = ParameterType::LOG_SCALE;
+//                         def.float_range = {param.value("min", 0.001f), param.value("max", 1.0f)};
+//                         def.log_base = param.value("log_base", 10.0f);
+//                         def.num_samples = param.value("num_samples", 10);
+//                     }
+//
+//                     paramSpace[name] = def;
+//                 }
+//             }
+//
+//             // Set parameter space
+//             for (const auto& param : paramSpace) {
+//                 hyperparameterTuner->addParameter(param.first, param.second);
+//             }
+//
+//             // Configure tuning
+//             TuningConfig config;
+//             if (searchMethod == "grid_search") {
+//                 config.method = SearchMethod::GRID_SEARCH;
+//             } else if (searchMethod == "random_search") {
+//                 config.method = SearchMethod::RANDOM_SEARCH;
+//             } else if (searchMethod == "bayesian") {
+//                 config.method = SearchMethod::BAYESIAN_OPTIMIZATION;
+//             }
+//             config.max_evaluations = max_evaluations;
+//             config.parallel_evaluation = parallel;
+//             config.max_parallel_jobs = maxParallel;
+//
+//             hyperparameterTuner->setTuningConfig(config);
+//
+//             // Start tuning
+//             bool started = hyperparameterTuner->startTuning();
+//
+//             if (!started) {
+//                 return createErrorResponse("Failed to start hyperparameter tuning", 500);
+//             }
+//
+//             json response = {
+//                 {"status", "started"},
+//                 {"search_method", searchMethod},
+//                 {"max_evaluations", max_evaluations},
+//                 {"parallel", parallel},
+//                 {"max_parallel", maxParallel},
+//                 {"message", "Hyperparameter tuning started successfully"},
+//                 {"timestamp", getTimestampString()}
+//             };
+//             return response;
+//
+//         } else if (action == "status" && method == "GET") {
+//             // Get tuning status
+//             bool isActive = hyperparameterTuner->isTuning();
+//             std::string status = hyperparameterTuner->getTuningStatus();
+//
+//             json response = {
+//                 {"is_active", isActive},
+//                 {"status", status},
+//                 {"timestamp", getTimestampString()}
+//             };
+//             return response;
+//
+//         } else if (action == "stop" && method == "POST") {
+//             // Stop tuning
+//             bool stopped = hyperparameterTuner->stopTuning();
+//
+//             json response = {
+//                 {"stopped", stopped},
+//                 {"message", stopped ? "Hyperparameter tuning stopped successfully" : "Failed to stop tuning"},
+//                 {"timestamp", getTimestampString()}
+//             };
+//             return response;
+//
+//         } else if (action == "results" && method == "GET") {
+//             // Get tuning results
+//             TuningResults results = hyperparameterTuner->getCurrentResults();
+//
+//             json response = {
+//                 {"total_evaluations", results.total_evaluations},
+//                 {"total_time", results.total_time},
+//                 {"timestamp", results.timestamp},
+//                 {"best_score", results.best_parameters.score},
+//                 {"convergence_history", json::array()}
+//             };
+//
+//             // Add best parameters
+//             json bestParams;
+//             for (const auto& param : results.best_parameters.float_params) {
+//                 bestParams["float_params"][param.first] = param.second;
+//             }
+//             for (const auto& param : results.best_parameters.int_params) {
+//                 bestParams["int_params"][param.first] = param.second;
+//             }
+//             for (const auto& param : results.best_parameters.categorical_params) {
+//                 bestParams["categorical_params"][param.first] = param.second;
+//             }
+//             response["best_parameters"] = bestParams;
+//
+//             // Add convergence history
+//             for (const auto& point : results.convergence_history) {
+//                 response["convergence_history"].push_back({point.first, point.second});
+//             }
+//
+//             return response;
+//
+//         } else if (action == "save_results" && method == "POST") {
+//             // Save tuning results
+//             std::string filepath = parameters.value("filepath", "tuning_results.json");
+//             TuningResults results = hyperparameterTuner->getCurrentResults();
+//
+//             bool saved = hyperparameterTuner->saveResults(results, filepath);
+//
+//             json response = {
+//                 {"saved", saved},
+//                 {"filepath", filepath},
+//                 {"message", saved ? "Results saved successfully" : "Failed to save results"},
+//                 {"timestamp", getTimestampString()}
+//             };
+//             return response;
+//
+//         } else {
+//             return createErrorResponse("Unknown hyperparameter tuning action: " + action, 400);
+//         }
+//     }
+//     catch (const std::exception& e) {
+//         return createErrorResponse("Hyperparameter tuning API error: " + std::string(e.what()), 500);
+//     }
+// }
 void APIServer::setTrainingModule(std::unique_ptr<Training> training) {
     trainingModule = std::move(training);
 }

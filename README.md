@@ -9,6 +9,7 @@ CoreAI3D is a powerful multimodal AI platform that combines computer vision, nat
 - **Natural Language Processing**: Text encoding, chat interfaces, and language detection with embedding support
 - **Audio Processing**: Speech recognition, audio analysis, synthesis, music analysis, and speaker identification
 - **Neural Networks**: Customizable neural network training and prediction with flexible architecture
+- **Advanced Activation Functions**: Traditional activations plus calculus-based functions using numerical integration
 - **Multiple Interfaces**: Command-line interface, REST API server, and graphical user interfaces
 - **Database Integration**: MySQL support for data persistence and model storage
 - **Cross-Platform**: Built with C++ for Windows and Linux compatibility
@@ -26,6 +27,67 @@ CoreAI3D operates through specialized modules that handle different AI tasks:
 - **Database Layer**: Manages data storage and retrieval for models and results
 
 The system uses a modular orchestrator to coordinate between different AI capabilities, allowing you to combine vision, audio, and language processing in powerful ways.
+
+## Calculus-Based Activation Functions
+
+CoreAI3D features advanced calculus-based activation functions that use numerical integration for more sophisticated neural network behavior:
+
+### Available Calculus Activations
+
+- **Integral Sigmoid**: ∫ sigmoid(t) dt from 0 to x - Provides smooth, integrated activation
+- **Integral ReLU**: ∫ max(0, t) dt from 0 to x - Creates quadratic activation patterns
+- **Integral Tanh**: ∫ tanh(t) dt from 0 to x - Offers hyperbolic tangent integration
+
+### Configuration Parameters
+
+Each calculus activation can be configured with:
+- **N**: Number of integration points (default: 10, range: 1-1000)
+- **SM**: Simpson's method multiplier (default: 1.0)
+- **a**: Alpha scaling parameter (default: 1.0)
+
+### API Configuration
+
+Configure calculus activations via REST API:
+
+```bash
+# Set calculus activation for a specific layer
+curl -X POST http://localhost:8080/api/neural/set_calculus_config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "layer_index": 1,
+    "N": 20,
+    "SM": 1.5,
+    "a": 2.0
+  }'
+
+# Set calculus activation for all layers
+curl -X POST http://localhost:8080/api/neural/set_all_calculus_activations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "activation_type": "INTEGRAL_SIGMOID",
+    "N": 15,
+    "SM": 1.0,
+    "a": 1.5
+  }'
+
+# Test calculus activation function
+curl -X POST http://localhost:8080/api/neural/test_calculus_activation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": 1.5,
+    "activation_type": "INTEGRAL_SIGMOID",
+    "N": 10,
+    "SM": 1.0,
+    "a": 1.0
+  }'
+```
+
+### Benefits
+
+- **Smoother Gradients**: Integrated functions provide more stable gradient flow
+- **Complex Patterns**: Quadratic and integrated behaviors enable richer representations
+- **Numerical Precision**: Configurable integration points balance accuracy and performance
+- **Research Applications**: Enables exploration of advanced activation function research
 
 ## Getting Started
 
@@ -127,6 +189,13 @@ CoreAI3D provides a REST API for programmatic access to AI capabilities:
 - `POST /api/train` - Train models on data
 - `POST /api/chat` - Interactive chat with AI
 - `GET /api/models` - List available models
+
+### Neural Network Configuration Endpoints
+
+- `POST /api/neural/set_calculus_config` - Configure calculus activation for specific layer
+- `GET /api/neural/get_calculus_config` - Get calculus configuration for specific layer
+- `POST /api/neural/set_all_calculus_activations` - Set calculus activation for all layers
+- `POST /api/neural/test_calculus_activation` - Test calculus activation function output
 
 ### Vision Endpoints
 
