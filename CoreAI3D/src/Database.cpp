@@ -358,17 +358,31 @@ void Database::createTables() {
 
 int Database::addDataset(const std::string& datasetName, const std::string& description,
     int numRows, int numFeatures, int numLabels) {
+    // Validate input parameters
+    if (datasetName.empty()) {
+        throw std::invalid_argument("Dataset name cannot be empty");
+    }
+    if (numRows <= 0) {
+        throw std::invalid_argument("Number of rows must be positive");
+    }
+    if (numFeatures <= 0) {
+        throw std::invalid_argument("Number of features must be positive");
+    }
+    if (numLabels <= 0) {
+        throw std::invalid_argument("Number of labels must be positive");
+    }
+
     ensureConnection();
 #ifdef USE_MYSQL
     try {
         auto result = session->sql("INSERT INTO " + dbSchema + ".datasets (name, description, num_rows, num_features, num_labels) "
-                                     "VALUES (?, ?, ?, ?, ?)")
-                        .bind(datasetName)
-                        .bind(description)
-                        .bind(numRows)
-                        .bind(numFeatures)
-                        .bind(numLabels)
-                        .execute();
+                                      "VALUES (?, ?, ?, ?, ?)")
+                         .bind(datasetName)
+                         .bind(description)
+                         .bind(numRows)
+                         .bind(numFeatures)
+                         .bind(numLabels)
+                         .execute();
 
         // Get the auto-generated ID
         auto idResult = session->sql("SELECT LAST_INSERT_ID() as id").execute();
@@ -392,6 +406,20 @@ int Database::addDataset(const std::string& datasetName, const std::string& desc
 void Database::addDatasetRecord(int& datasetId, int rowIndex,
     const std::vector<float>& featureValues,
     const std::vector<float>& labelValues) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+    if (rowIndex < 0) {
+        throw std::invalid_argument("Row index must be non-negative");
+    }
+    if (featureValues.empty()) {
+        throw std::invalid_argument("Feature values cannot be empty");
+    }
+    if (labelValues.empty()) {
+        throw std::invalid_argument("Label values cannot be empty");
+    }
+
     ensureConnection();
 #ifdef USE_MYSQL
     try {
@@ -492,6 +520,17 @@ Database::DatasetData Database::getDataset(int& datasetId) {
 };
 
 void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std::vector<float>& labelValues) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+    if (rowIndex < 0) {
+        throw std::invalid_argument("Row index must be non-negative");
+    }
+    if (labelValues.empty()) {
+        throw std::invalid_argument("Label values cannot be empty");
+    }
+
     ensureConnection();
 #ifdef USE_MYSQL
     try {
@@ -515,6 +554,11 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
 };
 
 void Database::clearDatasetRecords(long long& datasetId) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+
     ensureConnection();
 #ifdef USE_MYSQL
     try {
@@ -672,13 +716,18 @@ bool Database::getDatasetRecords(long long datasetId,
     std::vector<std::vector<float>>& loadedTargets,
     long long& loadedNumSamples,
     int& loadedInputSize, int& loadedOutputSize) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+
     ensureConnection();
 #ifdef USE_MYSQL
     try {
         // Get dataset metadata first
         auto metaResult = session->sql("SELECT num_features, num_labels, num_rows FROM " + dbSchema + ".datasets WHERE id = ?")
-                           .bind(datasetId)
-                           .execute();
+                            .bind(datasetId)
+                            .execute();
 
         auto metaRow = metaResult.fetchOne();
         if (!metaRow) {

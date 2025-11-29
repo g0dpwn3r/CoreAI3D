@@ -478,6 +478,10 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to sessions module" << std::endl;
             return handleSessionsAPI(action, requestData, method);
         }
+        else if (module == "dataset") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to dataset module" << std::endl;
+            return handleDatasetAPI(action, requestData, method);
+        }
         else if (module.empty() || module == "/") {
             // Handle root endpoint
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to root endpoint" << std::endl;
@@ -3686,4 +3690,198 @@ void APIServer::setTrainingModule(std::unique_ptr<Training> training) {
 
 void APIServer::setPredictModule(std::unique_ptr<Predict> predict) {
     predictModule = std::move(predict);
+}
+
+json APIServer::handleDatasetAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (!database) {
+            return createErrorResponse("Database not available", 503);
+        }
+
+        if (action == "create" && method == "POST") {
+            // Create a new dataset
+            std::string datasetName = parameters.value("name", "");
+            std::string description = parameters.value("description", "");
+            int numRows = parameters.value("num_rows", 0);
+            int numFeatures = parameters.value("num_features", 0);
+            int numLabels = parameters.value("num_labels", 0);
+
+            // Validate required parameters
+            if (datasetName.empty()) {
+                return createErrorResponse("Dataset name cannot be empty", 400);
+            }
+            if (numRows <= 0) {
+                return createErrorResponse("Number of rows must be positive", 400);
+            }
+            if (numFeatures <= 0) {
+                return createErrorResponse("Number of features must be positive", 400);
+            }
+            if (numLabels <= 0) {
+                return createErrorResponse("Number of labels must be positive", 400);
+            }
+
+            int datasetId = database->addDataset(datasetName, description, numRows, numFeatures, numLabels);
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"name", datasetName},
+                {"description", description},
+                {"num_rows", numRows},
+                {"num_features", numFeatures},
+                {"num_labels", numLabels},
+                {"message", "Dataset created successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "add_record" && method == "POST") {
+            // Add a record to a dataset
+            int datasetId = parameters.value("dataset_id", -1);
+            int rowIndex = parameters.value("row_index", -1);
+            std::vector<float> featureValues = parameters.value("features", std::vector<float>{});
+            std::vector<float> labelValues = parameters.value("labels", std::vector<float>{});
+
+            // Validate parameters
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+            if (rowIndex < 0) {
+                return createErrorResponse("Row index must be non-negative", 400);
+            }
+            if (featureValues.empty()) {
+                return createErrorResponse("Feature values cannot be empty", 400);
+            }
+            if (labelValues.empty()) {
+                return createErrorResponse("Label values cannot be empty", 400);
+            }
+
+            database->addDatasetRecord(datasetId, rowIndex, featureValues, labelValues);
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"row_index", rowIndex},
+                {"features_count", featureValues.size()},
+                {"labels_count", labelValues.size()},
+                {"message", "Record added successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "get" && method == "GET") {
+            // Get dataset information and records
+            int datasetId = parameters.value("dataset_id", -1);
+
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+
+            Database::DatasetData data = database->getDataset(datasetId);
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"name", data.datasetName},
+                {"num_rows", data.numRows},
+                {"num_features", data.numFeatures},
+                {"num_labels", data.numLabels},
+                {"records", json::array()}
+            };
+
+            // Add records data
+            for (size_t i = 0; i < data.inputs.size(); ++i) {
+                if (!data.inputs[i].empty() && !data.targets[i].empty()) {
+                    json record = {
+                        {"row_index", static_cast<int>(i)},
+                        {"features", data.inputs[i]},
+                        {"labels", data.targets[i]}
+                    };
+                    response["records"].push_back(record);
+                }
+            }
+
+            response["message"] = "Dataset retrieved successfully";
+            response["timestamp"] = getTimestampString();
+            return response;
+        }
+        else if (action == "update_labels" && method == "PUT") {
+            // Update labels for a specific record
+            int datasetId = parameters.value("dataset_id", -1);
+            int rowIndex = parameters.value("row_index", -1);
+            std::vector<float> labelValues = parameters.value("labels", std::vector<float>{});
+
+            // Validate parameters
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+            if (rowIndex < 0) {
+                return createErrorResponse("Row index must be non-negative", 400);
+            }
+            if (labelValues.empty()) {
+                return createErrorResponse("Label values cannot be empty", 400);
+            }
+
+            database->updateDatasetRecordLabels(datasetId, rowIndex, labelValues);
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"row_index", rowIndex},
+                {"labels_count", labelValues.size()},
+                {"message", "Labels updated successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "clear_records" && method == "DELETE") {
+            // Clear all records from a dataset
+            long long datasetId = parameters.value("dataset_id", -1LL);
+
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+
+            database->clearDatasetRecords(datasetId);
+
+            json response = {
+                {"dataset_id", static_cast<int>(datasetId)},
+                {"message", "All records cleared successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "get_records" && method == "GET") {
+            // Get dataset records for training
+            long long datasetId = parameters.value("dataset_id", -1LL);
+
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+
+            std::vector<std::vector<float>> inputs, targets;
+            long long numSamples = 0;
+            int inputSize = 0, outputSize = 0;
+
+            bool success = database->getDatasetRecords(datasetId, inputs, targets, numSamples, inputSize, outputSize);
+
+            if (!success) {
+                return createErrorResponse("Failed to retrieve dataset records", 500);
+            }
+
+            json response = {
+                {"dataset_id", static_cast<int>(datasetId)},
+                {"num_samples", numSamples},
+                {"input_size", inputSize},
+                {"output_size", outputSize},
+                {"inputs", inputs},
+                {"targets", targets},
+                {"message", "Dataset records retrieved successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else {
+            return createErrorResponse("Unknown dataset action: " + action + " with method " + method, 400);
+        }
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Dataset API error: " + std::string(e.what()), 500);
+    }
 }

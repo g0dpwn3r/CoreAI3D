@@ -6,14 +6,6 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     outputSize(outputSize_), minVal(min_), maxVal(max_), verbose(verbose_),
     x(1.0f), y(1.0f), z(1.0f)  // Initialize transform variables to meaningful values
 {
-    if (verbose) {
-        std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI constructor with params: "
-                  << "inputSize=" << inputSize_ << ", layers=" << layers_
-                  << ", neurons=" << neurons_ << ", outputSize=" << outputSize_
-                  << ", min=" << min_ << ", max=" << max_ << std::endl;
-        
-        std::cout << "[DEBUG CONSTRUCTOR] Transform variables initialized - x: " << x
-                  << ", y: " << y << ", z: " << z << ", epsilon: " << epsilon << std::endl;
     // Initialize advanced 3D transform parameters
     this->enable_polynomial = true;
     this->enable_trigonometric = true;
@@ -46,6 +38,15 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     this->translation_x = 0.0f;
     this->translation_y = 0.0f;
     this->translation_z = 0.0f;
+
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI constructor with params: "
+                  << "inputSize=" << inputSize_ << ", layers=" << layers_
+                  << ", neurons=" << neurons_ << ", outputSize=" << outputSize_
+                  << ", min=" << min_ << ", max=" << max_ << std::endl;
+
+        std::cout << "[DEBUG CONSTRUCTOR] Transform variables initialized - x: " << x
+                  << ", y: " << y << ", z: " << z << ", epsilon: " << epsilon << std::endl;
     }
 
     // Parameter validation
@@ -625,6 +626,14 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
             std::cout << inputvalue[0][k] << " ";
         }
         std::cout << "..." << std::endl;
+    }
+
+    // DEBUG: Check RBF parameters
+    if (verbose) {
+        std::cout << "[DEBUG FORWARD] RBF enabled: " << (enable_rbf ? "true" : "false")
+                  << ", rbf_center size: " << rbf_center.size()
+                  << ", rbf_weight: " << rbf_weight
+                  << ", rbf_sigma: " << rbf_sigma << std::endl;
     }
 
     // First pass: compute all hidden layer activations before batch normalization

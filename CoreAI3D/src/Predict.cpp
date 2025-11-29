@@ -3,6 +3,7 @@
 #include <iostream>
 #include <chrono>
 #include <stdexcept>
+#include <fstream>
 
 Predict::Predict(bool verbose, WebSocketServer* wsServer)
     : verbose_(verbose), trainer_(nullptr), webSocketServer_(wsServer),
@@ -66,8 +67,8 @@ bool Predict::runPrediction(const std::string& inputFile,
         trainer_->neurons = neurons;
         trainer_->min = minRange;
         trainer_->max = maxRange;
-        trainer_->outputSize = outputSize;
-        trainer_->inputSize = inputSize;
+        trainer_->outputSize = outputSize;  // Fixed to 1 for regression
+        trainer_->inputSize = inputSize;    // Will be set dynamically if 0
         trainer_->numSamples = numSamples;
 
         // Load data
@@ -180,39 +181,107 @@ bool Predict::initializeTrainer(const std::string& dbHost,
 }
 
 bool Predict::loadData(const std::string& inputFile,
-                       const std::string& targetFile,
-                       int numSamples,
-                       int outputSize,
-                       bool hasHeader,
-                       bool containsText,
-                       char delimiter,
-                       const std::string& datasetName) {
+                        const std::string& targetFile,
+                        int numSamples,
+                        int outputSize,
+                        bool hasHeader,
+                        bool containsText,
+                        char delimiter,
+                        const std::string& datasetName) {
     if (verbose_) {
         std::cout << "[PREDICT] Loading data from: " << inputFile << std::endl;
     }
 
-    // Load main input data - use outputSize=0 to treat all columns as inputs
-    if (!trainer_->loadCSV(inputFile, numSamples, 0, hasHeader, containsText, delimiter, datasetName)) {
+    // Check if input file exists
+    std::ifstream checkFile(inputFile);
+    if (!checkFile.good()) {
+        std::cerr << "[PREDICT] ERROR: Input file does not exist or cannot be opened: " << inputFile << std::endl;
+        return false;
+    }
+    checkFile.close();
+
+    if (verbose_) {
+        std::cout << "[PREDICT] Input file exists and is accessible: " << inputFile << std::endl;
+    }
+
+    // Determine outputSizeParam for inputFile loading
+    // If targetFile is provided, inputFile contains only features (outputSizeParam=0)
+    // If no targetFile, inputFile contains features + target (outputSizeParam=1)
+    int outputSizeParam = targetFile.empty() ? 1 : 0;
+
+    if (verbose_) {
+        std::cout << "[PREDICT] Loading CSV with outputSizeParam=" << outputSizeParam
+                  << ", numSamples=" << numSamples << ", hasHeader=" << hasHeader
+                  << ", containsText=" << containsText << ", delimiter='" << delimiter << "'" << std::endl;
+    }
+
+    if (!trainer_->loadCSV(inputFile, numSamples, outputSizeParam, hasHeader, containsText, delimiter, datasetName)) {
         std::cerr << "[PREDICT] Failed to load CSV data from " << inputFile << std::endl;
         return false;
     }
+
+    if (verbose_) {
+        std::cout << "[PREDICT] After loadCSV: numSamples=" << trainer_->numSamples
+                  << ", inputSize=" << trainer_->inputSize << ", outputSize=" << trainer_->outputSize << std::endl;
+        std::cout << "[PREDICT] Inputs vector size: " << trainer_->getInputs().size() << std::endl;
+        std::cout << "[PREDICT] Targets vector size: " << trainer_->getTargets().size() << std::endl;
+        if (!trainer_->getInputs().empty()) {
+            std::cout << "[PREDICT] First input sample size: " << trainer_->getInputs()[0].size() << std::endl;
+            if (!trainer_->getInputs()[0].empty()) {
+                std::cout << "[PREDICT] First few input values: "
+                          << trainer_->getInputs()[0][0];
+                for (size_t i = 1; i < std::min(size_t(3), trainer_->getInputs()[0].size()); ++i) {
+                    std::cout << ", " << trainer_->getInputs()[0][i];
+                }
+                std::cout << std::endl;
+            }
+        }
+    }
+
+    // For regression, outputSize is always 1
+    trainer_->outputSize = 1;
+    // inputSize is set by loadCSV to columns in inputFile (since outputSizeParam=0 when targetFile provided)
 
     // Load target data if provided
     if (!targetFile.empty()) {
         if (verbose_) {
             std::cout << "[PREDICT] Loading targets from: " << targetFile << std::endl;
         }
+
+        // Check if target file exists
+        std::ifstream checkTargetFile(targetFile);
+        if (!checkTargetFile.good()) {
+            std::cerr << "[PREDICT] ERROR: Target file does not exist or cannot be opened: " << targetFile << std::endl;
+            return false;
+        }
+        checkTargetFile.close();
+
         if (!trainer_->loadTargetsCSV(targetFile, delimiter, hasHeader, containsText, trainer_->currentDatasetId)) {
             std::cerr << "[PREDICT] Failed to load target CSV data from " << targetFile << std::endl;
             return false;
         }
-    } else {
-        // If no target file provided, set outputSize based on the neural network output size
-        trainer_->outputSize = outputSize;
+
+        if (verbose_) {
+            std::cout << "[PREDICT] After loading targets: Targets vector size: " << trainer_->getTargets().size() << std::endl;
+            if (!trainer_->getTargets().empty()) {
+                std::cout << "[PREDICT] First target sample size: " << trainer_->getTargets()[0].size() << std::endl;
+                if (!trainer_->getTargets()[0].empty()) {
+                    std::cout << "[PREDICT] First few target values: "
+                              << trainer_->getTargets()[0][0];
+                    for (size_t i = 1; i < std::min(size_t(3), trainer_->getTargets()[0].size()); ++i) {
+                        std::cout << ", " << trainer_->getTargets()[0][i];
+                    }
+                    std::cout << std::endl;
+                }
+            }
+        }
     }
 
     if (verbose_) {
-        std::cout << "[PREDICT] Data loaded successfully." << std::endl;
+        std::cout << "[PREDICT] Data loaded successfully. Input size: " << trainer_->inputSize
+                  << ", Output size: " << trainer_->outputSize
+                  << ", Final inputs size: " << trainer_->getInputs().size()
+                  << ", Final targets size: " << trainer_->getTargets().size() << std::endl;
     }
     return true;
 }
@@ -266,6 +335,26 @@ bool Predict::loadModel(const std::string& loadModelId, int datasetId) {
 bool Predict::preprocessData(float minRange, float maxRange) {
     if (verbose_) {
         std::cout << "[PREDICT] Preprocessing data..." << std::endl;
+        std::cout << "[PREDICT] Before preprocessing - numSamples: " << trainer_->numSamples
+                  << ", inputSize: " << trainer_->inputSize << ", outputSize: " << trainer_->outputSize << std::endl;
+        std::cout << "[PREDICT] Before preprocessing - inputs size: " << trainer_->getInputs().size()
+                  << ", targets size: " << trainer_->getTargets().size() << std::endl;
+        if (!trainer_->getInputs().empty() && !trainer_->getInputs()[0].empty()) {
+            std::cout << "[PREDICT] Before preprocessing - first input values: "
+                      << trainer_->getInputs()[0][0];
+            for (size_t i = 1; i < std::min(size_t(3), trainer_->getInputs()[0].size()); ++i) {
+                std::cout << ", " << trainer_->getInputs()[0][i];
+            }
+            std::cout << std::endl;
+        }
+        if (!trainer_->getTargets().empty() && !trainer_->getTargets()[0].empty()) {
+            std::cout << "[PREDICT] Before preprocessing - first target values: "
+                      << trainer_->getTargets()[0][0];
+            for (size_t i = 1; i < std::min(size_t(3), trainer_->getTargets()[0].size()); ++i) {
+                std::cout << ", " << trainer_->getTargets()[0][i];
+            }
+            std::cout << std::endl;
+        }
     }
 
     try {
@@ -274,8 +363,23 @@ bool Predict::preprocessData(float minRange, float maxRange) {
             std::cout << "[PREDICT] Data preprocessing complete." << std::endl;
             std::cout << "[PREDICT] After preprocessing - numSamples: " << trainer_->numSamples
                       << ", inputSize: " << trainer_->inputSize << ", outputSize: " << trainer_->outputSize << std::endl;
-            if (!trainer_->getTargets().empty()) {
-                std::cout << "[PREDICT] First target value: " << trainer_->getTargets()[0][0] << std::endl;
+            std::cout << "[PREDICT] After preprocessing - inputs size: " << trainer_->getInputs().size()
+                      << ", targets size: " << trainer_->getTargets().size() << std::endl;
+            if (!trainer_->getInputs().empty() && !trainer_->getInputs()[0].empty()) {
+                std::cout << "[PREDICT] After preprocessing - first input values: "
+                          << trainer_->getInputs()[0][0];
+                for (size_t i = 1; i < std::min(size_t(3), trainer_->getInputs()[0].size()); ++i) {
+                    std::cout << ", " << trainer_->getInputs()[0][i];
+                }
+                std::cout << std::endl;
+            }
+            if (!trainer_->getTargets().empty() && !trainer_->getTargets()[0].empty()) {
+                std::cout << "[PREDICT] After preprocessing - first target values: "
+                          << trainer_->getTargets()[0][0];
+                for (size_t i = 1; i < std::min(size_t(3), trainer_->getTargets()[0].size()); ++i) {
+                    std::cout << ", " << trainer_->getTargets()[0][i];
+                }
+                std::cout << std::endl;
             }
         }
         return true;

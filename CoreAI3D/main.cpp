@@ -31,8 +31,8 @@ struct option long_options[] = {
     {"learning-rate", required_argument, 0, 'r'},
     {"min", required_argument, 0, 'm'},
     {"max", required_argument, 0, 'M'},
-    {"inputsize", required_argument, 0, 'z'},
-    {"outputsize", required_argument, 0, 'Z'},
+    {"input-size", required_argument, 0, 'z'},
+    {"output-size", required_argument, 0, 'Z'},
     {"dataset-name", required_argument, 0, 'N'},
     {"dataset-id", required_argument, 0, 'I'},
     {"api-port", required_argument, 0, 'A'},
@@ -83,7 +83,7 @@ int main(int argc, char* argv[]) {
     std::string dbPassword = "password";
     std::string dbPort = "3306";
     std::string dbSchema = "coreai_db";
-    bool hasHeader = true;
+    bool hasHeader = false;
     bool containsText = false;
     bool startChat = false;
     bool startPredict = false;
@@ -298,6 +298,18 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --batch-size <number> or -b <number>\n";
             std::cout << "    Dependencies: Used in training mode\n";
             std::cout << "    Example: --batch-size 64 or -b 64\n\n";
+            std::cout << "  --input-size, -z <number>\n";
+            std::cout << "    Set the input size (dynamically determined from CSV columns if not specified).\n";
+            std::cout << "    Expected value: Integer (default: dynamic from CSV)\n";
+            std::cout << "    Usage: --input-size <number> or -z <number>\n";
+            std::cout << "    Dependencies: Used in prediction mode\n";
+            std::cout << "    Example: --input-size 5 or -z 5\n\n";
+            std::cout << "  --output-size, -Z <number>\n";
+            std::cout << "    Set the output size (default: 1 for regression).\n";
+            std::cout << "    Expected value: Integer (default: 1)\n";
+            std::cout << "    Usage: --output-size <number> or -Z <number>\n";
+            std::cout << "    Dependencies: Used in prediction mode\n";
+            std::cout << "    Example: --output-size 1 or -Z 1\n\n";
             std::cout << "  --calculus-activation\n";
             std::cout << "    Enable calculus-based activation functions.\n";
             std::cout << "    Usage: --calculus-activation or -C\n";
@@ -419,11 +431,11 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--max") {
             std::string value = extractValue(i, "--max", arg);
             if (!value.empty()) maxRange = value;
-        } else if (arg == "--inputsize") {
-            std::string value = extractValue(i, "--inputsize", arg);
+        } else if (arg == "--input-size" || arg == "--inputsize") {
+            std::string value = extractValue(i, "--input-size", arg);
             if (!value.empty()) inputSize = value;
-        } else if (arg == "--outputsize") {
-            std::string value = extractValue(i, "--outputsize", arg);
+        } else if (arg == "--output-size" || arg == "--outputsize") {
+            std::string value = extractValue(i, "--output-size", arg);
             if (!value.empty()) outputSize = value;
         } else if (arg == "--dataset-name") {
             std::string value = extractValue(i, "--dataset-name", arg);
@@ -642,7 +654,7 @@ int main(int argc, char* argv[]) {
             bool success = predictor.runPrediction(
                 inputFile, outputCsvFile, targetFile, loadModelId, datasetId_val,
                 layers_val, neurons_val, minRange_val, maxRange_val,
-                inputSize_val, outputSize_val, numSamples_val, batchSize_val,
+                0, 1, numSamples_val, batchSize_val,  // inputSize=0 (dynamic), outputSize=1
                 learningRate_val, epochs_val, embeddingFile, language,
                 datasetName, hasHeader, containsText, delimiter_char,
                 isOfflineMode, dbHost, dbPort_val, dbUser, dbPassword, dbSchema

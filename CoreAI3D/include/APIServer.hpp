@@ -89,6 +89,7 @@ protected:
     virtual json handlePerformanceAPI(const std::string& action, const json& parameters);
     virtual json handleAPIDebug(const json& parameters);
     virtual json handleSystemDebug(const json& parameters);
+    virtual json handleDatasetAPI(const std::string& action, const json& parameters, const std::string& method);
 
     // HTTP request handling
     virtual void handleRequest(http::request<http::string_body>&& req, tcp::socket socket);

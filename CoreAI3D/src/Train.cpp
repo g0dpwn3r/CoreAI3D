@@ -255,8 +255,20 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             if (current_raw_cells.empty()) {
                 if (verbose) {
                     std::cout << "[DIAGNOSTIC] WARNING: Skipping empty row at line " << lineCounter << " (no cells after parsing)" << std::endl;
+                    std::cout << "[DIAGNOSTIC] Original line was: '" << line << "'" << std::endl;
                 }
                 continue; // Skip empty rows
+            }
+
+            if (verbose) {
+                std::cout << "[DEBUG] Processing row " << rowIndex << " from line " << lineCounter << " with " << current_raw_cells.size() << " cells" << std::endl;
+            }
+
+            if (verbose) {
+                std::cout << "[DEBUG] Line " << lineCounter << " has " << current_raw_cells.size() << " cells after parsing" << std::endl;
+                if (current_raw_cells.empty()) {
+                    std::cout << "[DEBUG] WARNING: No cells parsed from line " << lineCounter << " - this row will be skipped" << std::endl;
+                }
             }
 
             // 2. Process raw cells into float values or embeddings
@@ -462,6 +474,10 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 continue; // Skip if row became empty after processing
             }
 
+            if (verbose) {
+                std::cout << "[DEBUG] Row " << rowIndex << " successfully processed " << current_processed_values.size() << " values" << std::endl;
+            }
+
             // Determine inputSize and outputSize from the first data row
             if (firstDataRow) {
                 if (verbose) {
@@ -474,21 +490,31 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                         << outputSizeParam << ") at file line " << lineCounter << ". Cannot proceed." << std::endl;
                     return false;
                 }
-                this->outputSize = outputSizeParam;
-                this->inputSize = current_processed_values.size() - this->outputSize;
-                // If outputSizeParam was 0, calculate input/output based on heuristic (e.g., last column is target)
-                if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
-                    this->outputSize = 1;
-                    this->inputSize = current_processed_values.size() - 1;
+
+                // Special case: outputSizeParam == 0 means no splitting, all columns are inputs
+                if (outputSizeParam == 0) {
+                    this->outputSize = 0; // No targets from this file
+                    this->inputSize = current_processed_values.size();
                     if (verbose) {
-                        std::cout << "[DIAGNOSTIC] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
+                        std::cout << "[DIAGNOSTIC] outputSizeParam=0: No splitting, all columns are inputs. inputSize=" << this->inputSize << std::endl;
                     }
-                }
-                else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
-                    this->outputSize = 0; // No target if only one column and not specified
-                    this->inputSize = 1;
-                    if (verbose) {
-                        std::cout << "[DIAGNOSTIC] Single column: outputSize=0, inputSize=1" << std::endl;
+                } else {
+                    this->outputSize = outputSizeParam;
+                    this->inputSize = current_processed_values.size() - this->outputSize;
+                    // If outputSizeParam was 0, calculate input/output based on heuristic (e.g., last column is target)
+                    if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
+                        this->outputSize = 1;
+                        this->inputSize = current_processed_values.size() - 1;
+                        if (verbose) {
+                            std::cout << "[DIAGNOSTIC] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
+                        }
+                    }
+                    else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
+                        this->outputSize = 0; // No target if only one column and not specified
+                        this->inputSize = 1;
+                        if (verbose) {
+                            std::cout << "[DIAGNOSTIC] Single column: outputSize=0, inputSize=1" << std::endl;
+                        }
                     }
                 }
                 firstDataRow = false;
@@ -512,23 +538,32 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             std::vector<float> current_target;
 
             if (verbose) {
-                std::cout << "[DEBUG] Extracting inputs and targets based on outputSize=" << outputSizeParam << std::endl;
+                std::cout << "[DEBUG] Extracting inputs and targets based on outputSize=" << this->outputSize << std::endl;
             }
 
-            // Targets are the last outputSizeParam columns
-            for (int i = 0; i < outputSizeParam; ++i) {
-                size_t target_index = current_processed_values.size() - outputSizeParam + i;
-                if (target_index < current_processed_values.size()) {
-                    current_target.push_back(current_processed_values[target_index]);
-                } else {
-                    std::cerr << "[ERROR] Not enough columns for target extraction at row " << rowIndex << std::endl;
-                    return false;
+            // Special case: if outputSize == 0, all columns are inputs, no targets
+            if (this->outputSize == 0) {
+                current_input = current_processed_values; // All columns are inputs
+                // current_target remains empty
+                if (verbose) {
+                    std::cout << "[DEBUG] outputSize=0: All columns are inputs, no targets" << std::endl;
                 }
-            }
+            } else {
+                // Targets are the last outputSize columns
+                for (int i = 0; i < this->outputSize; ++i) {
+                    size_t target_index = current_processed_values.size() - this->outputSize + i;
+                    if (target_index < current_processed_values.size()) {
+                        current_target.push_back(current_processed_values[target_index]);
+                    } else {
+                        std::cerr << "[ERROR] Not enough columns for target extraction at row " << rowIndex << std::endl;
+                        return false;
+                    }
+                }
 
-            // Inputs are all columns except the last outputSizeParam
-            for (size_t i = 0; i < current_processed_values.size() - outputSizeParam; ++i) {
-                current_input.push_back(current_processed_values[i]);
+                // Inputs are all columns except the last outputSize
+                for (size_t i = 0; i < current_processed_values.size() - this->outputSize; ++i) {
+                    current_input.push_back(current_processed_values[i]);
+                }
             }
 
             if (verbose) {
@@ -538,6 +573,10 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
             inputs.push_back(current_input);
             targets.push_back(current_target);
+
+            if (verbose) {
+                std::cout << "[DEBUG] Added row " << rowIndex << " to dataset. Total rows now: " << inputs.size() << std::endl;
+            }
 
             rowIndex++;
             if (numSamplesToLoad > 0 && rowIndex >= numSamplesToLoad) break;
@@ -556,19 +595,14 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
         std::cout << "[DIAGNOSTIC] Final validation - Total rows processed: " << inputs.size() << std::endl;
     }
 
-    // Strict Validation
-    for (size_t i = 0; i < inputs.size(); ++i) {
-        if (inputs[i].size() != (size_t)this->inputSize) {
-            std::cerr << "[DEBUG] Error: Inconsistent input row size detected after parsing. Row " << i << " expected "
-                << this->inputSize << " columns, but found " << inputs[i].size() << " columns.\n";
-            inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
-        }
-    }
-    for (size_t i = 0; i < targets.size(); ++i) {
-        if (targets[i].size() != (size_t)this->outputSize) {
-            std::cerr << "[DEBUG] Error: Inconsistent target row size detected after parsing. Row " << i << " expected "
-                << this->outputSize << " columns, but found " << targets[i].size() << " columns.\n";
-            inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
+    // Only validate targets if outputSize > 0
+    if (this->outputSize > 0) {
+        for (size_t i = 0; i < targets.size(); ++i) {
+            if (targets[i].size() != (size_t)this->outputSize) {
+                std::cerr << "[DEBUG] Error: Inconsistent target row size detected after parsing. Row " << i << " expected "
+                    << this->outputSize << " columns, but found " << targets[i].size() << " columns.\n";
+                inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
+            }
         }
     }
 
@@ -640,6 +674,15 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
     if (verbose) {
         std::cout << "Successfully loaded CSV: " << filename << std::endl;
+        std::cout << "[DEBUG] Final summary:" << std::endl;
+        std::cout << "[DEBUG]   - Total lines processed: " << lineCounter << std::endl;
+        std::cout << "[DEBUG]   - Data rows loaded: " << inputs.size() << std::endl;
+        std::cout << "[DEBUG]   - Target rows loaded: " << targets.size() << std::endl;
+        std::cout << "[DEBUG]   - Input size per row: " << (inputs.empty() ? 0 : inputs[0].size()) << std::endl;
+        std::cout << "[DEBUG]   - Target size per row: " << (targets.empty() ? 0 : targets[0].size()) << std::endl;
+        std::cout << "[DEBUG]   - Determined inputSize: " << this->inputSize << std::endl;
+        std::cout << "[DEBUG]   - Determined outputSize: " << this->outputSize << std::endl;
+        std::cout << "[DEBUG]   - Final numSamples: " << this->numSamples << std::endl;
     }
     return true;
 }
