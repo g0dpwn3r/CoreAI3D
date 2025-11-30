@@ -37,6 +37,7 @@ RUN apt-get update && apt full-upgrade -y && apt upgrade -y && apt-get install -
       libffi-dev libssl-dev \
       sqlite3 \
       imagemagick sox ffmpeg \
+      supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt update && apt install -y \

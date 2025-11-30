@@ -3,6 +3,7 @@
 #include "VisionModule.hpp"
 #include "AudioModule.hpp"
 #include <filesystem>
+#include <algorithm>
 // Constructor for online mode (with database) - only if USE_MYSQL is defined
 #ifdef USE_MYSQL
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
@@ -243,12 +244,14 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 std::cout << std::endl;
             }
             
-            // Trim whitespace from cells
+            // Trim whitespace from cells and remove commas for better float parsing
             for (auto& cell : current_raw_cells) {
                 cell.erase(0, cell.find_first_not_of(" \t\r\n"));
                 cell.erase(cell.find_last_not_of(" \t\r\n") + 1);
+                // Remove commas to handle comma-formatted numbers like "1,826.20"
+                cell.erase(std::remove(cell.begin(), cell.end(), ','), cell.end());
                 if (verbose) {
-                    std::cout << "[DIAGNOSTIC] Trimmed cell: '" << cell << "'" << std::endl;
+                    std::cout << "[DIAGNOSTIC] Trimmed and cleaned cell: '" << cell << "'" << std::endl;
                 }
             }
 
@@ -975,6 +978,35 @@ void Training::normalize(float minRange, float maxRange) {
     this->original_target_global_min = targetMin;
     this->original_target_global_max = targetMax;
 
+    // DIAGNOSTIC: Log normalization setup
+    if (verbose) {
+        std::cout << "[DIAGNOSTIC NORMALIZE] Setting original ranges:" << std::endl;
+        std::cout << "  Input range: [" << inputMin << ", " << inputMax << "]" << std::endl;
+        std::cout << "  Target range: [" << targetMin << ", " << targetMax << "]" << std::endl;
+        std::cout << "  Normalization range: [" << minRange << ", " << maxRange << "]" << std::endl;
+        std::cout << "[DIAGNOSTIC NORMALIZE] First few original targets: ";
+        if (!targets.empty() && !targets[0].empty()) {
+            for (size_t i = 0; i < std::min(size_t(5), targets[0].size()); ++i) {
+                std::cout << targets[0][i] << " ";
+            }
+        }
+        std::cout << std::endl;
+        // Log all targets if few samples
+        if (targets.size() <= 10) {
+            std::cout << "[DIAGNOSTIC NORMALIZE] All original targets:" << std::endl;
+            for (size_t i = 0; i < targets.size(); ++i) {
+                std::cout << "  Sample " << i << ": ";
+                for (size_t j = 0; j < targets[i].size(); ++j) {
+                    std::cout << targets[i][j] << " ";
+                }
+                std::cout << std::endl;
+            }
+        }
+    }
+
+    // Store original targets before normalization for comparison
+    std::vector<std::vector<float>> originalTargetsBeforeNormalize = targets;
+
     // Store command line ranges for scaling and denormalization
     // If --min --max were specified and different from default [0,1], use them for scaling
     if (minRange != 0.0f || maxRange != 1.0f) {
@@ -1020,8 +1052,8 @@ void Training::normalize(float minRange, float maxRange) {
         }
     } else {
         // Default behavior: scale to [0,1] using actual data ranges
-        this->min = std::min(inputMin, targetMin);
-        this->max = std::max(inputMax, targetMax);
+        this->min = 0.0f;
+        this->max = 1.0f;
 
         // Scale inputs to [0, 1] using actual data range
         if (inputDataFound && std::abs(inputMax - inputMin) > std::numeric_limits<float>::epsilon()) {
@@ -1062,6 +1094,13 @@ void Training::normalize(float minRange, float maxRange) {
 
     if (verbose) {
         std::cout << "Data Normalized to [0,1] range!\n";
+        std::cout << "[DIAGNOSTIC NORMALIZE] First few normalized targets after normalization: ";
+        if (!targets.empty() && !targets[0].empty()) {
+            for (size_t i = 0; i < std::min(size_t(3), targets[0].size()); ++i) {
+                std::cout << targets[0][i] << " ";
+            }
+        }
+        std::cout << std::endl;
     }
 }
 
@@ -1452,23 +1491,52 @@ float Training::calculateRMSE() {
 
     auto predictions = core->getResults();
 
-    // Denormalize targets using the original data's global min/max stored in Training class
+    // Denormalize targets using the original target global min/max stored in Training class
     std::vector<std::vector<float>> denormalizedTargets = targets; // Create a copy to denormalize
     float target_range_min_val = this->min; // The 'min' value from `--min` argument
     float target_range_max_val = this->max; // The 'max' value from `--max` argument
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_data_range_diff = original_data_global_max - original_data_global_min;
+    float original_target_range_diff = original_target_global_max - original_target_global_min;
 
-    // Denormalize target values from the [min, max] range back to the original global min/max
-    for (auto& row : denormalizedTargets) {
-        for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
-            }
-            else {
-                val = original_data_global_min; // If ranges are zero, map to original min
+    // DIAGNOSTIC: Log normalization parameters for RMSE calculation
+    if (verbose) {
+        std::cout << "[DIAGNOSTIC RMSE] Denormalization parameters:" << std::endl;
+        std::cout << "  target_range_min_val (this->min): " << target_range_min_val << std::endl;
+        std::cout << "  target_range_max_val (this->max): " << target_range_max_val << std::endl;
+        std::cout << "  target_range_diff: " << target_range_diff << std::endl;
+        std::cout << "  original_target_global_min: " << original_target_global_min << std::endl;
+        std::cout << "  original_target_global_max: " << original_target_global_max << std::endl;
+        std::cout << "  original_target_range_diff: " << original_target_range_diff << std::endl;
+        std::cout << "[DIAGNOSTIC RMSE] First few normalized targets before denormalization: ";
+        if (!targets.empty() && !targets[0].empty()) {
+            for (size_t i = 0; i < std::min(size_t(3), targets[0].size()); ++i) {
+                std::cout << targets[0][i] << " ";
             }
         }
+        std::cout << std::endl;
+    }
+
+    // Denormalize target values assuming they are normalized to [0,1] range
+    for (auto& row : denormalizedTargets) {
+        for (float& val : row) {
+            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = val * original_target_range_diff + original_target_global_min;
+            }
+            else {
+                val = original_target_global_min; // If range is zero, map to original min
+            }
+        }
+    }
+
+    // DIAGNOSTIC: Log first few denormalized targets
+    if (verbose) {
+        std::cout << "[DIAGNOSTIC RMSE] First few denormalized targets: ";
+        if (!denormalizedTargets.empty() && !denormalizedTargets[0].empty()) {
+            for (size_t i = 0; i < std::min(size_t(3), denormalizedTargets[0].size()); ++i) {
+                std::cout << denormalizedTargets[0][i] << " ";
+            }
+        }
+        std::cout << std::endl;
     }
 
     float mse = 0.0f;
@@ -1505,22 +1573,82 @@ float Training::calculateMSE() {
     core->denormalizeOutput();
     auto predictions = core->getResults();
 
-    // Denormalize targets using the original data's global min/max stored in Training class
+    // DIAGNOSTIC: Log normalization parameters
+    if (verbose) {
+        std::cout << "[DIAGNOSTIC MSE] Normalization parameters:" << std::endl;
+        std::cout << "  this->min: " << this->min << ", this->max: " << this->max << std::endl;
+        std::cout << "  original_data_global_min: " << original_data_global_min << ", original_data_global_max: " << original_data_global_max << std::endl;
+        std::cout << "  original_input_global_min: " << original_input_global_min << ", original_input_global_max: " << original_input_global_max << std::endl;
+        std::cout << "  original_target_global_min: " << original_target_global_min << ", original_target_global_max: " << original_target_global_max << std::endl;
+        std::cout << "  Using original_target_global_min/max for denormalization (fixed!)" << std::endl;
+    }
+
+    // Denormalize targets using the original target's global min/max stored in Training class
     std::vector<std::vector<float>> denormalizedTargets = targets;
     float target_range_min_val = this->min;
     float target_range_max_val = this->max;
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_data_range_diff = original_data_global_max - original_data_global_min;
+    float original_target_range_diff = original_target_global_max - original_target_global_min;
 
-    // Denormalize target values from the [min, max] range back to the original global min/max
+    // DIAGNOSTIC: Log first few normalized targets before denormalization
+    if (verbose && !targets.empty() && !targets[0].empty()) {
+        std::cout << "[DIAGNOSTIC MSE] First normalized target values: ";
+        for (size_t i = 0; i < std::min(size_t(3), targets[0].size()); ++i) {
+            std::cout << targets[0][i] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    // Denormalize target values from the [min, max] range back to the original target global min/max
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_target_range_diff + original_target_global_min;
             }
             else {
-                val = original_data_global_min;
+                val = original_target_global_min;
             }
+        }
+    }
+
+    // DIAGNOSTIC: Log first few denormalized targets
+    if (verbose && !denormalizedTargets.empty() && !denormalizedTargets[0].empty()) {
+        std::cout << "[DIAGNOSTIC MSE] First denormalized target values: ";
+        for (size_t i = 0; i < std::min(size_t(3), denormalizedTargets[0].size()); ++i) {
+            std::cout << denormalizedTargets[0][i] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    // DIAGNOSTIC: Log first few predictions
+    if (verbose && !predictions.empty() && !predictions[0].empty()) {
+        std::cout << "[DIAGNOSTIC MSE] First prediction values: ";
+        for (size_t i = 0; i < std::min(size_t(3), predictions[0].size()); ++i) {
+            std::cout << predictions[0][i] << " ";
+        }
+        std::cout << std::endl;
+
+        // Check if all predictions are the same (constant)
+        bool allSame = true;
+        float firstVal = predictions[0][0];
+        for (size_t i = 0; i < predictions.size(); ++i) {
+            for (size_t j = 0; j < predictions[i].size(); ++j) {
+                if (std::abs(predictions[i][j] - firstVal) > 1e-6f) {
+                    allSame = false;
+                    break;
+                }
+            }
+            if (!allSame) break;
+        }
+        if (allSame) {
+            std::cout << "[DIAGNOSTIC MSE] WARNING: All predictions are constant! Value: " << firstVal << std::endl;
+            std::cout << "[DIAGNOSTIC MSE] This indicates the model is not learning. Possible causes:" << std::endl;
+            std::cout << "[DIAGNOSTIC MSE]   - Weights are not being updated during training" << std::endl;
+            std::cout << "[DIAGNOSTIC MSE]   - Gradients are zero or not flowing" << std::endl;
+            std::cout << "[DIAGNOSTIC MSE]   - Denormalization is incorrect" << std::endl;
+            std::cout << "[DIAGNOSTIC MSE]   - Complex transformations are still enabled" << std::endl;
+        } else {
+            std::cout << "[DIAGNOSTIC MSE] Predictions vary - good!" << std::endl;
         }
     }
 
@@ -1558,21 +1686,21 @@ float Training::calculateAccuracy(float threshold) {
     core->denormalizeOutput();
     auto predictions = core->getResults();
 
-    // Denormalize targets using the original data's global min/max stored in Training class
+    // Denormalize targets using the original target global min/max stored in Training class
     std::vector<std::vector<float>> denormalizedTargets = targets;
     float target_range_min_val = this->min;
     float target_range_max_val = this->max;
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_data_range_diff = original_data_global_max - original_data_global_min;
+    float original_target_range_diff = original_target_global_max - original_target_global_min;
 
-    // Denormalize target values from the [min, max] range back to the original global min/max
+    // Denormalize target values assuming they are normalized to [0,1] range
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = val * original_target_range_diff + original_target_global_min;
             }
             else {
-                val = original_data_global_min;
+                val = original_target_global_min;
             }
         }
     }
@@ -1931,16 +2059,16 @@ std::vector<std::vector<float>> Training::denormalizeMatrix(const std::vector<st
     float target_range_min = this->min;
     float target_range_max = this->max;
     float target_range_diff = target_range_max - target_range_min;
-    float original_data_range_diff = original_data_global_max - original_data_global_min;
+    float original_target_range_diff = original_target_global_max - original_target_global_min;
 
     for (const auto& row : normalized_data) {
         std::vector<float> denormalized_row;
         for (float val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                denormalized_row.push_back(((val - target_range_min) / target_range_diff) * original_data_range_diff + original_data_global_min);
+            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
+                denormalized_row.push_back(val * original_target_range_diff + original_target_global_min);
             }
             else {
-                denormalized_row.push_back(original_data_global_min);
+                denormalized_row.push_back(original_target_global_min);
             }
         }
         denormalized_copy.push_back(denormalized_row);
@@ -1968,28 +2096,30 @@ bool Training::saveResultsToCSV(const std::string& filename, const std::string& 
     float target_range_min_val = this->min;
     float target_range_max_val = this->max;
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_data_range_diff = original_data_global_max - original_data_global_min;
+    float original_target_range_diff = original_target_global_max - original_target_global_min;
 
-    // Denormalize inputs if they were normalized and you want them in original scale in output
+    // Denormalize inputs using input-specific min/max
     std::vector<std::vector<float>> denormalizedInputs = inputs;
+    float original_input_range_diff = original_input_global_max - original_input_global_min;
     for (auto& row : denormalizedInputs) {
         for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_input_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_input_range_diff + original_input_global_min;
             }
             else {
-                val = original_data_global_min;
+                val = original_input_global_min;
             }
         }
     }
 
+    // Denormalize targets assuming they are normalized to [0,1] range
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = val * original_target_range_diff + original_target_global_min;
             }
             else {
-                val = original_data_global_min;
+                val = original_target_global_min;
             }
         }
     }
@@ -4594,15 +4724,15 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
             float target_range_min_val = this->min;
             float target_range_max_val = this->max;
             float target_range_diff = target_range_max_val - target_range_min_val;
-            float original_data_range_diff = original_data_global_max - original_data_global_min;
+            float original_target_range_diff = original_target_global_max - original_target_global_min;
 
             for (auto& row : denormalizedTargets) {
                 for (float& val : row) {
-                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                        val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
+                        val = ((val - target_range_min_val) / target_range_diff) * original_target_range_diff + original_target_global_min;
                     }
                     else {
-                        val = original_data_global_min;
+                        val = original_target_global_min;
                     }
                 }
             }
@@ -4610,12 +4740,13 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
             for (size_t i = 0; i < std::min(predictions.size(), denormalizedTargets.size()); ++i) {
                 if (i < inputs.size()) {
                     std::vector<float> denormalizedInputs = inputs[i];
+                    float original_input_range_diff = original_input_global_max - original_input_global_min;
                     for (float& val : denormalizedInputs) {
-                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
-                            val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
+                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_input_range_diff) > std::numeric_limits<float>::epsilon()) {
+                            val = ((val - target_range_min_val) / target_range_diff) * original_input_range_diff + original_input_global_min;
                         }
                         else {
-                            val = original_data_global_min;
+                            val = original_input_global_min;
                         }
                     }
 
@@ -4728,6 +4859,219 @@ void Training::applyDataAugmentation() {
         std::cout << "Data augmentation completed." << std::endl;
     }
 }
+// Problem complexity detection and auto-tuning methods
+Training::ComplexityAnalysis Training::detectProblemComplexity() {
+    ComplexityAnalysis analysis;
+    analysis.complexity_score = 0.0f;
+    analysis.requires_3d_transforms = false;
+    analysis.recommended_layers = 3;
+    analysis.recommended_neurons = 10;
+    analysis.recommended_learning_rate = 0.01;
+    analysis.recommended_epochs = 10;
+
+    if (inputs.empty() || targets.empty()) {
+        analysis.complexity = ProblemComplexity::MODERATE;
+        analysis.reasoning = "No data loaded - using default moderate complexity";
+        return analysis;
+    }
+
+    // Special case: Simple 1D regression with small dataset
+    if (inputSize == 1 && outputSize == 1 && numSamples < 100) {
+        analysis.complexity = ProblemComplexity::SIMPLE;
+        analysis.reasoning = "Simple 1D regression with small dataset";
+        analysis.requires_3d_transforms = false;
+        analysis.recommended_layers = 2;
+        analysis.recommended_neurons = 5;
+        analysis.recommended_learning_rate = 0.1;
+        analysis.recommended_epochs = 20;
+        return analysis;
+    }
+
+    // Factor 1: Input dimensionality
+    float dimensionality_factor = 0.0f;
+    if (inputSize <= 2) {
+        dimensionality_factor = 0.0f; // Very simple
+    } else if (inputSize <= 5) {
+        dimensionality_factor = 0.3f; // Moderate
+    } else if (inputSize <= 10) {
+        dimensionality_factor = 0.6f; // Complex
+    } else {
+        dimensionality_factor = 1.0f; // Very complex
+    }
+
+    // Factor 2: Data size
+    float data_size_factor = 0.0f;
+    if (numSamples < 100) {
+        data_size_factor = 0.0f; // Small dataset
+    } else if (numSamples < 1000) {
+        data_size_factor = 0.2f; // Medium dataset
+    } else if (numSamples < 10000) {
+        data_size_factor = 0.5f; // Large dataset
+    } else {
+        data_size_factor = 0.8f; // Very large dataset
+    }
+
+    // Factor 3: Target variance (normalized)
+    float target_variance = 0.0f;
+    if (!targets.empty() && !targets[0].empty()) {
+        float target_mean = 0.0f;
+        for (const auto& sample : targets) {
+            for (float val : sample) {
+                target_mean += val;
+            }
+        }
+        target_mean /= (targets.size() * targets[0].size());
+
+        float variance_sum = 0.0f;
+        for (const auto& sample : targets) {
+            for (float val : sample) {
+                float diff = val - target_mean;
+                variance_sum += diff * diff;
+            }
+        }
+        target_variance = variance_sum / (targets.size() * targets[0].size());
+    }
+    float variance_factor = std::min(1.0f, target_variance * 10.0f); // Scale variance to 0-1
+
+    // Factor 4: Feature correlation analysis (simplified)
+    float correlation_factor = 0.0f;
+    if (inputSize > 1 && numSamples > 10) {
+        // Calculate average correlation between features
+        float total_correlation = 0.0f;
+        int correlation_count = 0;
+
+        for (size_t i = 0; i < inputSize; ++i) {
+            for (size_t j = i + 1; j < inputSize; ++j) {
+                // Simple correlation calculation
+                float mean_i = 0.0f, mean_j = 0.0f;
+                for (const auto& sample : inputs) {
+                    mean_i += sample[i];
+                    mean_j += sample[j];
+                }
+                mean_i /= numSamples;
+                mean_j /= numSamples;
+
+                float covariance = 0.0f, var_i = 0.0f, var_j = 0.0f;
+                for (const auto& sample : inputs) {
+                    float diff_i = sample[i] - mean_i;
+                    float diff_j = sample[j] - mean_j;
+                    covariance += diff_i * diff_j;
+                    var_i += diff_i * diff_i;
+                    var_j += diff_j * diff_j;
+                }
+
+                if (var_i > 0 && var_j > 0) {
+                    float correlation = covariance / std::sqrt(var_i * var_j);
+                    total_correlation += std::abs(correlation);
+                    correlation_count++;
+                }
+            }
+        }
+
+        if (correlation_count > 0) {
+            float avg_correlation = total_correlation / correlation_count;
+            correlation_factor = avg_correlation; // High correlation suggests simpler relationships
+        }
+    }
+
+    // Factor 5: Check if data appears to be 3D spatial (multiples of 3)
+    bool appears_3d_spatial = (inputSize % 3 == 0) && (inputSize >= 3);
+    float spatial_factor = appears_3d_spatial ? 0.7f : 0.0f;
+
+    // Combine factors with weights
+    analysis.complexity_score = (
+        dimensionality_factor * 0.25f +
+        data_size_factor * 0.15f +
+        variance_factor * 0.20f +
+        (1.0f - correlation_factor) * 0.25f + // Inverse: low correlation = more complex
+        spatial_factor * 0.15f
+    );
+
+    // Determine complexity level
+    if (analysis.complexity_score < 0.5f) {
+        analysis.complexity = ProblemComplexity::SIMPLE;
+        analysis.reasoning = "Simple problem detected: low dimensionality, small dataset, or high feature correlation";
+        analysis.requires_3d_transforms = false;
+        analysis.recommended_layers = 2;
+        analysis.recommended_neurons = 5;
+        analysis.recommended_learning_rate = 0.1;
+        analysis.recommended_epochs = 20;
+    } else if (analysis.complexity_score < 0.7f) {
+        analysis.complexity = ProblemComplexity::MODERATE;
+        analysis.reasoning = "Moderate complexity: balanced characteristics";
+        analysis.requires_3d_transforms = appears_3d_spatial && inputSize > 6;
+        analysis.recommended_layers = 3;
+        analysis.recommended_neurons = 10;
+        analysis.recommended_learning_rate = 0.01;
+        analysis.recommended_epochs = 50;
+    } else {
+        analysis.complexity = ProblemComplexity::COMPLEX;
+        analysis.reasoning = "Complex problem detected: high dimensionality, large dataset, or spatial 3D data";
+        analysis.requires_3d_transforms = true;
+        analysis.recommended_layers = 4;
+        analysis.recommended_neurons = 20;
+        analysis.recommended_learning_rate = 0.001;
+        analysis.recommended_epochs = 100;
+    }
+
+    if (verbose) {
+        std::cout << "[COMPLEXITY ANALYSIS] Score: " << analysis.complexity_score
+                  << ", Level: " << (analysis.complexity == ProblemComplexity::SIMPLE ? "SIMPLE" :
+                                   analysis.complexity == ProblemComplexity::MODERATE ? "MODERATE" : "COMPLEX")
+                  << ", 3D Transforms: " << (analysis.requires_3d_transforms ? "YES" : "NO") << std::endl;
+        std::cout << "[COMPLEXITY ANALYSIS] Reasoning: " << analysis.reasoning << std::endl;
+        std::cout << "[COMPLEXITY ANALYSIS] Recommendations: layers=" << analysis.recommended_layers
+                  << ", neurons=" << analysis.recommended_neurons
+                  << ", lr=" << analysis.recommended_learning_rate
+                  << ", epochs=" << analysis.recommended_epochs << std::endl;
+    }
+
+    return analysis;
+}
+
+void Training::applyAutoTuning(ComplexityAnalysis& analysis) {
+    // Apply recommended hyperparameters
+    layers = analysis.recommended_layers;
+    neurons = analysis.recommended_neurons;
+    learningRate = analysis.recommended_learning_rate;
+
+    // Configure 3D transforms based on complexity
+    configure3DTransforms(analysis.requires_3d_transforms);
+
+    if (verbose) {
+        std::cout << "[AUTO-TUNING] Applied recommendations: layers=" << layers
+                  << ", neurons=" << neurons << ", learning_rate=" << learningRate << std::endl;
+    }
+}
+
+void Training::configure3DTransforms(bool enable_complex_transforms) {
+    if (!core) {
+        if (verbose) {
+            std::cout << "[CONFIGURE 3D] No core instance available for transform configuration" << std::endl;
+        }
+        return;
+    }
+
+    if (enable_complex_transforms) {
+        // Enable complex 3D transforms for complex problems
+        core->set3DTransformConfig(true, true, true, true, true, true, true, true);
+
+        // Set reasonable weights
+        core->set3DTransformWeights(0.1f, 0.1f, 0.05f, 0.1f, 0.1f, 0.1f, 0.05f);
+    } else {
+        // Disable complex transforms for simple problems
+        core->set3DTransformConfig(false, false, false, false, false, false, false, false);
+
+        // Zero out weights
+        core->set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    if (verbose) {
+        std::cout << "[CONFIGURE 3D] " << (enable_complex_transforms ? "Enabled" : "Disabled")
+                  << " complex 3D transforms" << std::endl;
+    }
+}
+
 // Hyperparameter tuning integration methods
 void Training::setHyperparameters(const std::map<std::string, float>& float_params,
                                  const std::map<std::string, int>& int_params,

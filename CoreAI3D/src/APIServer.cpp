@@ -23,6 +23,8 @@
 #include <regex>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 using namespace std::chrono_literals;
 
@@ -3698,6 +3700,67 @@ json APIServer::handleDatasetAPI(const std::string& action, const json& paramete
             return createErrorResponse("Database not available", 503);
         }
 
+        // Helper function to read CSV file and return data as vector of vectors
+        auto readCSVFile = [](const std::string& filename, bool hasHeader, char delimiter) -> std::pair<std::vector<std::vector<float>>, std::string> {
+            std::vector<std::vector<float>> data;
+            std::ifstream file(filename);
+            std::string line;
+            int lineNumber = 0;
+
+            if (!file.is_open()) {
+                return {data, "Failed to open file: " + filename};
+            }
+
+            // Skip header if present
+            if (hasHeader && std::getline(file, line)) {
+                lineNumber++;
+            }
+
+            // Read data lines
+            while (std::getline(file, line)) {
+                lineNumber++;
+                std::vector<float> row;
+                std::stringstream ss(line);
+                std::string cell;
+
+                while (std::getline(ss, cell, delimiter)) {
+                    try {
+                        // Trim whitespace
+                        cell.erase(cell.begin(), std::find_if(cell.begin(), cell.end(), [](unsigned char ch) {
+                            return !std::isspace(ch);
+                        }));
+                        cell.erase(std::find_if(cell.rbegin(), cell.rend(), [](unsigned char ch) {
+                            return !std::isspace(ch);
+                        }).base(), cell.end());
+
+                        if (!cell.empty()) {
+                            row.push_back(std::stof(cell));
+                        }
+                    } catch (const std::exception&) {
+                        return {data, "Invalid numeric data in file " + filename + " at line " + std::to_string(lineNumber) + ", cell: '" + cell + "'"};
+                    }
+                }
+
+                if (!row.empty()) {
+                    data.push_back(row);
+                }
+            }
+
+            file.close();
+            return {data, ""}; // Empty string means success
+        };
+
+        // Helper function to combine multiple CSV datasets
+        auto combineCSVData = [](const std::vector<std::vector<std::vector<float>>>& datasets) -> std::vector<std::vector<float>> {
+            std::vector<std::vector<float>> combined;
+
+            for (const auto& dataset : datasets) {
+                combined.insert(combined.end(), dataset.begin(), dataset.end());
+            }
+
+            return combined;
+        };
+
         if (action == "create" && method == "POST") {
             // Create a new dataset
             std::string datasetName = parameters.value("name", "");
@@ -3873,6 +3936,247 @@ json APIServer::handleDatasetAPI(const std::string& action, const json& paramete
                 {"inputs", inputs},
                 {"targets", targets},
                 {"message", "Dataset records retrieved successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "load_csv_directory" && method == "POST") {
+            // Load all CSV files from a directory and combine them into a single dataset
+            std::string directory = parameters.value("directory", "");
+            std::string datasetName = parameters.value("dataset_name", "combined_csv_dataset");
+            std::string description = parameters.value("description", "Dataset created from CSV files in directory");
+            bool hasHeader = parameters.value("has_header", true);
+            char delimiter = parameters.value("delimiter", ',');
+            int outputSize = parameters.value("output_size", 1);
+
+            // Validate parameters
+            if (directory.empty()) {
+                return createErrorResponse("Directory path cannot be empty", 400);
+            }
+            if (!std::filesystem::exists(directory)) {
+                return createErrorResponse("Directory does not exist: " + directory, 400);
+            }
+            if (!std::filesystem::is_directory(directory)) {
+                return createErrorResponse("Path is not a directory: " + directory, 400);
+            }
+
+            // Find all CSV files in the directory
+            std::vector<std::string> csvFiles;
+            for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+                if (entry.is_regular_file()) {
+                    std::string filename = entry.path().filename().string();
+                    std::string extension = getFileExtension(filename);
+                    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+                    if (extension == "csv") {
+                        csvFiles.push_back(entry.path().string());
+                    }
+                }
+            }
+
+            if (csvFiles.empty()) {
+                return createErrorResponse("No CSV files found in directory: " + directory, 400);
+            }
+
+            // Read and combine all CSV files
+            std::vector<std::vector<std::vector<float>>> allDatasets;
+            std::vector<std::string> processedFiles;
+            int totalRows = 0;
+            int numFeatures = -1; // Will be determined from first file
+
+            for (const auto& csvFile : csvFiles) {
+                auto [data, error] = readCSVFile(csvFile, hasHeader, delimiter);
+                if (!error.empty()) {
+                    return createErrorResponse("Error reading CSV file " + csvFile + ": " + error, 500);
+                }
+
+                if (data.empty()) {
+                    std::cout << "[WARNING] Empty CSV file skipped: " << csvFile << std::endl;
+                    continue;
+                }
+
+                // Check feature consistency
+                if (numFeatures == -1) {
+                    numFeatures = data[0].size();
+                } else if (data[0].size() != static_cast<size_t>(numFeatures)) {
+                    return createErrorResponse("Inconsistent number of features in CSV file " + csvFile +
+                                             ". Expected " + std::to_string(numFeatures) + " features, got " +
+                                             std::to_string(data[0].size()), 400);
+                }
+
+                allDatasets.push_back(data);
+                processedFiles.push_back(csvFile);
+                totalRows += data.size();
+            }
+
+            if (allDatasets.empty()) {
+                return createErrorResponse("No valid CSV data found in directory", 400);
+            }
+
+            // Combine all datasets
+            std::vector<std::vector<float>> combinedData = combineCSVData(allDatasets);
+
+            // Create dataset in database
+            int datasetId = database->addDataset(datasetName, description, totalRows, numFeatures, outputSize);
+
+            // Add all records to the dataset
+            for (size_t rowIndex = 0; rowIndex < combinedData.size(); ++rowIndex) {
+                const auto& row = combinedData[rowIndex];
+                std::vector<float> features(row.begin(), row.end() - outputSize);
+                std::vector<float> labels(row.end() - outputSize, row.end());
+
+                database->addDatasetRecord(datasetId, static_cast<int>(rowIndex), features, labels);
+            }
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"dataset_name", datasetName},
+                {"description", description},
+                {"directory", directory},
+                {"files_processed", processedFiles.size()},
+                {"files_list", processedFiles},
+                {"total_rows", totalRows},
+                {"num_features", numFeatures},
+                {"output_size", outputSize},
+                {"has_header", hasHeader},
+                {"delimiter", std::string(1, delimiter)},
+                {"message", "CSV directory loaded and combined successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "add_file" && method == "POST") {
+            // Add a single CSV file to an existing dataset
+            int datasetId = parameters.value("dataset_id", -1);
+            std::string filename = parameters.value("filename", "");
+            bool hasHeader = parameters.value("has_header", true);
+            char delimiter = parameters.value("delimiter", ',');
+            int outputSize = parameters.value("output_size", 1);
+
+            // Validate parameters
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+            if (filename.empty()) {
+                return createErrorResponse("Filename cannot be empty", 400);
+            }
+            if (!std::filesystem::exists(filename)) {
+                return createErrorResponse("File does not exist: " + filename, 400);
+            }
+
+            // Read CSV file
+            auto [data, error] = readCSVFile(filename, hasHeader, delimiter);
+            if (!error.empty()) {
+                return createErrorResponse("Error reading CSV file: " + error, 500);
+            }
+
+            if (data.empty()) {
+                return createErrorResponse("CSV file is empty or contains no valid data", 400);
+            }
+
+            // Validate data consistency
+            int numFeatures = data[0].size() - outputSize;
+            if (numFeatures <= 0) {
+                return createErrorResponse("Invalid output_size: must be less than total columns", 400);
+            }
+
+            // Get current dataset info to validate consistency
+            Database::DatasetData datasetInfo = database->getDataset(datasetId);
+            if (datasetInfo.numFeatures != numFeatures) {
+                return createErrorResponse("Feature count mismatch: dataset expects " +
+                                         std::to_string(datasetInfo.numFeatures) + " features, file has " +
+                                         std::to_string(numFeatures), 400);
+            }
+            if (datasetInfo.numLabels != outputSize) {
+                return createErrorResponse("Label count mismatch: dataset expects " +
+                                         std::to_string(datasetInfo.numLabels) + " labels, specified output_size is " +
+                                         std::to_string(outputSize), 400);
+            }
+
+            // Add records to dataset with filename tracking
+            int startingRowIndex = datasetInfo.numRows;
+            for (size_t i = 0; i < data.size(); ++i) {
+                const auto& row = data[i];
+                std::vector<float> features(row.begin(), row.end() - outputSize);
+                std::vector<float> labels(row.end() - outputSize, row.end());
+
+                database->addDatasetRecord(datasetId, startingRowIndex + static_cast<int>(i), features, labels, filename);
+            }
+
+            // Update dataset metadata (num_rows)
+            int newTotalRows = datasetInfo.numRows + static_cast<int>(data.size());
+            database->updateDatasetRowCount(datasetId, newTotalRows);
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"filename", filename},
+                {"records_added", static_cast<int>(data.size())},
+                {"total_rows", newTotalRows},
+                {"num_features", numFeatures},
+                {"output_size", outputSize},
+                {"has_header", hasHeader},
+                {"delimiter", std::string(1, delimiter)},
+                {"message", "File added to dataset successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "remove_file" && method == "DELETE") {
+            // Remove records from a specific file from a dataset
+            int datasetId = parameters.value("dataset_id", -1);
+            std::string filename = parameters.value("filename", "");
+
+            // Validate parameters
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+            if (filename.empty()) {
+                return createErrorResponse("Filename cannot be empty", 400);
+            }
+
+            // Check if file exists in dataset
+            std::vector<std::string> datasetFiles = database->getDatasetFiles(datasetId);
+            bool fileExists = std::find(datasetFiles.begin(), datasetFiles.end(), filename) != datasetFiles.end();
+            if (!fileExists) {
+                return createErrorResponse("File '" + filename + "' not found in dataset " + std::to_string(datasetId), 404);
+            }
+
+            // Get current row count before removal
+            Database::DatasetData currentDatasetInfo = database->getDataset(datasetId);
+            int rowsBeforeRemoval = currentDatasetInfo.numRows;
+
+            // Remove records for this file
+            database->removeDatasetFileRecords(datasetId, filename);
+
+            // Update dataset row count
+            Database::DatasetData updatedDatasetInfo = database->getDataset(datasetId);
+            int rowsAfterRemoval = updatedDatasetInfo.numRows;
+            int recordsRemoved = rowsBeforeRemoval - rowsAfterRemoval;
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"filename", filename},
+                {"records_removed", recordsRemoved},
+                {"remaining_rows", rowsAfterRemoval},
+                {"message", "File removed from dataset successfully"},
+                {"timestamp", getTimestampString()}
+            };
+            return response;
+        }
+        else if (action == "list_files" && method == "GET") {
+            // List all files in a dataset
+            int datasetId = parameters.value("dataset_id", -1);
+
+            if (datasetId <= 0) {
+                return createErrorResponse("Valid dataset ID required", 400);
+            }
+
+            std::vector<std::string> files = database->getDatasetFiles(datasetId);
+
+            json response = {
+                {"dataset_id", datasetId},
+                {"files", files},
+                {"file_count", static_cast<int>(files.size())},
+                {"message", "Dataset files retrieved successfully"},
                 {"timestamp", getTimestampString()}
             };
             return response;

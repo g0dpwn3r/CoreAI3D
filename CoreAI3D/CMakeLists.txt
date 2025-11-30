@@ -193,6 +193,8 @@ set(SOURCE_FILES
     src/Optimizer.cpp
     src/LearningRateScheduler.cpp
     src/DataAugmentation.cpp
+    src/ValidationFramework.cpp
+    src/BenchmarkingEngine.cpp
     # src/HyperparameterTuner.cpp
 )
 
@@ -393,14 +395,15 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMENT "Copying CoreAI3D executable to $HOME/tools/CoreAI3D"
     VERBATIM)
 
-# Add post-build automation script (disabled for now due to path issues)
+# Add post-build automation script
 add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "SKIP_POST_BUILD=$ENV{SKIP_POST_BUILD}"
-    COMMAND python ${CMAKE_SOURCE_DIR}/post_build_automation.py
-        --source-dir ${PROJECT_SOURCE_DIR}
+    COMMAND python3 /home/carlon/code/CoreAI3D/post_build_automation.py
+        --source-dir $<TARGET_FILE_DIR:CoreAI3D>
         --build-dir $<TARGET_FILE_DIR:CoreAI3D>
         --target-executable $<TARGET_FILE:CoreAI3D>
-        --skip-post "$ENV{SKIP_POST_BUILD}" # <--- ADDED ARGUMENT
+        --workspace-dir /home/carlon/code/CoreAI3D
+        --skip-post "$ENV{SKIP_POST_BUILD}"
     COMMENT "Running post-build automation script"
     VERBATIM
 )

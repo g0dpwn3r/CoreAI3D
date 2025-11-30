@@ -70,18 +70,26 @@ public:
     void addDatasetRecord(int& datasetId, int rowIndex,
         const std::vector<float>& featureValues,
         const std::vector<float>& labelValues);
+    void addDatasetRecord(int& datasetId, int rowIndex,
+        const std::vector<float>& featureValues,
+        const std::vector<float>& labelValues,
+        const std::string& filename); // New method with filename tracking
     DatasetData
         getDataset(int& datasetId); // New method to load dataset and its metadata
     void updateDatasetRecordLabels(
         int& datasetId, int rowIndex,
         const std::vector<float>& labelValues); // New method to update labels
     void clearDatasetRecords(
-        long long& datasetId); // Changed to long long to match DB schema
+        long long datasetId); // Changed to long long to match DB schema
+    void removeDatasetFileRecords(
+        long long datasetId, const std::string& filename); // New method to remove records by filename
+    void updateDatasetRowCount(long long datasetId, int newRowCount); // New method to update dataset row count
     bool getDatasetRecords(long long datasetId,
         std::vector<std::vector<float>>& loadedInputs,
         std::vector<std::vector<float>>& loadedTargets,
         long long& loadedNumSamples,
         int& loadedInputSize, int& loadedOutputSize);
+    std::vector<std::string> getDatasetFiles(long long datasetId); // New method to get files in dataset
 
     // NEW: Struct to hold prediction results for a single sample
     struct PredictionResult

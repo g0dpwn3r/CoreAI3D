@@ -200,6 +200,7 @@ public:
     bool loadXMLFile(const std::string& filename, const std::string& xpath, int maxSeqLen, int embeddingDim);
     bool loadDocumentFile(const std::string& filename, int maxSeqLen, int embeddingDim);
     bool loadFile(const std::string& filename, int maxSeqLen, int embeddingDim); // General method that detects file type and routes to appropriate loader
+    bool loadCSVFromData(const std::vector<std::vector<float>>& data, const std::vector<std::vector<float>>& targets, const std::string& datasetName); // Load data directly into the training system
 
     // Batch processing methods for multiple files
     bool loadBatchFiles(const std::vector<std::string>& filenames, int maxSeqLen, int embeddingDim);
@@ -301,6 +302,24 @@ public:
     bool saveComprehensiveTrainingData(int datasetId, const std::string& datasetName);
     int getDecimalPlacesInString(float value, int precision_for_conversion);
     // NEW: Helper method to denormalize a matrix
+
+    // Problem complexity detection and auto-tuning methods
+    enum class ProblemComplexity { SIMPLE, MODERATE, COMPLEX };
+
+    struct ComplexityAnalysis {
+        ProblemComplexity complexity = ProblemComplexity::MODERATE;
+        float complexity_score = 0.0f; // 0.0 = simple, 1.0 = complex
+        std::string reasoning = "";
+        bool requires_3d_transforms = false;
+        int recommended_layers = 3;
+        int recommended_neurons = 10;
+        double recommended_learning_rate = 0.01;
+        int recommended_epochs = 10;
+    };
+
+    ComplexityAnalysis detectProblemComplexity();
+    void applyAutoTuning(ComplexityAnalysis& analysis);
+    void configure3DTransforms(bool enable_complex_transforms);
 
     // Hyperparameter tuning integration methods
     void setHyperparameters(const std::map<std::string, float>& float_params,

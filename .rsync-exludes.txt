@@ -1,9 +1,0 @@
-.vs/
-.git/
-build/
-out/
-vcpkg/
-vcpkg_installed/
-mysql-connector-cpp/
-CMakeCache.txt
-CMakeFiles/

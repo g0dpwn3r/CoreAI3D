@@ -14,7 +14,7 @@ RUN zypper refresh && zypper update -y && zypper install -y \
     libopenssl-devel zlib-devel libbz2-devel readline-devel \
     sqlite3-devel ncurses-devel xz-devel tk-devel \
     libxml2-devel libxmlsec1-devel libffi-devel \
-    lzma-devel make \
+    lzma-devel make supervisor\
     && zypper clean --all
 
 # Create sandbox user

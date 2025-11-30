@@ -116,4 +116,4 @@ set(CPACK_GENERATOR "DEB;NSIS")
 
 message(STATUS "CPack configured for generators: ${CPACK_GENERATOR}")
 enable_testing()
-add_subdirectory(tests)
+add_subdirectory(test/tests)

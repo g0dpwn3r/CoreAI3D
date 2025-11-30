@@ -75,6 +75,21 @@ CPackSourceConfig.cmake
 *.swo
 *~
 
+# IntelliJ IDEA
+.idea/
+
+# Vim
+*.un~
+
+# Emacs
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
 # ==========================================
 # Dependencies and Package Managers
 # ==========================================
@@ -111,6 +126,33 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# tox
+.tox/
+
+# nox
+.nox/
+
+# coverage
+.coverage
+htmlcov/
+
+# virtualenv
+.venv/
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+.pdm-python
+.pdm-build/
 
 # Node.js (if used)
 node_modules/
@@ -193,6 +235,20 @@ Icon
 *~
 .directory
 .Trash-*
+
+# More Windows
+$RECYCLE.BIN/
+*.stackdump
+
+# More macOS
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# More Linux
+.fuse_hidden*
 
 # ==========================================
 # Package Manager and Build Tools
@@ -347,6 +403,25 @@ ENV/
 *.m~
 *.mat
 
+# Cloud credentials
+.aws/
+.azure/
+.gcp/
+
+# Kubernetes
+.kube/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Ansible
+*.retry
+
+# Vagrant
+.vagrant/
+
 # ==========================================
 # Custom Patterns for CoreAI3D
 # ==========================================
@@ -373,6 +448,18 @@ ENV/
 # Ignore compiled shaders or assets
 *.spv
 *.glsl
+
+# Docker
+docker-compose.override.yml
+
+# Environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# SSH
+.ssh/
 
 # ==========================================
 # Final Notes

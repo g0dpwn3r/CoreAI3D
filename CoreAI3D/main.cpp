@@ -15,47 +15,6 @@
 // External library headers (Boost, cURL, MySQL, etc.)
 // Include specific Boost headers as needed for their functionality.
 namespace po = boost::program_options; // Alias for convenience
-#include <getopt.h>
-
-// Define long options
-struct option long_options[] = {
-    {"help", no_argument, 0, 'h'},
-    {"verbose", no_argument, 0, 'v'},
-    {"input-file", required_argument, 0, 'i'},
-    {"output-csv", required_argument, 0, 'o'},
-    {"target", required_argument, 0, 't'},
-    {"layers", required_argument, 0, 'l'},
-    {"samples", required_argument, 0, 's'},
-    {"epochs", required_argument, 0, 'e'},
-    {"neurons", required_argument, 0, 'n'},
-    {"learning-rate", required_argument, 0, 'r'},
-    {"min", required_argument, 0, 'm'},
-    {"max", required_argument, 0, 'M'},
-    {"input-size", required_argument, 0, 'z'},
-    {"output-size", required_argument, 0, 'Z'},
-    {"dataset-name", required_argument, 0, 'N'},
-    {"dataset-id", required_argument, 0, 'I'},
-    {"api-port", required_argument, 0, 'A'},
-    {"start-predict", no_argument, 0, 'P'},
-    {"start-chat", no_argument, 0, 'C'},
-    {"load-model", required_argument, 0, 'L'},
-    {"embedding-file", required_argument, 0, 'E'},
-    {"offline", no_argument, 0, 'O'},
-    {"enable-websocket", no_argument, 0, 'W'},
-    {"create-table", no_argument, 0, 'T'},
-    {"db-host", required_argument, 0, 'H'},
-    {"db-user", required_argument, 0, 'U'},
-    {"db-password", required_argument, 0, 'D'},
-    {"db-port", required_argument, 0, 'R'},
-    {"db-schema", required_argument, 0, 'S'},
-    {"batch-size", required_argument, 0, 'b'},
-    {"calculus-activation", no_argument, 0, 'C'},
-    {"contains-text", no_argument, 0, 0},
-    {"contains-header", no_argument, 0, 0},
-    {"contains-date", no_argument, 0, 0},
-    {"threads", required_argument, 0, 'j'},
-    {0, 0, 0, 0}
-};
 int main(int argc, char* argv[]) {
     // Simple argument parsing without Boost
     bool verbose = false;
@@ -120,22 +79,6 @@ int main(int argc, char* argv[]) {
     // Basic argument parsing
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        // Handle --arg=value format by checking for '=' in the argument
-        if (arg.find('=') != std::string::npos) {
-            // Split the argument at '='
-            size_t equalsPos = arg.find('=');
-            std::string flag = arg.substr(0, equalsPos);
-            std::string value = arg.substr(equalsPos + 1);
-            arg = flag; // Update arg to just the flag part
-            // Insert the value as the next argument
-            argv[i] = const_cast<char*>(flag.c_str());
-            // Shift remaining arguments and insert value
-            for (int j = argc; j > i + 1; --j) {
-                argv[j] = argv[j - 1];
-            }
-            argv[i + 1] = const_cast<char*>(value.c_str());
-            ++argc;
-        }
         if (arg == "--help" || arg == "-h") {
             std::cout << R"(
         ,     ,
@@ -212,6 +155,12 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --output-csv <path> or -o <path>\n";
             std::cout << "    Dependencies: Required for --start-predict mode\n";
             std::cout << "    Example: --output-csv ./results/predictions.csv\n\n";
+            std::cout << "  --target, -t <file>\n";
+            std::cout << "    Specify the target CSV file for training targets.\n";
+            std::cout << "    Expected value: Path to a valid CSV file containing target values\n";
+            std::cout << "    Usage: --target <path> or -t <path>\n";
+            std::cout << "    Dependencies: Used in prediction/training mode\n";
+            std::cout << "    Example: --target ./data/targets.csv\n\n";
             std::cout << "API SERVER OPTIONS:\n";
             std::cout << "  --api-port <port>\n";
             std::cout << "    Set the port number for the API server.\n";
@@ -367,23 +316,23 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
-        } else if (arg == "--input-file" || arg == "-i") {
+        } else if (arg.find("--input-file") == 0 || arg == "-i") {
             std::string value = extractValue(i, "--input-file", arg);
             if (!value.empty()) inputFile = value;
-        } else if (arg == "--output-csv" || arg == "-o") {
+        } else if (arg.find("--output-csv") == 0 || arg == "-o") {
             std::string value = extractValue(i, "--output-csv", arg);
             if (!value.empty()) outputCsvFile = value;
-        } else if (arg == "--api-port") {
+        } else if (arg.find("--api-port") == 0) {
             std::string value = extractValue(i, "--api-port", arg);
             if (!value.empty()) apiPort = value;
         } else if (arg == "--start-predict") {
             startPredict = true;
         } else if (arg == "--start-chat") {
             startChat = true;
-        } else if (arg == "--load-model") {
+        } else if (arg.find("--load-model") == 0) {
             std::string value = extractValue(i, "--load-model", arg);
             if (!value.empty()) loadModelId = value;
-        } else if (arg == "--embedding-file") {
+        } else if (arg.find("--embedding-file") == 0) {
             std::string value = extractValue(i, "--embedding-file", arg);
             if (!value.empty()) embeddingFile = value;
         } else if (arg == "--offline") {
@@ -392,58 +341,58 @@ int main(int argc, char* argv[]) {
             enableWebsocket = true;
         } else if (arg == "--create-table" || arg == "--create-tables") {
             createTableFlag = true;
-        } else if (arg == "--db-host") {
+        } else if (arg.find("--db-host") == 0) {
             std::string value = extractValue(i, "--db-host", arg);
             if (!value.empty()) dbHost = value;
-        } else if (arg == "--db-user") {
+        } else if (arg.find("--db-user") == 0) {
             std::string value = extractValue(i, "--db-user", arg);
             if (!value.empty()) dbUser = value;
-        } else if (arg == "--db-password") {
+        } else if (arg.find("--db-password") == 0) {
             std::string value = extractValue(i, "--db-password", arg);
             if (!value.empty()) dbPassword = value;
-        } else if (arg == "--db-port") {
+        } else if (arg.find("--db-port") == 0) {
             std::string value = extractValue(i, "--db-port", arg);
             if (!value.empty()) dbPort = value;
-        } else if (arg == "--db-schema") {
+        } else if (arg.find("--db-schema") == 0) {
             std::string value = extractValue(i, "--db-schema", arg);
             if (!value.empty()) dbSchema = value;
-        } else if (arg == "--target" || arg == "-t") {
+        } else if (arg.find("--target") == 0 || arg == "-t") {
             std::string value = extractValue(i, "--target", arg);
             if (!value.empty()) targetFile = value;
-        } else if (arg == "--layers" || arg == "-l") {
+        } else if (arg.find("--layers") == 0 || arg == "-l") {
             std::string value = extractValue(i, "--layers", arg);
             if (!value.empty()) layers = value;
-        } else if (arg == "--samples" || arg == "-s") {
+        } else if (arg.find("--samples") == 0 || arg == "-s") {
             std::string value = extractValue(i, "--samples", arg);
             if (!value.empty()) samples = value;
-        } else if (arg == "--epochs" || arg == "-e") {
+        } else if (arg.find("--epochs") == 0 || arg == "-e") {
             std::string value = extractValue(i, "--epochs", arg);
             if (!value.empty()) epochs = value;
-        } else if (arg == "--neurons" || arg == "-n") {
+        } else if (arg.find("--neurons") == 0 || arg == "-n") {
             std::string value = extractValue(i, "--neurons", arg);
             if (!value.empty()) neurons = value;
-        } else if (arg == "--learning-rate" || arg == "-r") {
+        } else if (arg.find("--learning-rate") == 0 || arg == "-r") {
             std::string value = extractValue(i, "--learning-rate", arg);
             if (!value.empty()) learningRate = value;
-        } else if (arg == "--min") {
+        } else if (arg.find("--min") == 0) {
             std::string value = extractValue(i, "--min", arg);
             if (!value.empty()) minRange = value;
-        } else if (arg == "--max") {
+        } else if (arg.find("--max") == 0) {
             std::string value = extractValue(i, "--max", arg);
             if (!value.empty()) maxRange = value;
-        } else if (arg == "--input-size" || arg == "--inputsize") {
+        } else if (arg.find("--input-size") == 0 || arg == "--inputsize") {
             std::string value = extractValue(i, "--input-size", arg);
             if (!value.empty()) inputSize = value;
-        } else if (arg == "--output-size" || arg == "--outputsize") {
+        } else if (arg.find("--output-size") == 0 || arg == "--outputsize") {
             std::string value = extractValue(i, "--output-size", arg);
             if (!value.empty()) outputSize = value;
-        } else if (arg == "--dataset-name") {
+        } else if (arg.find("--dataset-name") == 0) {
             std::string value = extractValue(i, "--dataset-name", arg);
             if (!value.empty()) datasetName = value;
-        } else if (arg == "--dataset-id") {
+        } else if (arg.find("--dataset-id") == 0) {
             std::string value = extractValue(i, "--dataset-id", arg);
             if (!value.empty()) datasetId = value;
-        } else if (arg == "--batch-size" || arg == "-b") {
+        } else if (arg.find("--batch-size") == 0 || arg == "-b") {
             std::string value = extractValue(i, "--batch-size", arg);
             if (!value.empty()) batchSize = value;
         } else if (arg == "--calculus-activation" || arg == "-C") {
@@ -454,7 +403,7 @@ int main(int argc, char* argv[]) {
             containsHeader = true;
         } else if (arg == "--contains-date") {
             containsDate = true;
-        } else if (arg == "--threads" || arg == "-j") {
+        } else if (arg.find("--threads") == 0 || arg == "-j") {
             std::string value = extractValue(i, "--threads", arg);
             if (!value.empty()) threads = value;
         } else {
@@ -462,19 +411,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // po::variables_map vm;
-    // try {
-    //     po::store(po::parse_command_line(argc, argv, desc), vm);
-    //     po::notify(vm);
-    // }
-    // catch (const po::error& e) {
-    //     std::cerr << "ERROR: Error parsing arguments: " << e.what() << std::endl;
-    //     std::cerr << desc << std::endl; // Print help message from Boost.Program_options
-    //     return 1;
-    // }
-
-    // Help already handled above
-    // bool verbose = vm["verbose"].as<bool>();
 
     // --- START DEBUG PRINTS (Argc/Argv) ---
     if (verbose) {

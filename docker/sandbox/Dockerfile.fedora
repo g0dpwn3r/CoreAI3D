@@ -13,7 +13,7 @@ RUN dnf update -y && dnf install -y \
     nodejs npm \
     libffi-devel sqlite supervisor \
     ImageMagick sox boost-devel \
-    cmake git \
+    cmake git supervisor\
     libssl-devel zlib-devel bzip2-devel readline-devel \
     sqlite-devel ncurses-devel xz-devel tk-devel \
     libxml2-devel libxmlsec1-devel libffi-devel \

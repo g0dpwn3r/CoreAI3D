@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import logging
 import sys
+import os
 from pathlib import Path
 
 # Set up logging
@@ -247,6 +248,7 @@ def main():
     parser.add_argument('--source-dir', required=True, help='Source directory to copy')
     parser.add_argument('--build-dir', required=True, help='Build directory (for reference)')
     parser.add_argument('--target-executable', required=True, help='Target executable file path')
+    parser.add_argument('--workspace-dir', help='Workspace directory (defaults to current directory)')
     parser.add_argument('--skip-post', default='ON', help='If set to ON, skips all post-build operations.')
     args = parser.parse_args()
 
@@ -255,6 +257,7 @@ def main():
     source_dir = Path(args.source_dir)
     build_dir = Path(args.build_dir)
     target_executable = Path(args.target_executable)
+    workspace_dir = Path(args.workspace_dir) if args.workspace_dir else Path.cwd()
     if args.skip_post.upper() == 'ON':
         logging.info("Skipping post-build automation as requested by --skip-post flag.")
         return
@@ -278,9 +281,9 @@ def main():
         # Copy to destinations
         for dest in destinations:
             try:
-                # Special handling for tools directory - only copy the executable
+                # Special handling for tools directory - copy from build directory
                 if str(dest) == '/home/carlon/tools/CoreAI3D':
-                    logging.info(f"Copying executable to tools directory: {target_executable} to {dest}")
+                    logging.info(f"Copying from build directory to tools directory: {source_dir} to {dest}")
                     # Clear the directory first
                     tools_dir = Path('/home/carlon/tools/CoreAI3D').resolve()
                     dest_dir = Path(dest).resolve()
@@ -288,23 +291,41 @@ def main():
                         logging.info(f"Clearing tools directory: {dest}")
                         delete_directory(dest)
                     dest.mkdir(parents=True, exist_ok=True)
+
+                    # Copy the executable and config.json from build directory
+                    executable_dest = dest / target_executable.name
+                    config_src = source_dir / 'config.json'
+                    config_dest = dest / 'config.json'
+
                     # Use sudo to copy the executable
-                    result = subprocess.run(['pkexec', 'cp', str(target_executable), str(dest / target_executable.name)],
+                    result = subprocess.run(['pkexec', 'cp', str(target_executable), str(executable_dest)],
                     capture_output=True, text=True)
                     if result.returncode == 0:
-                        logging.info(f"Successfully copied executable to {dest}")
+                        logging.info(f"Successfully copied executable to {executable_dest}")
                     else:
                         logging.error(f"Failed to copy executable with sudo: {result.stderr}")
                         raise Exception(f"Sudo copy failed: {result.stderr}")
+
+                    # Copy config.json if it exists
+                    if config_src.exists():
+                        shutil.copy2(config_src, config_dest)
+                        logging.info(f"Successfully copied config.json to {config_dest}")
                 else:
                     copy_source_to_destination(source_dir, dest)
             except Exception as e:
                 logging.error(f"Failed to copy to {dest}: {e}. Continuing with other destinations.")
            
-        # Perform git operations
-        branch = get_current_branch()
-        remotes = get_git_remotes()
-        perform_git_operations(branch, remotes)
+        # Perform git operations in workspace directory
+        original_cwd = Path.cwd()
+        try:
+            os.chdir(workspace_dir)
+            logging.info(f"Changed to workspace directory: {workspace_dir}")
+            branch = get_current_branch()
+            remotes = get_git_remotes()
+            perform_git_operations(branch, remotes)
+        finally:
+            os.chdir(original_cwd)
+            logging.info(f"Restored original directory: {original_cwd}")
 
         logging.info("Post-build automation completed successfully")
 

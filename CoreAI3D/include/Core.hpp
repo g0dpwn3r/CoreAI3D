@@ -336,6 +336,14 @@ public:
     // Multi-layer weight initialization
     void initializeMultiLayerWeights();
     void initializeAttentionWeights();
+
+    // 3D transform configuration methods (for auto-tuning)
+    void set3DTransformConfig(bool enable_polynomial, bool enable_trigonometric, bool enable_log_exp,
+                             bool enable_rbf, bool enable_angular, bool enable_projections,
+                             bool enable_ratios, bool enable_transformations);
+    void set3DTransformWeights(float polynomial_weight, float trig_weight, float log_exp_weight,
+                              float rbf_weight, float angular_weight, float projections_weight,
+                              float ratios_weight);
 };
 
 #endif // CORE_HPP

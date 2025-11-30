@@ -77,6 +77,35 @@ bool Predict::runPrediction(const std::string& inputFile,
             return false;
         }
 
+        // Perform automatic complexity detection and hyperparameter tuning
+        if (verbose_) {
+            std::cout << "[PREDICT] Performing automatic complexity detection and hyperparameter tuning..." << std::endl;
+        }
+        auto complexityAnalysis = trainer_->detectProblemComplexity();
+        trainer_->applyAutoTuning(complexityAnalysis);
+
+        // Override user-provided hyperparameters with auto-tuned values if not explicitly set
+        // (This allows users to override auto-tuning by providing specific values)
+        if (layers == 3 && neurons == 10 && learningRate == 0.01) { // Default values
+            layers = complexityAnalysis.recommended_layers;
+            neurons = complexityAnalysis.recommended_neurons;
+            learningRate = complexityAnalysis.recommended_learning_rate;
+            epochs = complexityAnalysis.recommended_epochs;
+
+            if (verbose_) {
+                std::cout << "[PREDICT] Auto-tuning applied: layers=" << layers
+                          << ", neurons=" << neurons << ", learning_rate=" << learningRate
+                          << ", epochs=" << epochs << std::endl;
+            }
+        } else if (verbose_) {
+            std::cout << "[PREDICT] Using user-provided hyperparameters (auto-tuning recommendations available)" << std::endl;
+        }
+
+        // Update trainer parameters with final values
+        trainer_->layers = layers;
+        trainer_->neurons = neurons;
+        trainer_->learningRate = learningRate;
+
         // Load model if specified
         if (!loadModelId.empty() || datasetId != -1) {
             if (!loadModel(loadModelId, datasetId)) {

@@ -265,15 +265,17 @@ void Database::createTables() {
 
         // Create dataset_records table with schema qualification
         session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".dataset_records ("
-                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
-                       "dataset_id BIGINT NOT NULL,"
-                       "row_index INT NOT NULL,"
-                       "feature_values BLOB,"
-                       "label_values BLOB,"
-                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                       "INDEX idx_dataset_row (dataset_id, row_index),"
-                       "FOREIGN KEY (dataset_id) REFERENCES " + dbSchema + ".datasets(id) ON DELETE CASCADE"
-                       ")").execute();
+                        "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                        "dataset_id BIGINT NOT NULL,"
+                        "row_index INT NOT NULL,"
+                        "feature_values BLOB,"
+                        "label_values BLOB,"
+                        "filename VARCHAR(255) DEFAULT NULL,"
+                        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                        "INDEX idx_dataset_row (dataset_id, row_index),"
+                        "INDEX idx_dataset_filename (dataset_id, filename),"
+                        "FOREIGN KEY (dataset_id) REFERENCES " + dbSchema + ".datasets(id) ON DELETE CASCADE"
+                        ")").execute();
 
         // Create ai_model_states table with schema qualification
         session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".ai_model_states ("
@@ -427,12 +429,12 @@ void Database::addDatasetRecord(int& datasetId, int rowIndex,
         auto labelBlob = vectorToBlob(labelValues);
 
         session->sql("INSERT INTO " + dbSchema + ".dataset_records (dataset_id, row_index, feature_values, label_values) "
-                        "VALUES (?, ?, ?, ?)")
-                 .bind(datasetId)
-                 .bind(rowIndex)
-                 .bind(std::string(featureBlob.begin(), featureBlob.end()))
-                 .bind(std::string(labelBlob.begin(), labelBlob.end()))
-                 .execute();
+                         "VALUES (?, ?, ?, ?)")
+                  .bind(datasetId)
+                  .bind(rowIndex)
+                  .bind(std::string(featureBlob.begin(), featureBlob.end()))
+                  .bind(std::string(labelBlob.begin(), labelBlob.end()))
+                  .execute();
 
         // Only log every 100th record to avoid spam during data loading
         if (rowIndex % 100 == 0) {
@@ -447,6 +449,56 @@ void Database::addDatasetRecord(int& datasetId, int rowIndex,
     // Only log every 100th record to avoid spam during data loading
     if (rowIndex % 100 == 0) {
         std::cout << "Database stub: addDatasetRecord(datasetId=" << datasetId << ", rowIndex=" << rowIndex << ") - processing..." << std::endl;
+    };
+#endif
+};
+
+void Database::addDatasetRecord(int& datasetId, int rowIndex,
+    const std::vector<float>& featureValues,
+    const std::vector<float>& labelValues,
+    const std::string& filename) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+    if (rowIndex < 0) {
+        throw std::invalid_argument("Row index must be non-negative");
+    }
+    if (featureValues.empty()) {
+        throw std::invalid_argument("Feature values cannot be empty");
+    }
+    if (labelValues.empty()) {
+        throw std::invalid_argument("Label values cannot be empty");
+    }
+
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto featureBlob = vectorToBlob(featureValues);
+        auto labelBlob = vectorToBlob(labelValues);
+
+        session->sql("INSERT INTO " + dbSchema + ".dataset_records (dataset_id, row_index, feature_values, label_values, filename) "
+                         "VALUES (?, ?, ?, ?, ?)")
+                  .bind(datasetId)
+                  .bind(rowIndex)
+                  .bind(std::string(featureBlob.begin(), featureBlob.end()))
+                  .bind(std::string(labelBlob.begin(), labelBlob.end()))
+                  .bind(filename)
+                  .execute();
+
+        // Only log every 100th record to avoid spam during data loading
+        if (rowIndex % 100 == 0) {
+            std::cout << "Added dataset record for dataset " << datasetId << ", row " << rowIndex << ", file " << filename << std::endl;
+        };
+    } catch (const std::exception& ex) {
+        std::cerr << "Error adding dataset record with filename: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation - reduce verbosity for bulk operations
+    // Only log every 100th record to avoid spam during data loading
+    if (rowIndex % 100 == 0) {
+        std::cout << "Database stub: addDatasetRecord(datasetId=" << datasetId << ", rowIndex=" << rowIndex << ", filename=" << filename << ") - processing..." << std::endl;
     };
 #endif
 };
@@ -553,7 +605,7 @@ void Database::updateDatasetRecordLabels(int& datasetId, int rowIndex, const std
 #endif
 };
 
-void Database::clearDatasetRecords(long long& datasetId) {
+void Database::clearDatasetRecords(long long datasetId) {
     // Validate input parameters
     if (datasetId <= 0) {
         throw std::invalid_argument("Dataset ID must be positive");
@@ -574,6 +626,94 @@ void Database::clearDatasetRecords(long long& datasetId) {
 #else
     // Stub implementation
     std::cout << "Database stub: clearDatasetRecords(datasetId=" << datasetId << ")" << std::endl;
+#endif
+};
+
+void Database::removeDatasetFileRecords(long long datasetId, const std::string& filename) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+    if (filename.empty()) {
+        throw std::invalid_argument("Filename cannot be empty");
+    }
+
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("DELETE FROM " + dbSchema + ".dataset_records WHERE dataset_id = ? AND filename = ?")
+                .bind(datasetId)
+                .bind(filename)
+                .execute();
+
+        std::cout << "Removed records for file '" << filename << "' from dataset " << datasetId << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error removing dataset file records: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: removeDatasetFileRecords(datasetId=" << datasetId << ", filename=" << filename << ")" << std::endl;
+#endif
+};
+
+std::vector<std::string> Database::getDatasetFiles(long long datasetId) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+
+    std::vector<std::string> files;
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT DISTINCT filename FROM " + dbSchema + ".dataset_records WHERE dataset_id = ? AND filename IS NOT NULL ORDER BY filename")
+                .bind(datasetId)
+                .execute();
+
+        mysqlx::Row row;
+        while ((row = result.fetchOne())) {
+            std::string filename = row[0].get<std::string>();
+            files.push_back(filename);
+        };
+
+        std::cout << "Found " << files.size() << " files in dataset " << datasetId << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error getting dataset files: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation - return empty list
+    std::cout << "Database stub: getDatasetFiles(datasetId=" << datasetId << ") -> empty list" << std::endl;
+#endif
+    return files;
+};
+
+void Database::updateDatasetRowCount(long long datasetId, int newRowCount) {
+    // Validate input parameters
+    if (datasetId <= 0) {
+        throw std::invalid_argument("Dataset ID must be positive");
+    }
+    if (newRowCount < 0) {
+        throw std::invalid_argument("Row count must be non-negative");
+    }
+
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("UPDATE " + dbSchema + ".datasets SET num_rows = ? WHERE id = ?")
+                .bind(newRowCount)
+                .bind(datasetId)
+                .execute();
+
+        std::cout << "Updated row count for dataset " << datasetId << " to " << newRowCount << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error updating dataset row count: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: updateDatasetRowCount(datasetId=" << datasetId << ", newRowCount=" << newRowCount << ")" << std::endl;
 #endif
 };
 

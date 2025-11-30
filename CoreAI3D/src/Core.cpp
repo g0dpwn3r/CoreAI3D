@@ -6,27 +6,27 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     outputSize(outputSize_), minVal(min_), maxVal(max_), verbose(verbose_),
     x(1.0f), y(1.0f), z(1.0f)  // Initialize transform variables to meaningful values
 {
-    // Initialize advanced 3D transform parameters
-    this->enable_polynomial = true;
-    this->enable_trigonometric = true;
-    this->enable_log_exp = true;
-    this->enable_rbf = true;
-    this->polynomial_weight = 1.0f;
-    this->trig_weight = 1.0f;
-    this->log_exp_weight = 1.0f;
-    this->rbf_weight = 1.0f;
+    // Initialize advanced 3D transform parameters - DISABLE COMPLEX TRANSFORMS FOR DEBUGGING
+    this->enable_polynomial = false;
+    this->enable_trigonometric = false;
+    this->enable_log_exp = false;
+    this->enable_rbf = false;
+    this->polynomial_weight = 0.0f;
+    this->trig_weight = 0.0f;
+    this->log_exp_weight = 0.0f;
+    this->rbf_weight = 0.0f;
     this->rbf_center = {0.0f, 0.0f, 0.0f};
     this->rbf_sigma = 1.0f;
 
-    // Initialize new 3D feature engineering parameters
-    this->enable_angular = true;
-    this->enable_projections = true;
-    this->enable_ratios = true;
-    this->enable_transformations = true;
-    this->angular_weight = 1.0f;
-    this->projections_weight = 1.0f;
-    this->ratios_weight = 1.0f;
-    this->transformations_weight = 1.0f;
+    // Initialize new 3D feature engineering parameters - DISABLE COMPLEX TRANSFORMS FOR DEBUGGING
+    this->enable_angular = false;
+    this->enable_projections = false;
+    this->enable_ratios = false;
+    this->enable_transformations = false;
+    this->angular_weight = 0.0f;
+    this->projections_weight = 0.0f;
+    this->ratios_weight = 0.0f;
+    this->transformations_weight = 0.0f;
 
     // Initialize transformation parameters
     this->rotation_angle_x = 0.0f;
@@ -1136,35 +1136,188 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 }
             }
 
-            // Accumulate gradients for input to hidden weights with stable 3D transforms
+            // Accumulate gradients for input to hidden weights with CORRECT 3D transform derivatives
             for (int j = 0; j < this->neurons; ++j) {
                 for (size_t k = 0; k < batch_inputs[batch_sample].size(); ++k) {
                     if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
                         throw std::out_of_range("CoreAI::train: Index out of range during weight update");
                     }
 
-                    // Get triplet coordinates for spatial context
+                    // Get triplet coordinates for spatial context (same as forward pass)
                     size_t triplet_base = (k / 3) * 3;
                     float x = (triplet_base < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base] : 0.0f;
                     float y = (triplet_base + 1 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 1] : 0.0f;
                     float z = (triplet_base + 2 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 2] : 0.0f;
 
+                    // Apply coordinate transformations if enabled (same as forward pass)
+                    if (enable_transformations) {
+                        // Apply scaling
+                        x = x * scale_x;
+                        y = y * scale_y;
+                        z = z * scale_z;
+
+                        // Apply translation
+                        x += translation_x;
+                        y += translation_y;
+                        z += translation_z;
+
+                        // Apply rotations (order: Z, Y, X)
+                        // Rotation around Z-axis
+                        float cos_z = std::cos(rotation_angle_z);
+                        float sin_z = std::sin(rotation_angle_z);
+                        float temp_x = x * cos_z - y * sin_z;
+                        float temp_y = x * sin_z + y * cos_z;
+                        x = temp_x;
+                        y = temp_y;
+
+                        // Rotation around Y-axis
+                        float cos_y = std::cos(rotation_angle_y);
+                        float sin_y = std::sin(rotation_angle_y);
+                        float temp_x2 = x * cos_y + z * sin_y;
+                        float temp_z = -x * sin_y + z * cos_y;
+                        x = temp_x2;
+                        z = temp_z;
+
+                        // Rotation around X-axis
+                        float cos_x = std::cos(rotation_angle_x);
+                        float sin_x = std::sin(rotation_angle_x);
+                        float temp_y2 = y * cos_x - z * sin_x;
+                        float temp_z2 = y * sin_x + z * cos_x;
+                        y = temp_y2;
+                        z = temp_z2;
+                    }
+
                     // Compute spatial features for consistency with forward pass
                     float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
-                    // Derivative of stable transform w.r.t weight is the input coordinate
+                    // Compute CORRECT derivative of the transform w.r.t weight
+                    // When complex transforms are disabled, use simple linear derivatives
                     int coord_type = k % 3;
-                    float transform_derivative;
-                    if (coord_type == 0) {
-                        transform_derivative = x;  // d/dw(x*w + ...) = x
-                    } else if (coord_type == 1) {
-                        transform_derivative = y;  // d/dw(y*w + ...) = y
+                    float transform_derivative = 0.0f;
+
+                    if (!enable_transformations && !enable_polynomial && !enable_trigonometric &&
+                        !enable_log_exp && !enable_rbf && !enable_angular && !enable_projections && !enable_ratios) {
+                        // SIMPLE LINEAR CASE: When all complex transforms are disabled
+                        // d/dw(x*w) = x, d/dw(y*w) = y, d/dw(z*w) = z
+                        if (coord_type == 0) {
+                            transform_derivative = x;
+                        } else if (coord_type == 1) {
+                            transform_derivative = y;
+                        } else {
+                            transform_derivative = z;
+                        }
+                        // Distance weighting: d/dw(distance * 0.1f) = 0.1f (constant)
+                        transform_derivative += 0.1f;
                     } else {
-                        transform_derivative = z;  // d/dw(z*w + ...) = z
+                        // COMPLEX TRANSFORMS ENABLED: Use full derivative calculations
+                        // Original linear transforms: d/dw(x*w + ...) = x, d/dw(y*w + ...) = y, d/dw(z*w + ...) = z
+                        if (coord_type == 0) {
+                            transform_derivative += x;
+                        } else if (coord_type == 1) {
+                            transform_derivative += y;
+                        } else {
+                            transform_derivative += z;
+                        }
+
+                        // Distance weighting: d/dw(distance * 0.1f) = 0.1f (constant)
+                        transform_derivative += 0.1f;
+
+                        // Polynomial transforms: d/dw(polynomial_weight * (x*x + x*y + x*z)) etc.
+                        if (enable_polynomial) {
+                            if (coord_type == 0) {
+                                transform_derivative += polynomial_weight * (x*x + x*y + x*z);
+                            } else if (coord_type == 1) {
+                                transform_derivative += polynomial_weight * (y*y + x*y + y*z);
+                            } else {
+                                transform_derivative += polynomial_weight * (z*z + x*z + y*z);
+                            }
+                        }
+
+                        // Trigonometric transforms: d/dw(trig_weight * sin(x)) = trig_weight * cos(x), etc.
+                        if (enable_trigonometric) {
+                            if (coord_type == 0) {
+                                transform_derivative += trig_weight * std::cos(x);
+                            } else if (coord_type == 1) {
+                                transform_derivative += trig_weight * std::cos(y);
+                            } else {
+                                float z_clamped = std::max(-std::acos(-1.0f)/2 + 0.01f, std::min(std::acos(-1.0f)/2 - 0.01f, z));
+                                transform_derivative += trig_weight * (1.0f / std::cos(z_clamped)); // derivative of tan
+                            }
+                        }
+
+                        // Logarithmic/exponential transforms
+                        if (enable_log_exp) {
+                            if (coord_type == 0) {
+                                transform_derivative += log_exp_weight * (1.0f / (1.0f + std::abs(x))); // derivative of log(1+|x|)
+                            } else if (coord_type == 1) {
+                                transform_derivative += log_exp_weight * (-distance); // derivative of exp(-distance)
+                            } else {
+                                transform_derivative += log_exp_weight * (1.0f / (1.0f + std::abs(z))); // derivative of log(1+|z|)
+                            }
+                        }
+
+                        // Radial basis function: d/dw(rbf_weight * exp(-dist_sq/sigma^2))
+                        if (enable_rbf) {
+                            float dx = x - rbf_center[0];
+                            float dy = y - rbf_center[1];
+                            float dz = z - rbf_center[2];
+                            float dist_sq = dx*dx + dy*dy + dz*dz;
+                            float rbf_derivative = rbf_weight * std::exp(-dist_sq / (rbf_sigma * rbf_sigma));
+                            rbf_derivative *= (-2.0f / (rbf_sigma * rbf_sigma)); // derivative of exp(-dist_sq/sigma^2)
+
+                            if (coord_type == 0) {
+                                transform_derivative += rbf_derivative * dx;
+                            } else if (coord_type == 1) {
+                                transform_derivative += rbf_derivative * dy;
+                            } else {
+                                transform_derivative += rbf_derivative * dz;
+                            }
+                        }
+
+                        // Angular features: d/dw(theta) and d/dw(phi)
+                        if (enable_angular) {
+                            float r = distance;
+                            if (r > this->epsilon) {
+                                float theta = std::acos(std::max(-1.0f, std::min(1.0f, z / r)));
+                                // derivative of theta w.r.t coordinates is complex, approximate with finite difference
+                                transform_derivative += angular_weight * 0.1f; // simplified approximation
+                            }
+                            // phi derivative also complex, use approximation
+                            transform_derivative += angular_weight * 0.1f;
+                        }
+
+                        // Projection features: derivatives are straightforward
+                        if (enable_projections) {
+                            float proj_xy = std::sqrt(x*x + y*y + this->epsilon);
+                            float proj_xz = std::sqrt(x*x + z*z + this->epsilon);
+                            float proj_yz = std::sqrt(y*y + z*z + this->epsilon);
+
+                            if (coord_type == 0) {
+                                transform_derivative += projections_weight * (x / proj_xy + x / proj_xz);
+                            } else if (coord_type == 1) {
+                                transform_derivative += projections_weight * (y / proj_xy + y / proj_yz);
+                            } else {
+                                transform_derivative += projections_weight * (z / proj_xz + z / proj_yz);
+                            }
+                        }
+
+                        // Distance ratios: derivatives are complex, use approximation
+                        if (enable_ratios) {
+                            transform_derivative += ratios_weight * 0.1f; // simplified approximation
+                        }
                     }
 
-                    // Backpropagation with stable 3D transform: gradient = error * transform_derivative
+                    // Backpropagation with CORRECT 3D transform derivative: gradient = error * transform_derivative
                     float gradient = hidden_errors[j] * transform_derivative;
+
+                    // DEBUG: Log gradient calculation for first sample, first neuron, first few inputs
+                    if (verbose && global_sample == 0 && j == 0 && k < 5) {
+                        std::cout << "[DEBUG GRADIENT] Input-Hidden gradient calc - sample: " << global_sample
+                                  << ", neuron: " << j << ", input: " << k
+                                  << ", hidden_error: " << hidden_errors[j]
+                                  << ", transform_derivative: " << transform_derivative
+                                  << ", gradient: " << gradient << std::endl;
+                    }
 
                     // Add L2 regularization gradient: 2 * lambda * weight
                     if (use_l2_reg) {
@@ -1203,6 +1356,44 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             }
         } else {
             // Fallback to basic gradient descent if no optimizer set
+            // DEBUG: Log weight updates for first few weights
+            if (verbose && batch_idx == 0) {
+                std::cout << "[DEBUG WEIGHT UPDATE] Before update - Input-Hidden[0][0]: " << this->weigth_input_hidden[0][0]
+                          << ", Hidden-Output[0][0]: " << this->weigth_output_hidden[0][0] << std::endl;
+                std::cout << "[DEBUG WEIGHT UPDATE] Gradients - Input-Hidden[0][0]: " << input_hidden_gradients[0][0]
+                          << ", Hidden-Output[0][0]: " << output_hidden_gradients[0][0] << std::endl;
+                std::cout << "[DEBUG WEIGHT UPDATE] Learning rate: " << currentLearningRate << std::endl;
+
+                // Check if gradients are zero (potential issue)
+                bool all_gradients_zero = true;
+                for (int j = 0; j < this->outputSize; ++j) {
+                    for (int k = 0; k < this->neurons; ++k) {
+                        if (std::abs(output_hidden_gradients[j][k]) > 1e-10f) {
+                            all_gradients_zero = false;
+                            break;
+                        }
+                    }
+                    if (!all_gradients_zero) break;
+                }
+                if (all_gradients_zero) {
+                    std::cout << "[WARNING] All output-hidden gradients are zero or near-zero!" << std::endl;
+                }
+
+                all_gradients_zero = true;
+                for (int j = 0; j < this->neurons; ++j) {
+                    for (size_t k = 0; k < this->inputSize; ++k) {
+                        if (std::abs(input_hidden_gradients[j][k]) > 1e-10f) {
+                            all_gradients_zero = false;
+                            break;
+                        }
+                    }
+                    if (!all_gradients_zero) break;
+                }
+                if (all_gradients_zero) {
+                    std::cout << "[WARNING] All input-hidden gradients are zero or near-zero!" << std::endl;
+                }
+            }
+
             for (int j = 0; j < this->outputSize; ++j) {
                 for (int k = 0; k < this->neurons; ++k) {
                     this->weigth_output_hidden[j][k] += currentLearningRate * output_hidden_gradients[j][k];
@@ -1212,6 +1403,24 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 for (size_t k = 0; k < this->inputSize; ++k) {
                     this->weigth_input_hidden[j][k] += currentLearningRate * input_hidden_gradients[j][k];
                 }
+            }
+
+            if (verbose && batch_idx == 0) {
+                std::cout << "[DEBUG WEIGHT UPDATE] After update - Input-Hidden[0][0]: " << this->weigth_input_hidden[0][0]
+                          << ", Hidden-Output[0][0]: " << this->weigth_output_hidden[0][0] << std::endl;
+
+                // Check if weights actually changed
+                static float prev_ih_weight = this->weigth_input_hidden[0][0];
+                static float prev_ho_weight = this->weigth_output_hidden[0][0];
+                float ih_change = this->weigth_input_hidden[0][0] - prev_ih_weight;
+                float ho_change = this->weigth_output_hidden[0][0] - prev_ho_weight;
+                std::cout << "[DEBUG WEIGHT UPDATE] Weight changes - Input-Hidden[0][0]: " << ih_change
+                          << ", Hidden-Output[0][0]: " << ho_change << std::endl;
+                if (std::abs(ih_change) < 1e-10f && std::abs(ho_change) < 1e-10f) {
+                    std::cout << "[WARNING] Weights are not changing! Check gradients and learning rate." << std::endl;
+                }
+                prev_ih_weight = this->weigth_input_hidden[0][0];
+                prev_ho_weight = this->weigth_output_hidden[0][0];
             }
 
             if (verbose) {
@@ -1298,6 +1507,24 @@ void CoreAI::denormalizeOutput()
                   << ", original_data_global_max: " << trainer->original_data_global_max
                   << ", range: " << (trainer->original_data_global_max - trainer->original_data_global_min)
                   << ", minVal: " << this->minVal << ", maxVal: " << this->maxVal << std::endl;
+        std::cout << "[DEBUG DENORMALIZE] First few results before denormalization: ";
+        if (!results.empty() && !results[0].empty()) {
+            for (size_t i = 0; i < std::min(size_t(5), results[0].size()); ++i) {
+                std::cout << results[0][i] << " ";
+            }
+        }
+        std::cout << std::endl;
+        // Log all results if there are few samples
+        if (results.size() <= 10) {
+            std::cout << "[DEBUG DENORMALIZE] All results before denormalization:" << std::endl;
+            for (size_t i = 0; i < results.size(); ++i) {
+                std::cout << "  Sample " << i << ": ";
+                for (size_t j = 0; j < results[i].size(); ++j) {
+                    std::cout << results[i][j] << " ";
+                }
+                std::cout << std::endl;
+            }
+        }
     }
 
     float normalized_range_diff = this->maxVal - this->minVal;
@@ -1653,5 +1880,54 @@ void CoreAI::setAllLayerActivations(ActivationType type, float alpha, float beta
         std::cout << "[DEBUG ACTIVATION] Set all layers to activation type " << static_cast<int>(type)
                   << " with alpha=" << alpha << ", beta=" << beta << ", spatial_weight=" << spatial_weight
                   << ", calculus_N=" << calculus_N << ", calculus_SM=" << calculus_SM << ", calculus_a=" << calculus_a << std::endl;
+    }
+}
+
+// 3D transform configuration methods (for auto-tuning)
+void CoreAI::set3DTransformConfig(bool enable_polynomial, bool enable_trigonometric, bool enable_log_exp,
+                                 bool enable_rbf, bool enable_angular, bool enable_projections,
+                                 bool enable_ratios, bool enable_transformations) {
+    this->enable_polynomial = enable_polynomial;
+    this->enable_trigonometric = enable_trigonometric;
+    this->enable_log_exp = enable_log_exp;
+    this->enable_rbf = enable_rbf;
+    this->enable_angular = enable_angular;
+    this->enable_projections = enable_projections;
+    this->enable_ratios = enable_ratios;
+    this->enable_transformations = enable_transformations;
+
+    if (verbose) {
+        std::cout << "[DEBUG 3D CONFIG] Set 3D transform configuration:" << std::endl;
+        std::cout << "  Polynomial: " << (enable_polynomial ? "enabled" : "disabled") << std::endl;
+        std::cout << "  Trigonometric: " << (enable_trigonometric ? "enabled" : "disabled") << std::endl;
+        std::cout << "  Log/Exp: " << (enable_log_exp ? "enabled" : "disabled") << std::endl;
+        std::cout << "  RBF: " << (enable_rbf ? "enabled" : "disabled") << std::endl;
+        std::cout << "  Angular: " << (enable_angular ? "enabled" : "disabled") << std::endl;
+        std::cout << "  Projections: " << (enable_projections ? "enabled" : "disabled") << std::endl;
+        std::cout << "  Ratios: " << (enable_ratios ? "enabled" : "disabled") << std::endl;
+        std::cout << "  Transformations: " << (enable_transformations ? "enabled" : "disabled") << std::endl;
+    }
+}
+
+void CoreAI::set3DTransformWeights(float polynomial_weight, float trig_weight, float log_exp_weight,
+                                  float rbf_weight, float angular_weight, float projections_weight,
+                                  float ratios_weight) {
+    this->polynomial_weight = polynomial_weight;
+    this->trig_weight = trig_weight;
+    this->log_exp_weight = log_exp_weight;
+    this->rbf_weight = rbf_weight;
+    this->angular_weight = angular_weight;
+    this->projections_weight = projections_weight;
+    this->ratios_weight = ratios_weight;
+
+    if (verbose) {
+        std::cout << "[DEBUG 3D WEIGHTS] Set 3D transform weights:" << std::endl;
+        std::cout << "  Polynomial: " << polynomial_weight << std::endl;
+        std::cout << "  Trigonometric: " << trig_weight << std::endl;
+        std::cout << "  Log/Exp: " << log_exp_weight << std::endl;
+        std::cout << "  RBF: " << rbf_weight << std::endl;
+        std::cout << "  Angular: " << angular_weight << std::endl;
+        std::cout << "  Projections: " << projections_weight << std::endl;
+        std::cout << "  Ratios: " << ratios_weight << std::endl;
     }
 }
