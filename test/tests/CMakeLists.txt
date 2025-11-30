@@ -66,3 +66,7 @@ add_test(NAME TestDataLoading COMMAND test_data_loading)
 add_executable(test_auto_tuning ../test_auto_tuning.cpp)
 target_link_libraries(test_auto_tuning PRIVATE CoreAI3DLib)
 add_test(NAME TestAutoTuning COMMAND test_auto_tuning)
+
+add_executable(test_gradient_accumulation ../test_gradient_accumulation.cpp)
+target_link_libraries(test_gradient_accumulation PRIVATE CoreAI3DLib)
+add_test(NAME TestGradientAccumulation COMMAND test_gradient_accumulation)
