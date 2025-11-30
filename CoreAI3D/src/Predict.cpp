@@ -55,7 +55,7 @@ bool Predict::runPrediction(const std::string& inputFile,
             return false;
         }
 
-        bool useOnlineMode = !trainer_->isOfflineMode;
+        bool useOnlineMode = !trainer_->getIsOfflineMode();
         if (verbose_) {
             std::cout << "[PREDICT] Running in " << (useOnlineMode ? "online" : "offline") << " mode" << std::endl;
         }
@@ -134,9 +134,9 @@ bool Predict::runPrediction(const std::string& inputFile,
             if (!trainer_->saveModel(datasetId)) {
                 std::cerr << "[PREDICT] Failed to save model to database." << std::endl;
             }
-        } else if (useOnlineMode && trainer_->currentDatasetId != -1) {
+        } else if (useOnlineMode && trainer_->getCurrentDatasetId() != -1) {
              // If datasetId was not passed but created during loadData
-             int currentId = trainer_->currentDatasetId;
+             int currentId = trainer_->getCurrentDatasetId();
              if (verbose_) {
                 std::cout << "[PREDICT] Saving trained model to database (ID: " << currentId << ")..." << std::endl;
             }
@@ -285,7 +285,8 @@ bool Predict::loadData(const std::string& inputFile,
         }
         checkTargetFile.close();
 
-        if (!trainer_->loadTargetsCSV(targetFile, delimiter, hasHeader, containsText, trainer_->currentDatasetId)) {
+        int datasetId = trainer_->getCurrentDatasetId();
+        if (!trainer_->loadTargetsCSV(targetFile, delimiter, hasHeader, containsText, datasetId)) {
             std::cerr << "[PREDICT] Failed to load target CSV data from " << targetFile << std::endl;
             return false;
         }

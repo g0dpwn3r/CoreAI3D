@@ -149,40 +149,119 @@ public:
     const DataAugmentation::AugmentationConfig& getAugmentationConfig() const;
     void applyDataAugmentation();
 
+    // Memory-intensive data augmentation methods
+    void createMultipleAugmentedCopies(int numCopies = 10);
+    void clearAugmentedCopies();
+    size_t getAugmentedDataSize() const;
+
+    // Data buffering system
+    struct BatchBuffer {
+        std::vector<std::vector<float>> inputs;
+        std::vector<std::vector<float>> targets;
+        int batchIndex;
+        bool isProcessed;
+        std::chrono::steady_clock::time_point createdTime;
+    };
+
+    void initializeDataBuffering(size_t maxBuffers = 100, size_t batchSize = 32);
+    void addBatchToBuffer(const std::vector<std::vector<float>>& batchInputs,
+                         const std::vector<std::vector<float>>& batchTargets);
+    bool getNextBatchFromBuffer(std::vector<std::vector<float>>& batchInputs,
+                               std::vector<std::vector<float>>& batchTargets);
+    void clearOldBuffers(std::chrono::seconds maxAge = std::chrono::seconds(300));
+    size_t getBufferMemoryUsage() const;
+    void enableMemoryIntensiveBuffering(bool enable);
+
+    // Historical data storage
+    struct HistoricalDataPoint {
+        std::vector<std::vector<float>> inputs;
+        std::vector<std::vector<float>> targets;
+        float loss;
+        int epoch;
+        std::chrono::steady_clock::time_point timestamp;
+        std::string metadata;
+    };
+
+    void initializeHistoricalStorage(size_t maxHistorySize = 1000);
+    void storeHistoricalDataPoint(const std::vector<std::vector<float>>& inputs,
+                                 const std::vector<std::vector<float>>& targets,
+                                 float loss, int epoch, const std::string& metadata = "");
+    const std::vector<HistoricalDataPoint>& getHistoricalData() const;
+    void clearHistoricalData();
+    size_t getHistoricalMemoryUsage() const;
+    std::vector<HistoricalDataPoint> getHistoricalDataInRange(int startEpoch, int endEpoch) const;
+
+    // Memory usage monitoring
+    struct MemoryStats {
+        size_t baseDataSize;
+        size_t augmentedDataSize;
+        size_t bufferSize;
+        size_t historicalSize;
+        size_t totalSize;
+        double memoryUsageMB;
+    };
+
+    MemoryStats getMemoryStats() const;
+    void logMemoryUsage() const;
+    void enableMemoryMonitoring(bool enable);
+
+    // Batch processing methods for multiple files
+    bool loadBatchFiles(const std::vector<std::string>& filenames, int maxSeqLen, int embeddingDim);
+    bool loadDirectoryFiles(const std::string& directoryPath, const std::vector<std::string>& extensions, int maxSeqLen, int embeddingDim);
+
+    // General file loading method
+    bool loadFile(const std::string& filename, int maxSeqLen, int embeddingDim); // General method that detects file type and routes to appropriate loader
+
+    bool loadCSVFromData(const std::vector<std::vector<float>>& data, const std::vector<std::vector<float>>& targets, const std::string& datasetName); // Load data directly into the training system
+
  private:
-    std::mt19937 gen;
-    std::vector<std::vector<float>> raw_data; // Might be less used now
-    std::vector<std::vector<float>> inputs;
-    std::vector<std::vector<float>> targets;
-    std::vector<std::vector<float>> embeddingLayer;
-    std::map<std::string, float> textEncodingMap;
-    std::default_random_engine randomEngine;
+   std::mt19937 gen;
+   std::vector<std::vector<float>> raw_data; // Might be less used now
+   std::vector<std::vector<float>> inputs;
+   std::vector<std::vector<float>> targets;
+   std::vector<std::vector<float>> embeddingLayer;
+   std::map<std::string, float> textEncodingMap;
+   std::default_random_engine randomEngine;
 
-    std::unique_ptr<CoreAI> core;
-    std::unique_ptr<Language> langProc;
-    std::unique_ptr<DataAugmentation> dataAugmentation;
-    WebSocketServer* webSocketServer;
+   std::unique_ptr<CoreAI> core;
+   std::unique_ptr<Language> langProc;
+   std::unique_ptr<DataAugmentation> dataAugmentation;
+   WebSocketServer* webSocketServer;
 
-    // Training state for async operations
-    std::atomic<bool> trainingActive;
-    std::atomic<bool> trainingStopRequested;
-    std::future<void> trainingFuture;
-    std::string trainingStatus;
-    int currentEpoch;
-    int totalEpochs;
-    float currentLoss;
-    std::chrono::steady_clock::time_point trainingStartTime;
-    // Checkpointing configuration and state
-    CheckpointConfig checkpointConfig;
-    bool checkpointingEnabled;
+   // Memory-intensive data augmentation storage
+   std::vector<std::vector<std::vector<float>>> augmentedInputsCopies;  // Multiple copies of augmented inputs
+   std::vector<std::vector<std::vector<float>>> augmentedTargetsCopies; // Multiple copies of augmented targets
 
-    // Checkpointing state variables
-    float bestValidationLoss;
-    int epochsSinceBestModel;
-    int lastCheckpointEpoch;
-    std::vector<std::string> checkpointFiles;
+   // Data buffering system
+   std::deque<BatchBuffer> batchBuffers;  // Queue of processed batches in memory
+   size_t maxBatchBuffers;                // Maximum number of buffers to keep
+   size_t bufferBatchSize;                // Size of each batch in buffer
+   bool memoryIntensiveBufferingEnabled;  // Flag to enable memory-intensive buffering
+   std::mutex bufferMutex;                // Mutex for thread-safe buffer access
 
- public:
+   // Historical data storage
+   std::vector<HistoricalDataPoint> historicalData;  // Historical training data points
+   size_t maxHistoricalSize;              // Maximum number of historical points to keep
+   bool memoryMonitoringEnabled;          // Flag to enable memory monitoring
+
+   // Training state for async operations
+   std::atomic<bool> trainingActive;
+   std::atomic<bool> trainingStopRequested;
+   std::future<void> trainingFuture;
+   std::string trainingStatus;
+   int currentEpoch;
+   int totalEpochs;
+   float currentLoss;
+   std::chrono::steady_clock::time_point trainingStartTime;
+   // Checkpointing configuration and state
+   CheckpointConfig checkpointConfig;
+   bool checkpointingEnabled;
+
+   // Checkpointing state variables
+   float bestValidationLoss;
+   int epochsSinceBestModel;
+   int lastCheckpointEpoch;
+   std::vector<std::string> checkpointFiles;
     // Database manager - only if USE_MYSQL is defined
  #ifdef USE_MYSQL
     std::unique_ptr<Database> dbManager; // Changed to unique_ptr
@@ -199,12 +278,6 @@ public:
     bool loadJSONFile(const std::string& filename, const std::string& dataPath, int maxSeqLen, int embeddingDim);
     bool loadXMLFile(const std::string& filename, const std::string& xpath, int maxSeqLen, int embeddingDim);
     bool loadDocumentFile(const std::string& filename, int maxSeqLen, int embeddingDim);
-    bool loadFile(const std::string& filename, int maxSeqLen, int embeddingDim); // General method that detects file type and routes to appropriate loader
-    bool loadCSVFromData(const std::vector<std::vector<float>>& data, const std::vector<std::vector<float>>& targets, const std::string& datasetName); // Load data directly into the training system
-
-    // Batch processing methods for multiple files
-    bool loadBatchFiles(const std::vector<std::string>& filenames, int maxSeqLen, int embeddingDim);
-    bool loadDirectoryFiles(const std::string& directoryPath, const std::vector<std::string>& extensions, int maxSeqLen, int embeddingDim);
 
     // New methods for learning from web content
     bool loadFromWebURL(const std::string& url, int maxSeqLen, int embeddingDim);
@@ -257,7 +330,13 @@ public:
     bool isOfflineMode; // New member to track offline status
     int currentDatasetId; // Stores the ID of the currently loaded/saved dataset
     std::string currentDatasetName; // Stores the name of the currently loaded/saved dataset
+
 public:
+    // Public accessors for Predict class
+    bool getIsOfflineMode() const { return isOfflineMode; }
+    int getCurrentDatasetId() const { return currentDatasetId; }
+    std::string getCurrentDatasetName() const { return currentDatasetName; }
+
     bool verbose; // Control verbosity of debug output
 
     void printProgressBar(const std::string& prefix, long long current, long long total, int barWidth);

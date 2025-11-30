@@ -181,6 +181,20 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4; // fallback
     threadPool = std::make_unique<ThreadPool>(num_threads);
+
+    // Initialize gradient accumulation parameters
+    this->enable_gradient_accumulation = false;
+    this->gradient_accumulation_steps = 4;
+    this->max_historical_gradients = 100;
+    this->current_accumulation_step = 0;
+
+    // Initialize accumulated gradients matrices (will be resized when needed)
+    initializeMatrix(this->accumulated_output_hidden_gradients, outputSize, neurons);
+    std::fill(accumulated_output_hidden_gradients.begin(), accumulated_output_hidden_gradients.end(),
+              std::vector<float>(neurons, 0.0f));
+    initializeMatrix(this->accumulated_input_hidden_gradients, neurons, inputSize);
+    std::fill(accumulated_input_hidden_gradients.begin(), accumulated_input_hidden_gradients.end(),
+              std::vector<float>(inputSize, 0.0f));
 }
 std::vector<std::vector<float>>& CoreAI::getInput()
 {
@@ -1346,6 +1360,185 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             }
         }
 
+        // Gradient accumulation with historical storage
+        if (enable_gradient_accumulation) {
+            // Accumulate gradients across batches
+            for (size_t i = 0; i < output_hidden_gradients.size(); ++i) {
+                for (size_t j = 0; j < output_hidden_gradients[i].size(); ++j) {
+                    accumulated_output_hidden_gradients[i][j] += output_hidden_gradients[i][j];
+                }
+            }
+            for (size_t i = 0; i < input_hidden_gradients.size(); ++i) {
+                for (size_t j = 0; j < input_hidden_gradients[i].size(); ++j) {
+                    accumulated_input_hidden_gradients[i][j] += input_hidden_gradients[i][j];
+                }
+            }
+
+            current_accumulation_step++;
+
+            // Check if we should update weights (every accumulation_steps batches)
+            if (current_accumulation_step >= gradient_accumulation_steps) {
+                // Store current accumulated gradients in history before scaling
+                if (historical_output_hidden_gradients.size() >= static_cast<size_t>(max_historical_gradients)) {
+                    historical_output_hidden_gradients.pop_front();
+                    historical_input_hidden_gradients.pop_front();
+                }
+                historical_output_hidden_gradients.push_back(accumulated_output_hidden_gradients);
+                historical_input_hidden_gradients.push_back(accumulated_input_hidden_gradients);
+
+                // Average accumulated gradients over accumulation steps
+                for (auto& row : accumulated_output_hidden_gradients) {
+                    for (float& grad : row) {
+                        grad /= gradient_accumulation_steps;
+                    }
+                }
+                for (auto& row : accumulated_input_hidden_gradients) {
+                    for (float& grad : row) {
+                        grad /= gradient_accumulation_steps;
+                    }
+                }
+
+                // Memory-intensive gradient computations
+                // Add historical gradient influence to current gradients
+                if (!historical_output_hidden_gradients.empty()) {
+                    float historical_weight = 0.1f; // Weight for historical gradients
+                    size_t history_size = historical_output_hidden_gradients.size();
+
+                    // Create additional memory-intensive computations by processing historical gradients
+                    std::vector<std::vector<std::vector<float>>> expanded_history;
+                    for (size_t h = 0; h < history_size; ++h) {
+                        // Duplicate and transform historical gradients to increase memory usage
+                        auto hist_out = historical_output_hidden_gradients[h];
+                        auto hist_in = historical_input_hidden_gradients[h];
+
+                        // Create expanded versions with additional computations
+                        std::vector<std::vector<float>> expanded_out(outputSize, std::vector<float>(neurons, 0.0f));
+                        std::vector<std::vector<float>> expanded_in(neurons, std::vector<float>(inputSize, 0.0f));
+
+                        // Memory-intensive operations: compute gradient statistics and correlations
+                        for (int i = 0; i < outputSize; ++i) {
+                            for (int j = 0; j < neurons; ++j) {
+                                float grad_val = hist_out[i][j];
+                                // Compute running statistics (mean, variance) across historical gradients
+                                float running_mean = 0.0f;
+                                float running_var = 0.0f;
+                                for (size_t k = 0; k < history_size; ++k) {
+                                    float hist_grad = historical_output_hidden_gradients[k][i][j];
+                                    running_mean += hist_grad;
+                                    running_var += hist_grad * hist_grad;
+                                }
+                                running_mean /= history_size;
+                                running_var = running_var / history_size - running_mean * running_mean;
+
+                                // Use statistics to modulate current gradients
+                                expanded_out[i][j] = grad_val * (1.0f + historical_weight * running_mean / (std::sqrt(running_var + epsilon)));
+                            }
+                        }
+
+                        for (int i = 0; i < neurons; ++i) {
+                            for (size_t j = 0; j < inputSize; ++j) {
+                                float grad_val = hist_in[i][j];
+                                // Similar statistical computations for input-hidden gradients
+                                float running_mean = 0.0f;
+                                float running_var = 0.0f;
+                                for (size_t k = 0; k < history_size; ++k) {
+                                    float hist_grad = historical_input_hidden_gradients[k][i][j];
+                                    running_mean += hist_grad;
+                                    running_var += hist_grad * hist_grad;
+                                }
+                                running_mean /= history_size;
+                                running_var = running_var / history_size - running_mean * running_mean;
+
+                                expanded_in[i][j] = grad_val * (1.0f + historical_weight * running_mean / (std::sqrt(running_var + epsilon)));
+                            }
+                        }
+
+                        expanded_history.push_back(expanded_out);
+                        expanded_history.push_back(expanded_in);
+                    }
+
+                    // Add influence from processed historical gradients to current accumulated gradients
+                    for (size_t h = 0; h < expanded_history.size(); h += 2) {
+                        auto& hist_out = expanded_history[h];
+                        auto& hist_in = expanded_history[h + 1];
+
+                        for (int i = 0; i < outputSize; ++i) {
+                            for (int j = 0; j < neurons; ++j) {
+                                accumulated_output_hidden_gradients[i][j] += historical_weight * hist_out[i][j];
+                            }
+                        }
+                        for (int i = 0; i < neurons; ++i) {
+                            for (size_t j = 0; j < inputSize; ++j) {
+                                accumulated_input_hidden_gradients[i][j] += historical_weight * hist_in[i][j];
+                            }
+                        }
+                    }
+                }
+
+                // Now update weights using accumulated gradients
+                if (optimizer) {
+                    optimizer->update(this->weigth_output_hidden, accumulated_output_hidden_gradients);
+                    optimizer->update(this->weigth_input_hidden, accumulated_input_hidden_gradients);
+
+                    if (verbose) {
+                        std::cout << "[DEBUG GRADIENT ACCUMULATION] Updated weights using accumulated gradients after "
+                                  << gradient_accumulation_steps << " batches" << std::endl;
+                    }
+                } else {
+                    // Fallback to basic gradient descent
+                    for (int j = 0; j < this->outputSize; ++j) {
+                        for (int k = 0; k < this->neurons; ++k) {
+                            this->weigth_output_hidden[j][k] += currentLearningRate * accumulated_output_hidden_gradients[j][k];
+                        }
+                    }
+                    for (int j = 0; j < this->neurons; ++j) {
+                        for (size_t k = 0; k < this->inputSize; ++k) {
+                            this->weigth_input_hidden[j][k] += currentLearningRate * accumulated_input_hidden_gradients[j][k];
+                        }
+                    }
+
+                    if (verbose) {
+                        std::cout << "[DEBUG GRADIENT ACCUMULATION] Updated weights using basic GD with accumulated gradients" << std::endl;
+                    }
+                }
+
+                // Reset accumulation for next cycle
+                resetGradientAccumulation();
+            } else {
+                // Don't update weights yet, just continue accumulating
+                if (verbose) {
+                    std::cout << "[DEBUG GRADIENT ACCUMULATION] Accumulated gradients for batch " << (batch_idx + 1)
+                              << " (" << current_accumulation_step << "/" << gradient_accumulation_steps << ")" << std::endl;
+                }
+            }
+        } else {
+            // Original behavior: update weights after each batch
+            if (optimizer) {
+                optimizer->update(this->weigth_output_hidden, output_hidden_gradients);
+                optimizer->update(this->weigth_input_hidden, input_hidden_gradients);
+
+                if (verbose) {
+                    std::cout << "[DEBUG TRAIN] Weights updated using " << optimizer->getName() << " optimizer for batch " << (batch_idx + 1) << std::endl;
+                }
+            } else {
+                // Fallback to basic gradient descent if no optimizer set
+                for (int j = 0; j < this->outputSize; ++j) {
+                    for (int k = 0; k < this->neurons; ++k) {
+                        this->weigth_output_hidden[j][k] += currentLearningRate * output_hidden_gradients[j][k];
+                    }
+                }
+                for (int j = 0; j < this->neurons; ++j) {
+                    for (size_t k = 0; k < this->inputSize; ++k) {
+                        this->weigth_input_hidden[j][k] += currentLearningRate * input_hidden_gradients[j][k];
+                    }
+                }
+
+                if (verbose) {
+                    std::cout << "[DEBUG TRAIN] Weights updated using basic gradient descent for batch " << (batch_idx + 1) << std::endl;
+                }
+            }
+        }
+
         // Update weights after each batch
         if (optimizer) {
             optimizer->update(this->weigth_output_hidden, output_hidden_gradients);
@@ -1429,38 +1622,6 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         }
     }
 
-    // Update weights using optimizer
-    if (optimizer) {
-        // Update learning rate in optimizer if scheduler is used
-        if (lrScheduler) {
-            // Note: This assumes optimizer has a way to update learning rate
-            // For now, we'll create new optimizer instances with updated learning rate
-            // In a more sophisticated implementation, optimizers would have a setLearningRate method
-        }
-
-        optimizer->update(this->weigth_output_hidden, output_hidden_gradients);
-        optimizer->update(this->weigth_input_hidden, input_hidden_gradients);
-
-        if (verbose) {
-            std::cout << "[DEBUG TRAIN] Weights updated using " << optimizer->getName() << " optimizer" << std::endl;
-        }
-    } else {
-        // Fallback to basic gradient descent if no optimizer set
-        for (int j = 0; j < this->outputSize; ++j) {
-            for (int k = 0; k < this->neurons; ++k) {
-                this->weigth_output_hidden[j][k] += currentLearningRate * output_hidden_gradients[j][k];
-            }
-        }
-        for (int j = 0; j < this->neurons; ++j) {
-            for (size_t k = 0; k < this->inputSize; ++k) {
-                this->weigth_input_hidden[j][k] += currentLearningRate * input_hidden_gradients[j][k];
-            }
-        }
-
-        if (verbose) {
-            std::cout << "[DEBUG TRAIN] Weights updated using basic gradient descent" << std::endl;
-        }
-    }
 
     // Increment epoch counter
     currentEpoch++;
@@ -1930,4 +2091,71 @@ void CoreAI::set3DTransformWeights(float polynomial_weight, float trig_weight, f
         std::cout << "  Projections: " << projections_weight << std::endl;
         std::cout << "  Ratios: " << ratios_weight << std::endl;
     }
+}
+
+// Gradient accumulation configuration methods
+void CoreAI::enableGradientAccumulation(bool enable, int accumulation_steps, int max_history) {
+    this->enable_gradient_accumulation = enable;
+    this->gradient_accumulation_steps = accumulation_steps;
+    this->max_historical_gradients = max_history;
+
+    if (enable) {
+        // Resize accumulated gradients matrices
+        initializeMatrix(this->accumulated_output_hidden_gradients, outputSize, neurons);
+        std::fill(accumulated_output_hidden_gradients.begin(), accumulated_output_hidden_gradients.end(),
+                  std::vector<float>(neurons, 0.0f));
+        initializeMatrix(this->accumulated_input_hidden_gradients, neurons, inputSize);
+        std::fill(accumulated_input_hidden_gradients.begin(), accumulated_input_hidden_gradients.end(),
+                  std::vector<float>(inputSize, 0.0f));
+    } else {
+        // Clear accumulated gradients when disabled
+        accumulated_output_hidden_gradients.clear();
+        accumulated_input_hidden_gradients.clear();
+        historical_output_hidden_gradients.clear();
+        historical_input_hidden_gradients.clear();
+    }
+
+    this->current_accumulation_step = 0;
+
+    if (verbose) {
+        std::cout << "[DEBUG GRADIENT ACCUMULATION] " << (enable ? "Enabled" : "Disabled")
+                  << " gradient accumulation with " << accumulation_steps << " steps, max history: " << max_history << std::endl;
+    }
+}
+
+void CoreAI::resetGradientAccumulation() {
+    this->current_accumulation_step = 0;
+    if (!accumulated_output_hidden_gradients.empty()) {
+        std::fill(accumulated_output_hidden_gradients.begin(), accumulated_output_hidden_gradients.end(),
+                  std::vector<float>(neurons, 0.0f));
+    }
+    if (!accumulated_input_hidden_gradients.empty()) {
+        std::fill(accumulated_input_hidden_gradients.begin(), accumulated_input_hidden_gradients.end(),
+                  std::vector<float>(inputSize, 0.0f));
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG GRADIENT ACCUMULATION] Reset gradient accumulation state" << std::endl;
+    }
+}
+
+size_t CoreAI::getGradientHistorySize() const {
+    return historical_output_hidden_gradients.size();
+}
+
+void CoreAI::clearGradientHistory() {
+    historical_output_hidden_gradients.clear();
+    historical_input_hidden_gradients.clear();
+
+    if (verbose) {
+        std::cout << "[DEBUG GRADIENT ACCUMULATION] Cleared gradient history" << std::endl;
+    }
+}
+
+std::vector<std::vector<float>> CoreAI::getAccumulatedGradientsOutputHidden() const {
+    return accumulated_output_hidden_gradients;
+}
+
+std::vector<std::vector<float>> CoreAI::getAccumulatedGradientsInputHidden() const {
+    return accumulated_input_hidden_gradients;
 }

@@ -194,6 +194,16 @@ public:
     // Activation function configurations per layer
     std::vector<ActivationConfig> layer_activation_configs; // One config per layer (including output)
 
+    // Gradient accumulation with historical storage
+    bool enable_gradient_accumulation;
+    int gradient_accumulation_steps; // Number of batches to accumulate before update
+    int max_historical_gradients; // Maximum number of historical gradient sets to keep
+    std::deque<std::vector<std::vector<float>>> historical_output_hidden_gradients; // Historical gradients for output-hidden weights
+    std::deque<std::vector<std::vector<float>>> historical_input_hidden_gradients; // Historical gradients for input-hidden weights
+    std::vector<std::vector<float>> accumulated_output_hidden_gradients; // Current accumulated gradients
+    std::vector<std::vector<float>> accumulated_input_hidden_gradients; // Current accumulated gradients
+    int current_accumulation_step; // Current step in accumulation cycle
+
     // Thread pool for parallel batch processing
     class ThreadPool {
     private:
@@ -344,6 +354,14 @@ public:
     void set3DTransformWeights(float polynomial_weight, float trig_weight, float log_exp_weight,
                               float rbf_weight, float angular_weight, float projections_weight,
                               float ratios_weight);
+
+    // Gradient accumulation configuration methods
+    void enableGradientAccumulation(bool enable, int accumulation_steps = 4, int max_history = 100);
+    void resetGradientAccumulation();
+    size_t getGradientHistorySize() const;
+    void clearGradientHistory();
+    std::vector<std::vector<float>> getAccumulatedGradientsOutputHidden() const;
+    std::vector<std::vector<float>> getAccumulatedGradientsInputHidden() const;
 };
 
 #endif // CORE_HPP

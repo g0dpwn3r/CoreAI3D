@@ -18,6 +18,8 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking
     checkpointingEnabled(false), bestValidationLoss(std::numeric_limits<float>::max()), epochsSinceBestModel(0), lastCheckpointEpoch(0),
+    maxBatchBuffers(100), bufferBatchSize(32), memoryIntensiveBufferingEnabled(false), // Initialize buffering
+    maxHistoricalSize(1000), memoryMonitoringEnabled(false), // Initialize historical storage
     gen(std::random_device{}()) // Initialize random number generator
 {
     // Parameter validation
@@ -43,6 +45,8 @@ Training::Training(bool isOffline, bool verbose, WebSocketServer* wsServer)
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     checkpointingEnabled(false), bestValidationLoss(std::numeric_limits<float>::max()), epochsSinceBestModel(0), lastCheckpointEpoch(0),
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking
+    maxBatchBuffers(100), bufferBatchSize(32), memoryIntensiveBufferingEnabled(false), // Initialize buffering
+    maxHistoricalSize(1000), memoryMonitoringEnabled(false), // Initialize historical storage
     gen(std::random_device{}()) // Initialize random number generator
 {
     if (isOfflineMode && verbose) {
@@ -1169,7 +1173,13 @@ void Training::train(double learningRate, int epochs, int batchSize) {
     }
 
     if (verbose) {
-        std::cout << "\nStarting training for " << epochs << " epochs...\n";
+        std::cout << "\nStarting memory-intensive training for " << epochs << " epochs...\n";
+        if (memoryIntensiveBufferingEnabled) {
+            std::cout << "[MEMORY TRAINING] Memory-intensive buffering is enabled\n";
+        }
+        if (memoryMonitoringEnabled) {
+            std::cout << "[MEMORY TRAINING] Memory monitoring is enabled\n";
+        }
     }
     const int barWidth = 70;
 
@@ -1182,13 +1192,62 @@ void Training::train(double learningRate, int epochs, int batchSize) {
     int epochs_since_best = 0;
     int minimum_epochs = std::max(50, epochs / 2); // Must train for at least 50 epochs or 50% of total
 
+    // Memory-intensive training: Use all available data (original + augmented copies)
+    std::vector<std::vector<std::vector<float>>> allInputs = {inputs};
+    std::vector<std::vector<std::vector<float>>> allTargets = {targets};
+
+    // Add augmented copies if available
+    allInputs.insert(allInputs.end(), augmentedInputsCopies.begin(), augmentedInputsCopies.end());
+    allTargets.insert(allTargets.end(), augmentedTargetsCopies.begin(), augmentedTargetsCopies.end());
+
+    if (verbose && allInputs.size() > 1) {
+        std::cout << "[MEMORY TRAINING] Using " << allInputs.size() << " datasets (1 original + "
+                  << augmentedInputsCopies.size() << " augmented copies)\n";
+    }
+
     for (int i = 0; i < epochs; ++i) {
         printProgressBar("Training Progress", i + 1, epochs, barWidth);
-        core->forward(inputs);
-        core->train(inputs, targets, learningRate, numSamples, batchSize);
 
-        // Calculate current loss for convergence monitoring
+        // Memory-intensive training: Train on all datasets
+        for (size_t datasetIdx = 0; datasetIdx < allInputs.size(); ++datasetIdx) {
+            const auto& currentInputs = allInputs[datasetIdx];
+            const auto& currentTargets = allTargets[datasetIdx];
+
+            if (memoryIntensiveBufferingEnabled) {
+                // Use buffering system: Create and buffer batches
+                size_t numBatches = (currentInputs.size() + batchSize - 1) / batchSize; // Ceiling division
+
+                for (size_t batchIdx = 0; batchIdx < numBatches; ++batchIdx) {
+                    size_t startIdx = batchIdx * batchSize;
+                    size_t endIdx = std::min(startIdx + batchSize, currentInputs.size());
+
+                    std::vector<std::vector<float>> batchInputs(currentInputs.begin() + startIdx, currentInputs.begin() + endIdx);
+                    std::vector<std::vector<float>> batchTargets(currentTargets.begin() + startIdx, currentTargets.begin() + endIdx);
+
+                    // Add batch to buffer (memory-intensive)
+                    addBatchToBuffer(batchInputs, batchTargets);
+
+                    // Process batch immediately for training
+                    core->forward(batchInputs);
+                    int batchSampleCount = static_cast<int>(batchInputs.size());
+                    core->train(batchInputs, batchTargets, learningRate, batchSampleCount, batchSize);
+                }
+            } else {
+                // Standard training without buffering
+                core->forward(currentInputs);
+                int datasetSampleCount = static_cast<int>(currentInputs.size());
+                core->train(currentInputs, currentTargets, learningRate, datasetSampleCount, batchSize);
+            }
+        }
+
+        // Calculate current loss for convergence monitoring (use original data for consistency)
         float current_loss = calculateMSE();
+
+        // Store historical data point (memory-intensive)
+        if (memoryMonitoringEnabled) {
+            std::string metadata = "Epoch " + std::to_string(i + 1) + " training";
+            storeHistoricalDataPoint(inputs, targets, current_loss, i + 1, metadata);
+        }
 
         // DEBUG: Check for exactly 0.0 loss (likely numerical issue)
         if (current_loss == 0.0f && verbose) {
@@ -1205,6 +1264,11 @@ void Training::train(double learningRate, int epochs, int batchSize) {
             epochs_since_best = 0;
         } else {
             epochs_since_best++;
+        }
+
+        // Memory monitoring: Log memory usage periodically
+        if (memoryMonitoringEnabled && (i + 1) % 50 == 0) {
+            logMemoryUsage();
         }
 
         // Checkpointing: Save checkpoint at regular intervals
@@ -1247,12 +1311,22 @@ void Training::train(double learningRate, int epochs, int batchSize) {
         }
         previous_loss = current_loss;
     }
+
+    // Final memory usage report
+    if (memoryMonitoringEnabled) {
+        std::cout << "\n[MULTI DATASET TRAINING] Final memory usage report:\n";
+        logMemoryUsage();
+    }
+
     // Only print 100% if we actually finished all epochs
     // if (epochs > 0) {
     //    printProgressBar("Training Progress", epochs, epochs, barWidth);
     // }
     if (verbose) {
-        std::cout << "\nTraining Complete!\n";
+        std::cout << "\nMemory-Intensive Training Complete!\n";
+        if (allInputs.size() > 1) {
+            std::cout << "Trained on " << allInputs.size() << " datasets total\n";
+        }
     }
 }
 
@@ -1301,6 +1375,19 @@ bool Training::startTraining(double learningRate, int epochs) {
             int epochs_since_best = 0;
             int minimum_epochs = std::max(50, epochs / 2); // Must train for at least 50 epochs or 50% of total
 
+            // Memory-intensive training: Use all available data (original + augmented copies)
+            std::vector<std::vector<std::vector<float>>> allInputs = {inputs};
+            std::vector<std::vector<std::vector<float>>> allTargets = {targets};
+
+            // Add augmented copies if available
+            allInputs.insert(allInputs.end(), augmentedInputsCopies.begin(), augmentedInputsCopies.end());
+            allTargets.insert(allTargets.end(), augmentedTargetsCopies.begin(), augmentedTargetsCopies.end());
+
+            if (verbose && allInputs.size() > 1) {
+                std::cout << "[MEMORY TRAINING] Async training using " << allInputs.size() << " datasets (1 original + "
+                          << augmentedInputsCopies.size() << " augmented copies)\n";
+            }
+
             for (int i = 0; i < epochs; ++i) {
                 if (trainingStopRequested.load()) {
                     trainingStatus = "stopped";
@@ -1310,11 +1397,47 @@ bool Training::startTraining(double learningRate, int epochs) {
                 currentEpoch = i + 1;
                 // Update progress bar with current epoch
                 printProgressBar("Training Progress", i + 1, epochs, barWidth);
-                core->forward(inputs);
-                core->train(inputs, targets, learningRate, numSamples, batchSize);
 
-                // Calculate current loss
+                // Memory-intensive training: Train on all datasets
+                for (size_t datasetIdx = 0; datasetIdx < allInputs.size(); ++datasetIdx) {
+                    const auto& currentInputs = allInputs[datasetIdx];
+                    const auto& currentTargets = allTargets[datasetIdx];
+
+                    if (memoryIntensiveBufferingEnabled) {
+                        // Use buffering system: Create and buffer batches
+                        size_t numBatches = (currentInputs.size() + batchSize - 1) / batchSize; // Ceiling division
+
+                        for (size_t batchIdx = 0; batchIdx < numBatches; ++batchIdx) {
+                            size_t startIdx = batchIdx * batchSize;
+                            size_t endIdx = std::min(startIdx + batchSize, currentInputs.size());
+
+                            std::vector<std::vector<float>> batchInputs(currentInputs.begin() + startIdx, currentInputs.begin() + endIdx);
+                            std::vector<std::vector<float>> batchTargets(currentTargets.begin() + startIdx, currentTargets.begin() + endIdx);
+
+                            // Add batch to buffer (memory-intensive)
+                            addBatchToBuffer(batchInputs, batchTargets);
+
+                            // Process batch immediately for training
+                            core->forward(batchInputs);
+                            int batchSampleCount = static_cast<int>(batchInputs.size());
+                            core->train(batchInputs, batchTargets, learningRate, batchSampleCount, batchSize);
+                        }
+                    } else {
+                        // Standard training without buffering
+                        core->forward(currentInputs);
+                        int datasetSampleCount = static_cast<int>(currentInputs.size());
+                        core->train(currentInputs, currentTargets, learningRate, datasetSampleCount, batchSize);
+                    }
+                }
+
+                // Calculate current loss (use original data for consistency)
                 currentLoss = calculateMSE();
+
+                // Store historical data point (memory-intensive)
+                if (memoryMonitoringEnabled) {
+                    std::string metadata = "Async epoch " + std::to_string(i + 1) + " training";
+                    storeHistoricalDataPoint(inputs, targets, currentLoss, i + 1, metadata);
+                }
 
                 // DEBUG: Check for exactly 0.0 loss (likely numerical issue)
                 if (currentLoss == 0.0f && verbose) {
@@ -1331,6 +1454,11 @@ bool Training::startTraining(double learningRate, int epochs) {
                     epochs_since_best = 0;
                 } else {
                     epochs_since_best++;
+                }
+
+                // Memory monitoring: Log memory usage periodically
+                if (memoryMonitoringEnabled && (i + 1) % 50 == 0) {
+                    logMemoryUsage();
                 }
 
                 // Checkpointing: Save checkpoint at regular intervals
@@ -1398,6 +1526,12 @@ bool Training::startTraining(double learningRate, int epochs) {
                     // Early stopping - show progress at the epoch where it stopped
                     printProgressBar("Training Progress", currentEpoch, totalEpochs, barWidth);
                 }
+            }
+
+            // Final memory usage report for async training
+            if (memoryMonitoringEnabled) {
+                std::cout << "\n[ASYNC MEMORY TRAINING] Final memory usage report:\n";
+                logMemoryUsage();
             }
 
             trainingActive = false;
@@ -5438,7 +5572,6 @@ std::string Training::getBestModelFilename() const {
     ss << checkpointConfig.bestModelPrefix << ".json";
     return ss.str();
 }
-
 std::string Training::getTimestampString() const {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
@@ -5446,5 +5579,346 @@ std::string Training::getTimestampString() const {
     ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
+
+// Memory-intensive data augmentation methods implementation
+
+void Training::createMultipleAugmentedCopies(int numCopies) {
+    if (inputs.empty() || targets.empty()) {
+        if (verbose) {
+            std::cout << "[MEMORY AUGMENTATION] No data available for augmentation" << std::endl;
+        }
+        return;
+    }
+
+    if (!dataAugmentation) {
+        if (verbose) {
+            std::cout << "[MEMORY AUGMENTATION] Data augmentation not initialized" << std::endl;
+        }
+        return;
+    }
+
+    // Clear existing augmented copies
+    clearAugmentedCopies();
+
+    if (verbose) {
+        std::cout << "[MEMORY AUGMENTATION] Creating " << numCopies << " augmented copies of " << inputs.size() << " samples..." << std::endl;
+    }
+
+    // Create multiple augmented copies
+    for (int copy = 0; copy < numCopies; ++copy) {
+        std::vector<std::vector<float>> augmentedInputs = inputs;  // Start with original data
+        std::vector<std::vector<float>> augmentedTargets = targets; // Targets remain the same
+
+        // Apply augmentation to each sample in this copy
+        for (size_t i = 0; i < augmentedInputs.size(); ++i) {
+            // Assume 3D coordinates are triplets (x, y, z)
+            for (size_t j = 0; j < augmentedInputs[i].size(); j += 3) {
+                if (j + 2 < augmentedInputs[i].size()) {
+                    std::vector<float> point = {augmentedInputs[i][j], augmentedInputs[i][j + 1], augmentedInputs[i][j + 2]};
+                    std::vector<float> augmentedPoint = dataAugmentation->augmentCoordinates(point);
+                    augmentedInputs[i][j] = augmentedPoint[0];
+                    augmentedInputs[i][j + 1] = augmentedPoint[1];
+                    augmentedInputs[i][j + 2] = augmentedPoint[2];
+                }
+            }
+        }
+
+        // Store this augmented copy
+        augmentedInputsCopies.push_back(augmentedInputs);
+        augmentedTargetsCopies.push_back(augmentedTargets);
+
+        if (verbose && (copy + 1) % 10 == 0) {
+            std::cout << "[MEMORY AUGMENTATION] Created copy " << (copy + 1) << "/" << numCopies << std::endl;
+        }
+    }
+
+    if (verbose) {
+        size_t totalAugmentedSamples = augmentedInputsCopies.size() * inputs.size();
+        std::cout << "[MEMORY AUGMENTATION] Successfully created " << numCopies << " augmented copies ("
+                  << totalAugmentedSamples << " total augmented samples)" << std::endl;
+    }
+}
+
+void Training::clearAugmentedCopies() {
+    augmentedInputsCopies.clear();
+    augmentedTargetsCopies.clear();
+
+    if (verbose) {
+        std::cout << "[MEMORY AUGMENTATION] Cleared all augmented copies" << std::endl;
+    }
+}
+
+size_t Training::getAugmentedDataSize() const {
+    size_t totalSize = 0;
+    for (const auto& copy : augmentedInputsCopies) {
+        for (const auto& sample : copy) {
+            totalSize += sample.size() * sizeof(float);
+        }
+    }
+    for (const auto& copy : augmentedTargetsCopies) {
+        for (const auto& sample : copy) {
+            totalSize += sample.size() * sizeof(float);
+        }
+    }
+    return totalSize;
+}
+
+// Data buffering system implementation
+
+void Training::initializeDataBuffering(size_t maxBuffers, size_t batchSize) {
+    this->maxBatchBuffers = maxBuffers;
+    this->bufferBatchSize = batchSize;
+
+    // Clear existing buffers
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    batchBuffers.clear();
+
+    if (verbose) {
+        std::cout << "[DATA BUFFERING] Initialized buffering system with max " << maxBuffers
+                  << " buffers of size " << batchSize << std::endl;
+    }
+}
+
+void Training::addBatchToBuffer(const std::vector<std::vector<float>>& batchInputs,
+                               const std::vector<std::vector<float>>& batchTargets) {
+    if (!memoryIntensiveBufferingEnabled) {
+        return; // Skip if not enabled
+    }
+
+    std::lock_guard<std::mutex> lock(bufferMutex);
+
+    // Create new batch buffer
+    BatchBuffer buffer;
+    buffer.inputs = batchInputs;
+    buffer.targets = batchTargets;
+    buffer.batchIndex = batchBuffers.size();
+    buffer.isProcessed = false;
+    buffer.createdTime = std::chrono::steady_clock::now();
+
+    batchBuffers.push_back(buffer);
+
+    // Remove old buffers if we exceed the limit
+    while (batchBuffers.size() > maxBatchBuffers) {
+        batchBuffers.pop_front();
+    }
+
+    if (verbose && batchBuffers.size() % 10 == 0) {
+        std::cout << "[DATA BUFFERING] Buffered " << batchBuffers.size() << " batches in memory" << std::endl;
+    }
+}
+
+bool Training::getNextBatchFromBuffer(std::vector<std::vector<float>>& batchInputs,
+                                    std::vector<std::vector<float>>& batchTargets) {
+    if (!memoryIntensiveBufferingEnabled) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(bufferMutex);
+
+    // Find an unprocessed batch
+    for (auto& buffer : batchBuffers) {
+        if (!buffer.isProcessed) {
+            batchInputs = buffer.inputs;
+            batchTargets = buffer.targets;
+            buffer.isProcessed = true;
+            return true;
+        }
+    }
+
+    return false; // No unprocessed batches available
+}
+
+void Training::clearOldBuffers(std::chrono::seconds maxAge) {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+
+    auto now = std::chrono::steady_clock::now();
+    auto it = batchBuffers.begin();
+
+    while (it != batchBuffers.end()) {
+        auto age = std::chrono::duration_cast<std::chrono::seconds>(now - it->createdTime);
+        if (age > maxAge) {
+            it = batchBuffers.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[DATA BUFFERING] Cleared old buffers, " << batchBuffers.size() << " buffers remaining" << std::endl;
+    }
+}
+
+size_t Training::getBufferMemoryUsage() const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(bufferMutex));
+    size_t totalSize = 0;
+
+    for (const auto& buffer : batchBuffers) {
+        for (const auto& sample : buffer.inputs) {
+            totalSize += sample.size() * sizeof(float);
+        }
+        for (const auto& sample : buffer.targets) {
+            totalSize += sample.size() * sizeof(float);
+        }
+        // Add overhead for the buffer structure
+        totalSize += sizeof(BatchBuffer);
+    }
+
+    return totalSize;
+}
+
+void Training::enableMemoryIntensiveBuffering(bool enable) {
+    memoryIntensiveBufferingEnabled = enable;
+
+    if (verbose) {
+        std::cout << "[DATA BUFFERING] Memory-intensive buffering " << (enable ? "enabled" : "disabled") << std::endl;
+    }
+}
+
+// Historical data storage implementation
+
+void Training::initializeHistoricalStorage(size_t maxHistorySize) {
+    this->maxHistoricalSize = maxHistorySize;
+    historicalData.clear();
+
+    if (verbose) {
+        std::cout << "[HISTORICAL STORAGE] Initialized with max " << maxHistorySize << " data points" << std::endl;
+    }
+}
+
+void Training::storeHistoricalDataPoint(const std::vector<std::vector<float>>& inputs,
+                                       const std::vector<std::vector<float>>& targets,
+                                       float loss, int epoch, const std::string& metadata) {
+    if (!memoryMonitoringEnabled) {
+        return; // Skip if not enabled
+    }
+
+    HistoricalDataPoint point;
+    point.inputs = inputs;
+    point.targets = targets;
+    point.loss = loss;
+    point.epoch = epoch;
+    point.timestamp = std::chrono::steady_clock::now();
+    point.metadata = metadata;
+
+    historicalData.push_back(point);
+
+    // Remove old data if we exceed the limit
+    while (historicalData.size() > maxHistoricalSize) {
+        historicalData.erase(historicalData.begin());
+    }
+
+    if (verbose && historicalData.size() % 100 == 0) {
+        std::cout << "[HISTORICAL STORAGE] Stored " << historicalData.size() << " historical data points" << std::endl;
+    }
+}
+
+const std::vector<Training::HistoricalDataPoint>& Training::getHistoricalData() const {
+    return historicalData;
+}
+
+void Training::clearHistoricalData() {
+    historicalData.clear();
+
+    if (verbose) {
+        std::cout << "[HISTORICAL STORAGE] Cleared all historical data" << std::endl;
+    }
+}
+
+size_t Training::getHistoricalMemoryUsage() const {
+    size_t totalSize = 0;
+
+    for (const auto& point : historicalData) {
+        for (const auto& sample : point.inputs) {
+            totalSize += sample.size() * sizeof(float);
+        }
+        for (const auto& sample : point.targets) {
+            totalSize += sample.size() * sizeof(float);
+        }
+        // Add overhead for the structure
+        totalSize += sizeof(HistoricalDataPoint);
+    }
+
+    return totalSize;
+}
+
+std::vector<Training::HistoricalDataPoint> Training::getHistoricalDataInRange(int startEpoch, int endEpoch) const {
+    std::vector<HistoricalDataPoint> result;
+
+    for (const auto& point : historicalData) {
+        if (point.epoch >= startEpoch && point.epoch <= endEpoch) {
+            result.push_back(point);
+        }
+    }
+
+    return result;
+}
+
+// Memory usage monitoring implementation
+
+Training::MemoryStats Training::getMemoryStats() const {
+    MemoryStats stats;
+
+    // Calculate base data size (original inputs and targets)
+    stats.baseDataSize = 0;
+    for (const auto& sample : inputs) {
+        stats.baseDataSize += sample.size() * sizeof(float);
+    }
+    for (const auto& sample : targets) {
+        stats.baseDataSize += sample.size() * sizeof(float);
+    }
+
+    // Augmented data size
+    stats.augmentedDataSize = getAugmentedDataSize();
+
+    // Buffer size
+    stats.bufferSize = getBufferMemoryUsage();
+
+    // Historical data size
+    stats.historicalSize = getHistoricalMemoryUsage();
+
+    // Total size
+    stats.totalSize = stats.baseDataSize + stats.augmentedDataSize + stats.bufferSize + stats.historicalSize;
+
+    // Convert to MB
+    stats.memoryUsageMB = static_cast<double>(stats.totalSize) / (1024.0 * 1024.0);
+
+    return stats;
+}
+
+void Training::logMemoryUsage() const {
+    if (!memoryMonitoringEnabled) {
+        return;
+    }
+
+    auto stats = getMemoryStats();
+
+    std::cout << "\n=== MEMORY USAGE REPORT ===" << std::endl;
+    std::cout << "Base Data Size: " << stats.baseDataSize << " bytes (" << (stats.baseDataSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
+    std::cout << "Augmented Data Size: " << stats.augmentedDataSize << " bytes (" << (stats.augmentedDataSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
+    std::cout << "Buffer Size: " << stats.bufferSize << " bytes (" << (stats.bufferSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
+    std::cout << "Historical Data Size: " << stats.historicalSize << " bytes (" << (stats.historicalSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
+    std::cout << "Total Memory Usage: " << stats.totalSize << " bytes (" << stats.memoryUsageMB << " MB)" << std::endl;
+
+    if (!augmentedInputsCopies.empty()) {
+        std::cout << "Augmented Copies: " << augmentedInputsCopies.size() << " copies of " << inputs.size() << " samples each" << std::endl;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(bufferMutex));
+        std::cout << "Buffered Batches: " << batchBuffers.size() << std::endl;
+    }
+
+    std::cout << "Historical Data Points: " << historicalData.size() << std::endl;
+    std::cout << "===========================\n" << std::endl;
+}
+
+void Training::enableMemoryMonitoring(bool enable) {
+    memoryMonitoringEnabled = enable;
+
+    if (verbose) {
+        std::cout << "[MEMORY MONITORING] " << (enable ? "Enabled" : "Disabled") << std::endl;
+    }
+}
+
 
 
