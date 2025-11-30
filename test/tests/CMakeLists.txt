@@ -70,3 +70,7 @@ add_test(NAME TestAutoTuning COMMAND test_auto_tuning)
 add_executable(test_gradient_accumulation ../test_gradient_accumulation.cpp)
 target_link_libraries(test_gradient_accumulation PRIVATE CoreAI3DLib)
 add_test(NAME TestGradientAccumulation COMMAND test_gradient_accumulation)
+
+add_executable(test_gradient_accumulation_performance ../test_gradient_accumulation_performance.cpp)
+target_link_libraries(test_gradient_accumulation_performance PRIVATE CoreAI3DLib)
+add_test(NAME TestGradientAccumulationPerformance COMMAND test_gradient_accumulation_performance)
