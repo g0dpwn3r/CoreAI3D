@@ -207,7 +207,14 @@ def perform_git_operations(branch, remotes):
         subprocess.run(['git', 'add', '-A'], check=True)
 
         logging.info("Performing git commit")
-        subprocess.run(['git', 'commit', '-m', 'Another successful build with Git LFS support'], check=True)
+        try:
+            # Only commit if there are changes
+            subprocess.run(['git', 'diff-index', '--quiet', 'HEAD'], check=True)
+            print("No changes to commit.")
+        except subprocess.CalledProcessError:
+            # diff-index exit code 1 -> changes exist
+            subprocess.run(['git', 'commit', '-m', 'Another successful build with Git LFS support'], check=True)
+
 
     
         # Check SSH connectivity before pushing
@@ -298,8 +305,13 @@ def main():
                     config_dest = dest / 'config.json'
 
                     # Use sudo to copy the executable
-                    result = subprocess.run(['pkexec', 'cp', str(target_executable), str(executable_dest)],
-                    capture_output=True, text=True)
+                    result = subprocess.run([
+                        'sudo',
+                        '/usr/local/bin/coreai3d_copy',
+                        str(target_executable),
+                        str(executable_dest)
+                    ], capture_output=True, text=True)
+
                     if result.returncode == 0:
                         logging.info(f"Successfully copied executable to {executable_dest}")
                     else:
