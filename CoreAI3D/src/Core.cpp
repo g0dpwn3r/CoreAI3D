@@ -81,26 +81,13 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     initializeVector(this->hidden_output, neurons);
     std::fill(this->hidden_output.begin(), this->hidden_output.end(), 0.0f);
 
-    // CRITICAL: Initialize weight matrices with random values
-    // Use improved Xavier/Glorot initialization for 3D spatial data
-    float scale = std::sqrt(6.0f / (inputSize + neurons));
-    std::uniform_real_distribution<float> weight_dist(-scale, scale);
-
-    // Initialize hidden-to-output weights with explicit random values
+    // Initialize weight matrices with adaptive initialization
+    // Use Xavier/Glorot initialization by default for backward compatibility
     initializeMatrix(this->weigth_output_hidden, outputSize, neurons);
-    for (int i = 0; i < outputSize; ++i) {
-        for (int j = 0; j < neurons; ++j) {
-            this->weigth_output_hidden[i][j] = weight_dist(gen);
-        }
-    }
+    initializeWeightsAdaptive(neurons, outputSize, this->weigth_output_hidden, ActivationType::SIGMOID);
 
-    // Initialize input-to-hidden weights with explicit random values
     initializeMatrix(this->weigth_input_hidden, neurons, inputSize);
-    for (int i = 0; i < neurons; ++i) {
-        for (int j = 0; j < inputSize; ++j) {
-            this->weigth_input_hidden[i][j] = weight_dist(gen);
-        }
-    }
+    initializeWeightsAdaptive(inputSize, neurons, this->weigth_input_hidden, ActivationType::SIGMOID);
 
     // DEBUG: Verify weight initialization
     if (verbose) {
@@ -175,6 +162,20 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     default_config.spatial_weight = 1.0f;
     default_config.calculus_config = {10, 1.0f, 1.0f};
     layer_activation_configs.resize(layer_sizes.size(), default_config);
+    // Initialize activation configurations (default to sigmoid for backward compatibility)
+    ActivationConfig default_config;
+    default_config.type = ActivationType::SIGMOID;
+    default_config.alpha = 1.0f;
+    default_config.beta = 0.1f;
+    default_config.spatial_weight = 1.0f;
+    default_config.calculus_config = {10, 1.0f, 1.0f};
+    layer_activation_configs.resize(layer_sizes.size(), default_config);
+    std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
+
+    // Initialize weight initialization parameters
+    weight_init_type = WeightInitialization::XAVIER_UNIFORM; // Default to Xavier uniform
+    weight_init_scale = 1.0f;
+    weight_init_seed = 42;
     std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
 
     // Initialize thread pool with number of hardware threads
@@ -1737,33 +1738,17 @@ void CoreAI::setOutputSize(int size)
 
 void CoreAI::resizeWeights()
 {
-    // Use fixed seed for reproducible weight re-initialization
-    std::mt19937 gen(42);
-
     if (verbose) {
         std::cout << "[DEBUG RESIZE] Resizing and re-initializing weights" << std::endl;
     }
 
-    // Resize weight matrices with improved Xavier/Glorot initialization for 3D spatial data
-    float scale = std::sqrt(6.0f / (inputSize + neurons));
-    std::uniform_real_distribution<float> weight_dist(-scale, scale);
-
-    // Resize and initialize hidden-to-output weights with explicit random values
+    // Resize and initialize weight matrices with adaptive initialization
     initializeMatrix(this->weigth_output_hidden, outputSize, neurons);
-    for (int i = 0; i < outputSize; ++i) {
-        for (int j = 0; j < neurons; ++j) {
-            this->weigth_output_hidden[i][j] = weight_dist(gen);
-        }
-    }
+    initializeWeightsAdaptive(neurons, outputSize, this->weigth_output_hidden, ActivationType::SIGMOID);
 
-    // Resize and initialize input-to-hidden weights with explicit random values
     initializeMatrix(this->weigth_input_hidden, neurons, inputSize);
-    for (int i = 0; i < neurons; ++i) {
-        for (int j = 0; j < inputSize; ++j) {
-            this->weigth_input_hidden[i][j] = weight_dist(gen);
-        }
-    }
-    
+    initializeWeightsAdaptive(inputSize, neurons, this->weigth_input_hidden, ActivationType::SIGMOID);
+
     if (verbose) {
         std::cout << "[DEBUG RESIZE] Weight re-initialization complete" << std::endl;
     }
@@ -1789,22 +1774,35 @@ void CoreAI::setOptimizer(const std::string& optimizerType, float learningRate,
 }
 
 void CoreAI::setLearningRateScheduler(const std::string& schedulerType, float initialLearningRate,
-                                     float decayRate, int decaySteps,
-                                     float decayFactor, int totalEpochs,
-                                     float minLearningRate) {
+                                      float decayRate, int decaySteps,
+                                      float decayFactor, int totalEpochs,
+                                      float minLearningRate, int warmupEpochs) {
+    std::unique_ptr<LearningRateScheduler> baseScheduler;
+
     if (schedulerType == "ExponentialDecay") {
-        lrScheduler = std::make_unique<ExponentialDecay>(initialLearningRate, decayRate, decaySteps);
+        baseScheduler = std::make_unique<ExponentialDecay>(initialLearningRate, decayRate, decaySteps);
     } else if (schedulerType == "StepDecay") {
-        lrScheduler = std::make_unique<StepDecay>(initialLearningRate, decayFactor, decaySteps);
+        baseScheduler = std::make_unique<StepDecay>(initialLearningRate, decayFactor, decaySteps);
     } else if (schedulerType == "CosineAnnealing") {
-        lrScheduler = std::make_unique<CosineAnnealing>(initialLearningRate, totalEpochs, minLearningRate);
+        baseScheduler = std::make_unique<CosineAnnealing>(initialLearningRate, totalEpochs, minLearningRate);
     } else {
         throw std::invalid_argument("Unknown scheduler type: " + schedulerType);
     }
 
+    // Apply warmup if specified
+    if (warmupEpochs > 0) {
+        lrScheduler = std::make_unique<WarmupScheduler>(initialLearningRate, warmupEpochs, std::move(baseScheduler));
+    } else {
+        lrScheduler = std::move(baseScheduler);
+    }
+
     if (verbose) {
         std::cout << "[DEBUG SCHEDULER] Set learning rate scheduler to: " << schedulerType
-                  << " with initial learning rate: " << initialLearningRate << std::endl;
+                  << " with initial learning rate: " << initialLearningRate;
+        if (warmupEpochs > 0) {
+            std::cout << " (with " << warmupEpochs << " warmup epochs)";
+        }
+        std::cout << std::endl;
     }
 }
 
@@ -1840,6 +1838,135 @@ void CoreAI::setRegularizationParams(float l2_lambda, float dropout_rate,
 
 void CoreAI::enableRegularization(bool dropout, bool batch_norm,
                                   bool l2_reg, bool grad_clip) {
+// Weight initialization configuration methods
+
+void CoreAI::setWeightInitialization(WeightInitialization type, float scale, unsigned int seed) {
+    weight_init_type = type;
+    weight_init_scale = scale;
+    weight_init_seed = seed;
+
+    if (verbose) {
+        std::cout << "[DEBUG WEIGHT INIT] Set weight initialization to type " << static_cast<int>(type)
+                  << " with scale " << scale << " and seed " << seed << std::endl;
+    }
+}
+
+void CoreAI::initializeWeightsAdaptive(int from_size, int to_size, std::vector<std::vector<float>>& weights, ActivationType activation_type) {
+    std::mt19937 gen(weight_init_seed);
+    float scale = weight_init_scale;
+
+    // Adaptive initialization based on activation function
+    switch (activation_type) {
+        case ActivationType::SIGMOID:
+        case ActivationType::INTEGRAL_SIGMOID:
+        case ActivationType::INTEGRAL_TANH:
+            // Xavier/Glorot initialization for sigmoid/tanh
+            scale *= std::sqrt(6.0f / (from_size + to_size));
+            break;
+        case ActivationType::ELU:
+        case ActivationType::LEAKY_RELU:
+        case ActivationType::PARAMETRIC_RELU:
+        case ActivationType::SWISH:
+        case ActivationType::GELU:
+        case ActivationType::SPATIAL_ELU:
+        case ActivationType::SPATIAL_LEAKY_RELU:
+        case ActivationType::INTEGRAL_RELU:
+            // He initialization for ReLU variants
+            scale *= std::sqrt(2.0f / from_size);
+            break;
+        default:
+            // Default Xavier initialization
+            scale *= std::sqrt(6.0f / (from_size + to_size));
+            break;
+    }
+
+    // Apply the specific initialization method
+    switch (weight_init_type) {
+        case WeightInitialization::XAVIER_UNIFORM: {
+            std::uniform_real_distribution<float> dist(-scale, scale);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::XAVIER_NORMAL: {
+            std::normal_distribution<float> dist(0.0f, scale);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::HE_UNIFORM: {
+            float limit = scale * std::sqrt(3.0f);
+            std::uniform_real_distribution<float> dist(-limit, limit);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::HE_NORMAL: {
+            std::normal_distribution<float> dist(0.0f, scale);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::LECUN_UNIFORM: {
+            float limit = scale * std::sqrt(3.0f);
+            std::uniform_real_distribution<float> dist(-limit, limit);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::LECUN_NORMAL: {
+            std::normal_distribution<float> dist(0.0f, scale);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::RANDOM_UNIFORM: {
+            std::uniform_real_distribution<float> dist(-scale, scale);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+        case WeightInitialization::RANDOM_NORMAL: {
+            std::normal_distribution<float> dist(0.0f, scale);
+            for (auto& row : weights) {
+                for (float& val : row) {
+                    val = dist(gen);
+                }
+            }
+            break;
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[DEBUG WEIGHT INIT] Initialized " << weights.size() << "x" << weights[0].size()
+                  << " weights with " << static_cast<int>(weight_init_type) << " method, scale: " << scale << std::endl;
+    }
+}
+
+// Multi-layer architecture implementation
+
+void CoreAI::initializeMultiLayerWeights() {
     this->use_dropout = dropout;
     this->use_batch_norm = batch_norm;
     this->use_l2_reg = l2_reg;
@@ -1857,22 +1984,27 @@ void CoreAI::enableRegularization(bool dropout, bool batch_norm,
 // Multi-layer architecture implementation
 
 void CoreAI::initializeMultiLayerWeights() {
-    std::mt19937 gen(42);
     layer_weights.clear();
     layer_weights.resize(layer_sizes.size() - 1); // weights between layers
 
     for (size_t i = 0; i < layer_weights.size(); ++i) {
         int from_size = layer_sizes[i];
         int to_size = layer_sizes[i + 1];
-        float scale = std::sqrt(6.0f / (from_size + to_size));
-        std::uniform_real_distribution<float> weight_dist(-scale, scale);
 
+        // Determine activation type for this layer (use default if not set)
+        ActivationType activation_type = ActivationType::SIGMOID;
+        if (i < layer_activation_configs.size()) {
+            activation_type = layer_activation_configs[i].type;
+        }
+
+        // Initialize weights using adaptive initialization
         layer_weights[i].resize(to_size);
         for (int j = 0; j < to_size; ++j) {
             layer_weights[i][j].resize(from_size);
-            for (int k = 0; k < from_size; ++k) {
-                layer_weights[i][j][k] = weight_dist(gen);
-            }
+            // Create a temporary 2D vector for this weight matrix
+            std::vector<std::vector<float>> temp_weights = {layer_weights[i][j]};
+            initializeWeightsAdaptive(from_size, to_size, temp_weights, activation_type);
+            layer_weights[i][j] = temp_weights[0];
         }
     }
 

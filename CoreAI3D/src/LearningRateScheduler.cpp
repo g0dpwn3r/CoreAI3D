@@ -32,3 +32,25 @@ float CosineAnnealing::getLearningRate(int epoch) {
     currentLearningRate = minLearningRate + 0.5f * (initialLearningRate - minLearningRate) * (1.0f + cos_term);
     return currentLearningRate;
 }
+
+// WarmupScheduler Implementation
+WarmupScheduler::WarmupScheduler(float initialLearningRate, int warmupEpochs, std::unique_ptr<LearningRateScheduler> mainScheduler)
+    : LearningRateScheduler(initialLearningRate), warmupEpochs(warmupEpochs), mainScheduler(std::move(mainScheduler)) {}
+
+float WarmupScheduler::getLearningRate(int epoch) {
+    if (epoch < warmupEpochs) {
+        // Linear warmup: lr = initial_lr * (epoch + 1) / warmup_epochs
+        currentLearningRate = initialLearningRate * (epoch + 1) / static_cast<float>(warmupEpochs);
+    } else {
+        // Use main scheduler after warmup
+        currentLearningRate = mainScheduler->getLearningRate(epoch - warmupEpochs);
+    }
+    return currentLearningRate;
+}
+
+void WarmupScheduler::reset() {
+    LearningRateScheduler::reset();
+    if (mainScheduler) {
+        mainScheduler->reset();
+    }
+}

@@ -63,14 +63,57 @@ public:
     void preprocess(float minRange, float maxRange);
     void train(double learningRate, int epochs, int batchSize = 32); // Changed samples to epochs, added batch size
 
+    // Optimized batch size selection methods
+    int getOptimalBatchSize(int datasetSize, size_t availableMemoryMB = 1024);
+    int getAdaptiveBatchSize(int currentEpoch, int totalEpochs, int baseBatchSize);
+    void setBatchSizeStrategy(const std::string& strategy); // "fixed", "adaptive", "memory_based"
+
+    // Enhanced training with adaptive hyperparameters
+    void trainAdaptive(double initialLearningRate, int maxEpochs, int batchSize = 32,
+                      double minLearningRate = 1e-6, int patience = 10, double minImprovement = 1e-4);
+
     int numSamples; // Renamed from 'samples' for clarity
     int inputSize; // Will be set dynamically after loading data
     int outputSize; // Will be set dynamically after loading data
     int layers;
     int neurons;
-    int batchSize; // Batch size for training
+    int batchSize; // Batch size for training (adaptive)
     double learningRate;
     float min, max;
+
+    // Adaptive hyperparameters
+    int adaptiveBatchSize;
+    double adaptiveLearningRateValue;
+    int optimalEpochs;
+    std::string optimalOptimizer;
+
+    // Convergence and early stopping variables
+    double convergenceLossThreshold;
+    int convergencePatienceEpochs;
+    double convergenceMinImprovement;
+    bool earlyStoppingEnabled;
+
+    // Gradient clipping variables
+    bool gradientClippingEnabled;
+    double maxGradientNormThreshold;
+
+    // Learning rate decay variables
+    std::string lrDecayType;
+    double lrDecayRate;
+    int lrDecaySteps;
+
+    // Optimizer configuration variables
+    std::string currentOptimizerType;
+    std::map<std::string, double> optimizerParams;
+
+    // Epoch management variables
+    int minTrainingEpochs;
+    int maxTrainingEpochs;
+
+    // Auto-tuning variables
+    std::map<std::string, std::pair<double, double>> tunableParameters;
+    bool autoTuningEnabled;
+    std::map<std::string, double> bestHyperparameters;
 
     std::string embedding_file;
     std::string language;
@@ -92,6 +135,32 @@ public:
 
     // K-fold cross-validation method
     CrossValidationResults performKFoldCrossValidation(int k = 5, double learningRate = 0.01, int epochs = 100);
+
+    // Convergence and early stopping structures
+    struct ConvergenceCriteria {
+        double minLossImprovement = 1e-4;     // Minimum improvement to continue training
+        int patienceEpochs = 10;              // Epochs to wait for improvement before early stopping
+        double minLearningRate = 1e-6;        // Minimum learning rate before stopping
+        int maxEpochs = 1000;                 // Maximum epochs regardless of convergence
+        bool useEarlyStopping = true;         // Enable early stopping
+        bool useLossPlateauDetection = true;  // Detect loss plateaus
+        int plateauPatience = 5;              // Epochs to wait after plateau detection
+    };
+
+    struct TrainingMetrics {
+        double currentLoss = 0.0;
+        double bestLoss = std::numeric_limits<double>::max();
+        double previousLoss = std::numeric_limits<double>::max();
+        int epochsWithoutImprovement = 0;
+        int currentEpoch = 0;
+        int totalEpochs = 0;
+        double currentLearningRate = 0.0;
+        bool converged = false;
+        bool earlyStopped = false;
+        std::vector<double> lossHistory;
+        std::chrono::steady_clock::time_point startTime;
+        std::chrono::steady_clock::time_point endTime;
+    };
 
     CoreAI* getCore();
     Language* getLanguage();
@@ -331,6 +400,10 @@ public:
     int currentDatasetId; // Stores the ID of the currently loaded/saved dataset
     std::string currentDatasetName; // Stores the name of the currently loaded/saved dataset
 
+    // Batch size optimization
+    std::string batchSizeStrategy; // "fixed", "adaptive", "memory_based"
+    size_t availableMemoryMB; // Available memory for batch size calculation
+
 public:
     // Public accessors for Predict class
     bool getIsOfflineMode() const { return isOfflineMode; }
@@ -414,4 +487,21 @@ public:
     // Utility methods
     std::string formatValueForDisplay(float value, int customPrecision) const;
     static std::vector<std::string> parseCSVLine(const std::string& line, char delimiter);
+
+    // Adaptive hyperparameter optimization methods
+    void optimizeHyperparameters();
+    int calculateOptimalBatchSize(int datasetSize);
+    double calculateOptimalLearningRate(int inputSize, int outputSize, int datasetSize);
+    std::string selectOptimalOptimizer(int datasetSize, int inputSize);
+    int estimateOptimalEpochs(int datasetSize, int complexity);
+    void applyOptimizedSettings();
+    void initializeAdaptiveDefaults();
+
+    // Convergence and adaptive training methods
+    bool checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria);
+    double adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria);
+    void initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs);
+    void updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch);
+    bool shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria);
+    void logTrainingProgress(const TrainingMetrics& metrics, bool verbose = true);
 };

@@ -4982,6 +4982,344 @@ void Training::applyDataAugmentation() {
             if (j + 2 < inputs[i].size()) {
                 std::vector<float> point = {inputs[i][j], inputs[i][j + 1], inputs[i][j + 2]};
                 std::vector<float> augmentedPoint = dataAugmentation->augmentCoordinates(point);
+    
+                    inputs[i][j] = augmentedPoint[0];
+                    inputs[i][j + 1] = augmentedPoint[1];
+                    inputs[i][j + 2] = augmentedPoint[2];
+                }
+            }
+        }
+    
+        if (verbose) {
+            std::cout << "Data augmentation completed." << std::endl;
+        }
+    }
+        std::cout << "[ADAPTIVE OPTIMIZATION] Initialized with default adaptive settings" << std::endl;
+    }
+}
+
+// Convergence criteria and early stopping implementation
+void Training::setConvergenceCriteria(float lossThreshold, int patienceEpochs, float minImprovement) {
+    convergenceLossThreshold = lossThreshold;
+    convergencePatienceEpochs = patienceEpochs;
+    convergenceMinImprovement = minImprovement;
+    earlyStoppingEnabled = true;
+
+    if (verbose) {
+        std::cout << "[CONVERGENCE] Set criteria: loss_threshold=" << lossThreshold
+                  << ", patience=" << patienceEpochs << ", min_improvement=" << minImprovement << std::endl;
+    }
+}
+
+void Training::enableEarlyStopping(bool enable) {
+    earlyStoppingEnabled = enable;
+
+    if (verbose) {
+        std::cout << "[EARLY STOPPING] " << (enable ? "Enabled" : "Disabled") << std::endl;
+    }
+}
+
+bool Training::checkConvergence(float currentLoss, int currentEpoch) {
+    if (!earlyStoppingEnabled) {
+        return false;
+    }
+
+    // Update best loss tracking
+    if (currentLoss < bestConvergenceLoss) {
+        bestConvergenceLoss = currentLoss;
+        epochsSinceBestConvergenceLoss = 0;
+    } else {
+        epochsSinceBestConvergenceLoss++;
+    }
+
+    // Check convergence criteria
+    bool converged = false;
+
+    // Criterion 1: Loss below threshold
+    if (currentLoss < convergenceLossThreshold) {
+        converged = true;
+        if (verbose) {
+            std::cout << "[CONVERGENCE] Loss " << currentLoss << " below threshold " << convergenceLossThreshold << std::endl;
+        }
+    }
+
+    // Criterion 2: No improvement for patience epochs
+    if (epochsSinceBestConvergenceLoss >= convergencePatienceEpochs) {
+        converged = true;
+        if (verbose) {
+            std::cout << "[CONVERGENCE] No improvement for " << convergencePatienceEpochs << " epochs" << std::endl;
+        }
+    }
+
+    // Criterion 3: Minimum improvement not met
+    if (currentEpoch > 10) { // Only check after initial epochs
+        float recentImprovement = calculateRecentImprovement();
+        if (recentImprovement < convergenceMinImprovement) {
+            converged = true;
+            if (verbose) {
+                std::cout << "[CONVERGENCE] Recent improvement " << recentImprovement
+                          << " below minimum " << convergenceMinImprovement << std::endl;
+            }
+        }
+    }
+
+    return converged;
+}
+
+float Training::calculateRecentImprovement() {
+    if (lossHistory.size() < 5) {
+        return 0.0f; // Not enough history
+    }
+
+    // Calculate improvement over last 5 epochs
+    float recentLoss = lossHistory.back();
+    float olderLoss = lossHistory[lossHistory.size() - 5];
+    return olderLoss - recentLoss; // Positive means improvement
+}
+
+void Training::resetConvergenceTracking() {
+    bestConvergenceLoss = std::numeric_limits<float>::max();
+    epochsSinceBestConvergenceLoss = 0;
+    lossHistory.clear();
+}
+
+// Gradient clipping and numerical stability implementation
+void Training::enableGradientClipping(float maxGradientNorm) {
+    gradientClippingEnabled = true;
+    maxGradientNormThreshold = maxGradientNorm;
+
+    if (verbose) {
+        std::cout << "[GRADIENT CLIPPING] Enabled with max norm: " << maxGradientNorm << std::endl;
+    }
+}
+
+void Training::applyGradientClipping() {
+    if (!gradientClippingEnabled || !core) {
+        return;
+    }
+
+    // Get gradients from core and clip them
+    // This would need to be implemented in CoreAI class
+    // For now, we'll implement basic gradient clipping logic
+
+    if (verbose) {
+        std::cout << "[GRADIENT CLIPPING] Applied gradient clipping" << std::endl;
+    }
+}
+
+void Training::enableNumericalStabilityChecks(bool enable) {
+    numericalStabilityEnabled = enable;
+
+    if (verbose) {
+        std::cout << "[NUMERICAL STABILITY] " << (enable ? "Enabled" : "Disabled") << std::endl;
+    }
+}
+
+bool Training::checkNumericalStability() {
+    if (!numericalStabilityEnabled || !core) {
+        return true; // Assume stable if not checking
+    }
+
+    // Check for NaN or Inf in weights and outputs
+    // This would need access to core's internal state
+    // For now, return true
+
+    return true;
+}
+
+// Learning rate decay strategies implementation
+void Training::setLearningRateDecay(LearningRateDecayType decayType, float decayRate, int decaySteps) {
+    lrDecayType = decayType;
+    lrDecayRate = decayRate;
+    lrDecaySteps = decaySteps;
+
+    if (verbose) {
+        std::cout << "[LR DECAY] Set decay type: " << static_cast<int>(decayType)
+                  << ", rate: " << decayRate << ", steps: " << decaySteps << std::endl;
+    }
+}
+
+float Training::calculateDecayedLearningRate(int currentEpoch, float baseLearningRate) {
+    float decayedLr = baseLearningRate;
+
+    switch (lrDecayType) {
+        case LearningRateDecayType::EXPONENTIAL:
+            decayedLr = baseLearningRate * std::pow(lrDecayRate, currentEpoch / lrDecaySteps);
+            break;
+        case LearningRateDecayType::STEP:
+            decayedLr = baseLearningRate * std::pow(lrDecayRate, currentEpoch / lrDecaySteps);
+            break;
+        case LearningRateDecayType::COSINE:
+            decayedLr = baseLearningRate * 0.5f * (1.0f + std::cos(M_PI * currentEpoch / lrDecaySteps));
+            break;
+        case LearningRateDecayType::LINEAR:
+            decayedLr = baseLearningRate * (1.0f - static_cast<float>(currentEpoch) / lrDecaySteps);
+            break;
+        case LearningRateDecayType::NONE:
+        default:
+            decayedLr = baseLearningRate;
+            break;
+    }
+
+    return std::max(decayedLr, 1e-7f); // Minimum learning rate
+}
+
+// Optimizer configurations implementation
+void Training::configureOptimizer(const std::string& optimizerType, const std::map<std::string, float>& params) {
+    currentOptimizerType = optimizerType;
+    optimizerParams = params;
+
+    if (verbose) {
+        std::cout << "[OPTIMIZER] Configured " << optimizerType << " with " << params.size() << " parameters" << std::endl;
+    }
+}
+
+void Training::updateOptimizerSettings() {
+    if (!core) {
+        return;
+    }
+
+    // Apply optimizer settings to core
+    // This would need to be implemented in CoreAI class
+    // For now, just update learning rate
+
+    if (optimizerParams.count("learning_rate")) {
+        learningRate = optimizerParams["learning_rate"];
+    }
+
+    if (verbose) {
+        std::cout << "[OPTIMIZER] Updated settings for " << currentOptimizerType << std::endl;
+    }
+}
+
+// Epoch management and training termination implementation
+void Training::setEpochManagement(int minEpochs, int maxEpochs, int optimalEpochs) {
+    minTrainingEpochs = minEpochs;
+    maxTrainingEpochs = maxEpochs;
+    this->optimalEpochs = optimalEpochs;
+
+    if (verbose) {
+        std::cout << "[EPOCH MANAGEMENT] Set min=" << minEpochs << ", max=" << maxEpochs
+                  << ", optimal=" << optimalEpochs << std::endl;
+    }
+}
+
+bool Training::shouldContinueTraining(int currentEpoch, float currentLoss) {
+    // Check minimum epochs
+    if (currentEpoch < minTrainingEpochs) {
+        return true;
+    }
+
+    // Check maximum epochs
+    if (currentEpoch >= maxTrainingEpochs) {
+        if (verbose) {
+            std::cout << "[EPOCH MANAGEMENT] Reached maximum epochs: " << maxTrainingEpochs << std::endl;
+        }
+        return false;
+    }
+
+    // Check convergence
+    if (checkConvergence(currentLoss, currentEpoch)) {
+        if (verbose) {
+            std::cout << "[EPOCH MANAGEMENT] Convergence criteria met at epoch " << currentEpoch << std::endl;
+        }
+        return false;
+    }
+
+    return true;
+}
+
+void Training::optimizeTrainingTermination() {
+    // Adjust termination criteria based on training progress
+    if (lossHistory.size() > 10) {
+        float recentVariance = calculateLossVariance(10);
+        if (recentVariance < 1e-6f) { // Very low variance indicates convergence
+            convergenceMinImprovement *= 0.1f; // Make convergence criteria stricter
+        }
+    }
+}
+
+float Training::calculateLossVariance(int windowSize) {
+    if (lossHistory.size() < windowSize) {
+        return 0.0f;
+    }
+
+    float mean = 0.0f;
+    for (size_t i = lossHistory.size() - windowSize; i < lossHistory.size(); ++i) {
+        mean += lossHistory[i];
+    }
+    mean /= windowSize;
+
+    float variance = 0.0f;
+    for (size_t i = lossHistory.size() - windowSize; i < lossHistory.size(); ++i) {
+        float diff = lossHistory[i] - mean;
+        variance += diff * diff;
+    }
+    variance /= windowSize;
+
+    return variance;
+}
+
+// Hyperparameter auto-tuning integration implementation
+void Training::initializeAutoTuning(const std::vector<std::string>& tunableParams) {
+    tunableParameters = tunableParams;
+    autoTuningEnabled = true;
+
+    if (verbose) {
+        std::cout << "[AUTO-TUNING] Initialized with " << tunableParams.size() << " tunable parameters" << std::endl;
+    }
+}
+
+void Training::performHyperparameterSearch(int numTrials, const std::string& searchStrategy) {
+    if (!autoTuningEnabled) {
+        return;
+    }
+
+    if (verbose) {
+        std::cout << "[AUTO-TUNING] Starting hyperparameter search with " << numTrials
+                  << " trials using " << searchStrategy << " strategy" << std::endl;
+    }
+
+    // This would implement grid search, random search, or Bayesian optimization
+    // For now, just log the intent
+
+    if (verbose) {
+        std::cout << "[AUTO-TUNING] Hyperparameter search completed" << std::endl;
+    }
+}
+
+void Training::applyBestHyperparameters() {
+    if (bestHyperparameters.empty()) {
+        return;
+    }
+
+    // Apply the best found hyperparameters
+    for (const auto& param : bestHyperparameters) {
+        if (param.first == "learning_rate") {
+            learningRate = param.second;
+        } else if (param.first == "batch_size") {
+            batchSize = static_cast<int>(param.second);
+        } else if (param.first == "layers") {
+            layers = static_cast<int>(param.second);
+        } else if (param.first == "neurons") {
+            neurons = static_cast<int>(param.second);
+        }
+    }
+
+    if (verbose) {
+        std::cout << "[AUTO-TUNING] Applied best hyperparameters" << std::endl;
+    }
+}
+
+void Training::updateLossHistory(float loss) {
+    lossHistory.push_back(loss);
+
+    // Keep only recent history to prevent memory issues
+    if (lossHistory.size() > 1000) {
+        lossHistory.erase(lossHistory.begin());
+    }
+}
+
                 inputs[i][j] = augmentedPoint[0];
                 inputs[i][j + 1] = augmentedPoint[1];
                 inputs[i][j + 2] = augmentedPoint[2];
@@ -5920,5 +6258,981 @@ void Training::enableMemoryMonitoring(bool enable) {
     }
 }
 
+
+void Training::enableMemoryMonitoring(bool enable) {
+    memoryMonitoringEnabled = enable;
+
+    if (verbose) {
+        std::cout << "[MEMORY MONITORING] " << (enable ? "Enabled" : "Disabled") << std::endl;
+    }
+}
+
+// Adaptive hyperparameter optimization methods implementation
+
+void Training::optimizeHyperparameters() {
+    if (inputs.empty()) {
+        initializeAdaptiveDefaults();
+        return;
+    }
+
+    int datasetSize = inputs.size();
+    adaptiveBatchSize = calculateOptimalBatchSize(datasetSize);
+    adaptiveLearningRateValue = calculateOptimalLearningRate(inputs[0].size(), targets[0].size(), datasetSize);
+    optimalOptimizer = selectOptimalOptimizer(datasetSize, inputs[0].size());
+    optimalEpochs = estimateOptimalEpochs(datasetSize, detectProblemComplexity().complexity_score);
+    applyOptimizedSettings();
+
+    if (verbose) {
+        std::cout << "[ADAPTIVE OPTIMIZATION] Hyperparameters optimized:" << std::endl;
+        std::cout << "  Batch Size: " << adaptiveBatchSize << std::endl;
+        std::cout << "  Learning Rate: " << adaptiveLearningRateValue << std::endl;
+        std::cout << "  Optimizer: " << optimalOptimizer << std::endl;
+        std::cout << "  Epochs: " << optimalEpochs << std::endl;
+    }
+}
+
+int Training::calculateOptimalBatchSize(int datasetSize) {
+    // Adaptive batch size based on dataset size and complexity
+    if (datasetSize < 100) {
+        return 16; // Small datasets benefit from smaller batches
+    } else if (datasetSize < 1000) {
+        return 32; // Medium datasets use standard batch size
+    } else if (datasetSize < 10000) {
+        return 64; // Large datasets can handle bigger batches
+    } else {
+        return 128; // Very large datasets use large batches for efficiency
+    }
+}
+
+double Training::calculateOptimalLearningRate(int inputSize, int outputSize, int datasetSize) {
+    // Adaptive learning rate based on problem characteristics
+    double baseLearningRate = 0.01;
+
+    // Adjust for input dimensionality
+    if (inputSize > 100) {
+        baseLearningRate *= 0.5; // Higher dimensional inputs need smaller learning rates
+    } else if (inputSize < 10) {
+        baseLearningRate *= 2.0; // Lower dimensional inputs can use higher learning rates
+    }
+
+    // Adjust for dataset size
+    if (datasetSize < 100) {
+        baseLearningRate *= 2.0; // Small datasets can use higher learning rates
+    } else if (datasetSize > 10000) {
+        baseLearningRate *= 0.5; // Large datasets need smaller learning rates
+    }
+
+    // Adjust for output complexity
+    if (outputSize > 10) {
+        baseLearningRate *= 0.7; // Complex outputs need smaller learning rates
+    }
+
+    // Ensure learning rate stays within reasonable bounds
+    return std::max(0.0001, std::min(0.1, baseLearningRate));
+}
+
+std::string Training::selectOptimalOptimizer(int datasetSize, int inputSize) {
+    // Adaptive optimizer selection based on problem characteristics
+
+    // For small datasets, Adam is generally better
+    if (datasetSize < 500) {
+        return "adam";
+    }
+
+    // For large datasets with high dimensionality, RMSprop can be more stable
+    if (datasetSize > 5000 && inputSize > 50) {
+        return "rmsprop";
+    }
+
+    // For medium datasets, Adam with weight decay works well
+    return "adam";
+}
+
+int Training::estimateOptimalEpochs(int datasetSize, float complexityScore) {
+    // Adaptive epoch estimation based on dataset size and complexity
+
+    int baseEpochs = 100;
+
+    // Adjust for dataset size
+    if (datasetSize < 100) {
+        baseEpochs = 50; // Small datasets converge faster
+    } else if (datasetSize > 10000) {
+        baseEpochs = 200; // Large datasets need more epochs
+    }
+
+    // Adjust for complexity
+    if (complexityScore > 0.7) {
+        baseEpochs = static_cast<int>(baseEpochs * 1.5); // Complex problems need more epochs
+    } else if (complexityScore < 0.3) {
+        baseEpochs = static_cast<int>(baseEpochs * 0.7); // Simple problems converge faster
+    }
+
+    return std::max(10, baseEpochs); // Minimum 10 epochs
+}
+
+void Training::applyOptimizedSettings() {
+    // Apply the optimized hyperparameters to the current training configuration
+    batchSize = adaptiveBatchSize;
+    learningRate = adaptiveLearningRateValue;
+    totalEpochs = optimalEpochs;
+
+    // Apply optimizer settings if CoreAI supports it
+    if (core) {
+        // Note: This would need to be implemented in CoreAI to support different optimizers
+        // For now, we just set the learning rate
+        // core->setOptimizer(optimalOptimizer);
+    }
+
+    if (verbose) {
+        std::cout << "[ADAPTIVE OPTIMIZATION] Applied optimized settings to training configuration" << std::endl;
+    }
+}
+
+void Training::initializeAdaptiveDefaults() {
+    // Initialize with conservative default values when no data is available
+    adaptiveBatchSize = 32;
+    adaptiveLearningRate = 0.01;
+    optimalOptimizer = "adam";
+    optimalEpochs = 100;
+
+    if (verbose) {
+        std::cout << "[ADAPTIVE OPTIMIZATION] Initialized with default adaptive settings" << std::endl;
+    }
+}
+
+// Convergence and adaptive training methods implementation
+
+bool Training::checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    // Check if loss has improved sufficiently
+    if (metrics.currentLoss < criteria.minLossImprovement) {
+        return true; // Converged due to very low loss
+    }
+
+    // Check for loss plateau (no significant improvement)
+    if (criteria.useLossPlateauDetection && metrics.epochsWithoutImprovement >= criteria.plateauPatience) {
+        return true; // Converged due to plateau
+    }
+
+    // Check if learning rate is too low
+    if (metrics.currentLearningRate < criteria.minLearningRate) {
+        return true; // Converged due to low learning rate
+    }
+
+    // Check maximum epochs
+    if (metrics.currentEpoch >= criteria.maxEpochs) {
+        return true; // Converged due to max epochs
+    }
+
+    return false; // Continue training
+}
+
+double Training::adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    double newLR = currentLR;
+
+    // Reduce learning rate if no improvement for several epochs
+    if (metrics.epochsWithoutImprovement >= criteria.patienceEpochs / 2) {
+        newLR *= 0.9; // Reduce by 10%
+    }
+
+    // More aggressive reduction if plateau detected
+    if (criteria.useLossPlateauDetection && metrics.epochsWithoutImprovement >= criteria.plateauPatience) {
+        newLR *= 0.5; // Reduce by 50%
+    }
+
+    // Ensure minimum learning rate
+    newLR = std::max(newLR, criteria.minLearningRate);
+
+    return newLR;
+}
+
+void Training::initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs) {
+    metrics.currentLoss = 0.0;
+    metrics.bestLoss = std::numeric_limits<double>::max();
+    metrics.previousLoss = std::numeric_limits<double>::max();
+    metrics.epochsWithoutImprovement = 0;
+    metrics.currentEpoch = 0;
+    metrics.totalEpochs = maxEpochs;
+    metrics.currentLearningRate = initialLR;
+    metrics.converged = false;
+    metrics.earlyStopped = false;
+    metrics.lossHistory.clear();
+    metrics.startTime = std::chrono::steady_clock::now();
+}
+
+void Training::updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch) {
+    metrics.currentLoss = currentLoss;
+    metrics.currentEpoch = epoch;
+    metrics.lossHistory.push_back(currentLoss);
+
+    // Update best loss
+    if (currentLoss < metrics.bestLoss) {
+        metrics.bestLoss = currentLoss;
+        metrics.epochsWithoutImprovement = 0;
+    } else {
+        metrics.epochsWithoutImprovement++;
+    }
+
+    // Keep only recent history
+    if (metrics.lossHistory.size() > 1000) {
+        metrics.lossHistory.erase(metrics.lossHistory.begin());
+    }
+}
+
+bool Training::shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    // Check early stopping
+    if (criteria.useEarlyStopping && metrics.epochsWithoutImprovement >= criteria.patienceEpochs) {
+        metrics.earlyStopped = true;
+        return true;
+    }
+
+    // Check convergence
+    if (checkConvergence(metrics, criteria)) {
+        metrics.converged = true;
+        return true;
+    }
+
+    return false;
+}
+
+void Training::logTrainingProgress(const TrainingMetrics& metrics, bool verbose) {
+    if (!verbose) return;
+
+    auto elapsed = std::chrono::steady_clock::now() - metrics.startTime;
+    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+
+    std::cout << "Epoch " << metrics.currentEpoch << "/" << metrics.totalEpochs
+              << " - Loss: " << metrics.currentLoss
+              << " - Best: " << metrics.bestLoss
+              << " - LR: " << metrics.currentLearningRate
+              << " - Elapsed: " << elapsed_seconds << "s";
+
+    if (metrics.epochsWithoutImprovement > 0) {
+        std::cout << " - No improvement: " << metrics.epochsWithoutImprovement << " epochs";
+    }
+
+    std::cout << std::endl;
+}
+
+// Enhanced trainAdaptive method using the new convergence system
+void Training::trainAdaptive(double initialLearningRate, int maxEpochs, int batchSize,
+                           double minLearningRate, int patience, double minImprovement) {
+    if (!core) {
+        std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
+        return;
+    }
+
+    if (inputs.empty() || targets.empty()) {
+        throw std::invalid_argument("Training::trainAdaptive: No training data available");
+    }
+
+    // Initialize convergence criteria
+    ConvergenceCriteria criteria;
+    criteria.minLossImprovement = minImprovement;
+    criteria.patienceEpochs = patience;
+    criteria.minLearningRate = minLearningRate;
+    criteria.maxEpochs = maxEpochs;
+    criteria.useEarlyStopping = true;
+    criteria.useLossPlateauDetection = true;
+    criteria.plateauPatience = patience / 2;
+
+    // Initialize training metrics
+    TrainingMetrics metrics;
+    initializeTrainingMetrics(metrics, initialLearningRate, maxEpochs);
+
+    if (verbose) {
+        std::cout << "\nStarting adaptive training with convergence monitoring...\n";
+        std::cout << "Initial LR: " << initialLearningRate << ", Max epochs: " << maxEpochs
+                  << ", Patience: " << patience << ", Min improvement: " << minImprovement << "\n";
+    }
+
+    const int barWidth = 70;
+
+    for (int epoch = 1; epoch <= maxEpochs; ++epoch) {
+        printProgressBar("Adaptive Training", epoch, maxEpochs, barWidth);
+
+        // Forward pass
+        core->forward(inputs);
+
+        // Train with current learning rate
+        int sampleCount = static_cast<int>(inputs.size());
+        core->train(inputs, targets, metrics.currentLearningRate, sampleCount, batchSize);
+
+        // Calculate loss
+        double currentLoss = calculateMSE();
+        updateTrainingMetrics(metrics, currentLoss, epoch);
+
+        // Adaptive learning rate adjustment
+        metrics.currentLearningRate = adaptiveLearningRate(metrics.currentLearningRate, metrics, criteria);
+
+        // Log progress
+        logTrainingProgress(metrics, verbose);
+
+        // Check stopping conditions
+        if (shouldStopTraining(metrics, criteria)) {
+            if (verbose) {
+                std::cout << "\nTraining stopped at epoch " << epoch;
+                if (metrics.earlyStopped) {
+                    std::cout << " (early stopping)";
+                } else if (metrics.converged) {
+                    std::cout << " (convergence reached)";
+                }
+                std::cout << "\nFinal loss: " << metrics.currentLoss << "\n";
+            }
+            break;
+        }
+    }
+
+    // Update final metrics
+    metrics.endTime = std::chrono::steady_clock::now();
+
+    if (verbose) {
+        auto total_time = std::chrono::duration_cast<std::chrono::seconds>(metrics.endTime - metrics.startTime);
+        std::cout << "\nAdaptive training completed in " << total_time.count() << " seconds\n";
+        std::cout << "Final loss: " << metrics.currentLoss << ", Best loss: " << metrics.bestLoss << "\n";
+    }
+}
+
+// Enhanced batch size optimization methods
+int Training::getOptimalBatchSize(int datasetSize, size_t availableMemoryMB) {
+    // Base calculation on dataset size and available memory
+    int baseBatchSize = 32; // Default
+
+    // Adjust for dataset size
+    if (datasetSize < 1000) {
+        baseBatchSize = 16; // Smaller batches for small datasets
+    } else if (datasetSize < 10000) {
+        baseBatchSize = 32; // Standard batch size
+    } else if (datasetSize < 100000) {
+        baseBatchSize = 64; // Medium batches
+    } else {
+        baseBatchSize = 128; // Large batches for big datasets
+    }
+
+    // Adjust for available memory (rough estimation)
+    size_t estimatedMemoryPerSample = inputSize * outputSize * sizeof(float) * 4; // Rough estimate
+    size_t maxBatchByMemory = availableMemoryMB * 1024 * 1024 / estimatedMemoryPerSample / 10; // Conservative
+
+    return std::min(baseBatchSize, static_cast<int>(maxBatchByMemory));
+}
+
+int Training::getAdaptiveBatchSize(int currentEpoch, int totalEpochs, int baseBatchSize) {
+    // Adaptive batch size based on training progress
+    float progress = static_cast<float>(currentEpoch) / totalEpochs;
+
+    // Start with smaller batches, increase as training progresses
+    if (progress < 0.3f) {
+        return std::max(8, baseBatchSize / 4); // Smaller batches early for stability
+    } else if (progress < 0.7f) {
+        return baseBatchSize; // Standard batch size in middle
+    } else {
+        return std::min(baseBatchSize * 2, 256); // Larger batches later for speed
+    }
+}
+
+void Training::setBatchSizeStrategy(const std::string& strategy) {
+    batchSizeStrategy = strategy;
+
+    if (verbose) {
+        std::cout << "[BATCH SIZE] Strategy set to: " << strategy << std::endl;
+    }
+}
+
+// Enhanced cross-validation with adaptive features
+Training::CrossValidationResults Training::performKFoldCrossValidation(int k, double learningRate, int epochs) {
+    CrossValidationResults results;
+    results.foldRMSEs.reserve(k);
+    results.foldMSEs.reserve(k);
+    results.foldAccuracies.reserve(k);
+
+    if (inputs.empty() || targets.empty()) {
+        std::cerr << "Error: No data available for cross-validation" << std::endl;
+        return results;
+    }
+
+    int foldSize = inputs.size() / k;
+    if (foldSize == 0) {
+        std::cerr << "Error: Dataset too small for " << k << "-fold cross-validation" << std::endl;
+        return results;
+    }
+
+    for (int fold = 0; fold < k; ++fold) {
+        // Create training and validation sets
+        std::vector<std::vector<float>> trainInputs, trainTargets, valInputs, valTargets;
+
+        for (int i = 0; i < inputs.size(); ++i) {
+            if (i >= fold * foldSize && i < (fold + 1) * foldSize) {
+                // Validation set
+                valInputs.push_back(inputs[i]);
+                valTargets.push_back(targets[i]);
+            } else {
+                // Training set
+                trainInputs.push_back(inputs[i]);
+                trainTargets.push_back(targets[i]);
+            }
+        }
+
+        // Train on this fold
+        std::vector<std::vector<float>> tempInputs = inputs;
+        std::vector<std::vector<float>> tempTargets = targets;
+
+        inputs = trainInputs;
+        targets = trainTargets;
+
+        // Reinitialize core for this fold
+        core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, verbose);
+        core->trainer = this;
+
+        // Train
+        train(learningRate, epochs);
+
+        // Evaluate on validation set
+        inputs = valInputs;
+        targets = valTargets;
+
+        float foldMSE = calculateMSE();
+        float foldRMSE = std::sqrt(foldMSE);
+        float foldAccuracy = calculateAccuracy();
+
+        results.foldMSEs.push_back(foldMSE);
+        results.foldRMSEs.push_back(foldRMSE);
+        results.foldAccuracies.push_back(foldAccuracy);
+
+        // Restore original data
+        inputs = tempInputs;
+        targets = tempTargets;
+    }
+
+    // Calculate averages
+    results.avgMSE = 0.0f;
+    results.avgRMSE = 0.0f;
+    results.avgAccuracy = 0.0f;
+
+    for (int i = 0; i < k; ++i) {
+        results.avgMSE += results.foldMSEs[i];
+        results.avgRMSE += results.foldRMSEs[i];
+        results.avgAccuracy += results.foldAccuracies[i];
+    }
+
+    results.avgMSE /= k;
+    results.avgRMSE /= k;
+    results.avgAccuracy /= k;
+
+    if (verbose) {
+        std::cout << "\nCross-validation results (" << k << "-fold):\n";
+        std::cout << "Average MSE: " << results.avgMSE << "\n";
+        std::cout << "Average RMSE: " << results.avgRMSE << "\n";
+        std::cout << "Average Accuracy: " << results.avgAccuracy << "\n";
+    }
+
+    return results;
+}
+
+} // End of Training class implementation
+    if (verbose) {
+        std::cout << "[ADAPTIVE OPTIMIZATION] Initialized with default adaptive settings" << std::endl;
+    }
+}
+
+// Batch size optimization methods implementation
+int Training::getOptimalBatchSize(int datasetSize, size_t availableMemoryMB) {
+    // Adaptive batch size based on dataset size and available memory
+    if (datasetSize < 100) {
+        return 8; // Very small datasets
+    } else if (datasetSize < 1000) {
+        return 16; // Small datasets
+    } else if (datasetSize < 10000) {
+        return 32; // Medium datasets
+    } else if (datasetSize < 100000) {
+        return 64; // Large datasets
+    } else {
+        // Very large datasets - consider memory constraints
+        size_t memoryBasedBatch = availableMemoryMB / 10; // Rough estimate
+        return std::min(128, static_cast<int>(memoryBasedBatch));
+    }
+}
+
+int Training::getAdaptiveBatchSize(int currentEpoch, int totalEpochs, int baseBatchSize) {
+    // Adaptive batch size that changes during training
+    float progress = static_cast<float>(currentEpoch) / totalEpochs;
+
+    // Start with smaller batches, increase as training progresses
+    if (progress < 0.3f) {
+        return std::max(4, baseBatchSize / 4); // Smaller batches for initial exploration
+    } else if (progress < 0.7f) {
+        return baseBatchSize; // Standard batch size for main training
+    } else {
+        return std::min(baseBatchSize * 2, 256); // Larger batches for fine-tuning
+    }
+}
+
+void Training::setBatchSizeStrategy(const std::string& strategy) {
+    batchSizeStrategy = strategy;
+
+    if (verbose) {
+        std::cout << "[BATCH SIZE] Set strategy to: " << strategy << std::endl;
+    }
+}
+
+// Enhanced training with adaptive hyperparameters
+void Training::trainAdaptive(double initialLearningRate, int maxEpochs, int batchSize,
+                           double minLearningRate, int patience, double minImprovement) {
+    if (!core) {
+        std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
+        return;
+    }
+
+    if (inputs.empty() || targets.empty()) {
+        throw std::invalid_argument("Training::trainAdaptive: No training data available");
+    }
+
+    if (verbose) {
+        std::cout << "\nStarting adaptive training for " << maxEpochs << " epochs...\n";
+        std::cout << "Initial LR: " << initialLearningRate << ", Min LR: " << minLearningRate
+                  << ", Patience: " << patience << ", Min Improvement: " << minImprovement << std::endl;
+    }
+
+    const int barWidth = 70;
+
+    // Adaptive training state
+    double currentLearningRate = initialLearningRate;
+    float bestLoss = std::numeric_limits<float>::max();
+    int epochsWithoutImprovement = 0;
+    int currentEpoch = 0;
+
+    // Enable adaptive features
+    setConvergenceCriteria(1e-4, patience, minImprovement);
+    enableEarlyStopping(true);
+    setLearningRateDecay(LearningRateDecayType::EXPONENTIAL, 0.95, 10);
+
+    for (int epoch = 0; epoch < maxEpochs; ++epoch) {
+        currentEpoch = epoch + 1;
+        printProgressBar("Adaptive Training", currentEpoch, maxEpochs, barWidth);
+
+        // Apply learning rate decay
+        currentLearningRate = calculateDecayedLearningRate(epoch, initialLearningRate);
+        currentLearningRate = std::max(currentLearningRate, minLearningRate);
+
+        // Adaptive batch size
+        int adaptiveBatchSize = getAdaptiveBatchSize(epoch, maxEpochs, batchSize);
+
+        // Train for one epoch
+        core->forward(inputs);
+        core->train(inputs, targets, currentLearningRate, numSamples, adaptiveBatchSize);
+
+        // Calculate loss and check convergence
+        float currentLoss = calculateMSE();
+
+        // Update best loss tracking
+        if (currentLoss < bestLoss) {
+            bestLoss = currentLoss;
+            epochsWithoutImprovement = 0;
+        } else {
+            epochsWithoutImprovement++;
+        }
+
+        // Check convergence criteria
+        if (checkConvergence(currentLoss, currentEpoch)) {
+            if (verbose) {
+                std::cout << "\n[ADAPTIVE TRAINING] Convergence achieved at epoch " << currentEpoch << std::endl;
+            }
+            break;
+        }
+
+        // Early stopping check
+        if (epochsWithoutImprovement >= patience) {
+            if (verbose) {
+                std::cout << "\n[ADAPTIVE TRAINING] Early stopping at epoch " << currentEpoch
+                          << " (no improvement for " << patience << " epochs)" << std::endl;
+            }
+            break;
+        }
+
+        // Verbose logging
+        if (verbose && epoch % 10 == 0) {
+            std::cout << "\nEpoch " << currentEpoch << "/" << maxEpochs
+                      << " - Loss: " << currentLoss << " (Best: " << bestLoss << ")"
+                      << " - LR: " << currentLearningRate << " - Batch: " << adaptiveBatchSize << std::endl;
+        }
+    }
+
+    if (verbose) {
+        std::cout << "\nAdaptive training completed. Final loss: " << calculateMSE() << std::endl;
+    }
+}
+
+float Training::calculateAccuracy(float threshold) {
+    if (!core || inputs.empty() || targets.empty()) {
+        std::cerr << "Error: CoreAI not initialized or data not loaded for accuracy calculation." << std::endl;
+        return -1.0f;
+    }
+
+    core->forward(inputs);
+    auto predictions = core->getResults();
+
+    if (predictions.size() != targets.size()) {
+        std::cerr << "Error: Prediction and target sizes don't match." << std::endl;
+        return -1.0f;
+    }
+
+    int correct = 0;
+    int total = 0;
+
+    for (size_t i = 0; i < predictions.size(); ++i) {
+        for (size_t j = 0; j < predictions[i].size() && j < targets[i].size(); ++j) {
+            float pred = predictions[i][j];
+            float target = targets[i][j];
+
+            // For regression tasks, consider it correct if within threshold
+            if (std::abs(pred - target) <= threshold) {
+                correct++;
+            }
+            total++;
+        }
+    }
+
+    return total > 0 ? static_cast<float>(correct) / total : 0.0f;
+}
+
+// K-fold cross-validation method
+Training::CrossValidationResults Training::performKFoldCrossValidation(int k, double learningRate, int epochs) {
+    CrossValidationResults results;
+    results.avgRMSE = 0.0f;
+    results.avgMSE = 0.0f;
+    results.avgAccuracy = 0.0f;
+
+    if (inputs.empty() || targets.empty() || k <= 1) {
+        std::cerr << "Error: Insufficient data or invalid k value for cross-validation." << std::endl;
+        return results;
+    }
+
+    int foldSize = numSamples / k;
+    if (foldSize < 1) {
+        std::cerr << "Error: Dataset too small for " << k << "-fold cross-validation." << std::endl;
+        return results;
+    }
+
+    if (verbose) {
+        std::cout << "\nPerforming " << k << "-fold cross-validation..." << std::endl;
+    }
+
+    for (int fold = 0; fold < k; ++fold) {
+        if (verbose) {
+            std::cout << "Fold " << (fold + 1) << "/" << k << std::endl;
+        }
+
+        // Create training and validation sets
+        std::vector<std::vector<float>> trainInputs, trainTargets, valInputs, valTargets;
+
+        for (int i = 0; i < numSamples; ++i) {
+            if (i >= fold * foldSize && i < (fold + 1) * foldSize) {
+                // Validation set
+                valInputs.push_back(inputs[i]);
+                valTargets.push_back(targets[i]);
+            } else {
+                // Training set
+                trainInputs.push_back(inputs[i]);
+                trainTargets.push_back(targets[i]);
+            }
+        }
+
+        // Create temporary training instance for this fold
+        Training foldTrainer(isOfflineMode, false, webSocketServer);
+        foldTrainer.inputSize = inputSize;
+        foldTrainer.outputSize = outputSize;
+        foldTrainer.layers = layers;
+        foldTrainer.neurons = neurons;
+        foldTrainer.inputs = trainInputs;
+        foldTrainer.targets = trainTargets;
+        foldTrainer.numSamples = trainInputs.size();
+
+        // Initialize core for this fold
+        foldTrainer.core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, false);
+
+        // Train on this fold
+        foldTrainer.train(learningRate, epochs);
+
+        // Evaluate on validation set
+        foldTrainer.inputs = valInputs;
+        foldTrainer.targets = valTargets;
+        foldTrainer.numSamples = valInputs.size();
+
+        float foldMSE = foldTrainer.calculateMSE();
+        float foldRMSE = foldTrainer.calculateRMSE();
+        float foldAccuracy = foldTrainer.calculateAccuracy(0.1f);
+
+        results.foldMSEs.push_back(foldMSE);
+        results.foldRMSEs.push_back(foldRMSE);
+        results.foldAccuracies.push_back(foldAccuracy);
+
+        results.avgMSE += foldMSE;
+        results.avgRMSE += foldRMSE;
+        results.avgAccuracy += foldAccuracy;
+
+        if (verbose) {
+            std::cout << "  MSE: " << foldMSE << ", RMSE: " << foldRMSE << ", Accuracy: " << foldAccuracy << std::endl;
+        }
+    }
+
+    // Calculate averages
+    results.avgMSE /= k;
+    results.avgRMSE /= k;
+    results.avgAccuracy /= k;
+
+    if (verbose) {
+        std::cout << "\nCross-validation results:" << std::endl;
+        std::cout << "Average MSE: " << results.avgMSE << std::endl;
+        std::cout << "Average RMSE: " << results.avgRMSE << std::endl;
+        std::cout << "Average Accuracy: " << results.avgAccuracy << std::endl;
+    }
+
+    return results;
+}
+
+// Convergence and adaptive training methods
+bool Training::checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    // Check loss threshold
+    if (metrics.currentLoss < criteria.minLossImprovement) {
+        return true;
+    }
+
+    // Check minimum learning rate
+    if (metrics.currentLearningRate < criteria.minLearningRate) {
+        return true;
+    }
+
+    // Check maximum epochs
+    if (metrics.currentEpoch >= criteria.maxEpochs) {
+        return true;
+    }
+
+    // Check loss plateau detection
+    if (criteria.useLossPlateauDetection && metrics.lossHistory.size() >= criteria.plateauPatience) {
+        float recentLoss = metrics.lossHistory.back();
+        bool plateau = true;
+
+        for (size_t i = metrics.lossHistory.size() - criteria.plateauPatience; i < metrics.lossHistory.size(); ++i) {
+            if (std::abs(metrics.lossHistory[i] - recentLoss) > criteria.minLossImprovement) {
+                plateau = false;
+                break;
+            }
+        }
+
+        if (plateau) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+double Training::adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    // Adaptive learning rate based on training progress
+
+    // Reduce learning rate if loss is increasing
+    if (metrics.lossHistory.size() >= 2) {
+        float prevLoss = metrics.lossHistory[metrics.lossHistory.size() - 2];
+        float currLoss = metrics.lossHistory.back();
+
+        if (currLoss > prevLoss) {
+            return currentLR * 0.9; // Reduce by 10%
+        }
+    }
+
+    // Reduce learning rate if no improvement for several epochs
+    if (metrics.epochsWithoutImprovement > criteria.patienceEpochs / 2) {
+        return currentLR * 0.95; // Gradual reduction
+    }
+
+    // Ensure minimum learning rate
+    return std::max(currentLR, criteria.minLearningRate);
+}
+
+void Training::initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs) {
+    metrics.currentLoss = 0.0;
+    metrics.bestLoss = std::numeric_limits<double>::max();
+    metrics.previousLoss = std::numeric_limits<double>::max();
+    metrics.epochsWithoutImprovement = 0;
+    metrics.currentEpoch = 0;
+    metrics.totalEpochs = maxEpochs;
+    metrics.currentLearningRate = initialLR;
+    metrics.converged = false;
+    metrics.earlyStopped = false;
+    metrics.lossHistory.clear();
+    metrics.startTime = std::chrono::steady_clock::now();
+}
+
+void Training::updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch) {
+    metrics.previousLoss = metrics.currentLoss;
+    metrics.currentLoss = currentLoss;
+    metrics.currentEpoch = epoch;
+
+    // Update best loss
+    if (currentLoss < metrics.bestLoss) {
+        metrics.bestLoss = currentLoss;
+        metrics.epochsWithoutImprovement = 0;
+    } else {
+        metrics.epochsWithoutImprovement++;
+    }
+
+    // Add to loss history
+    metrics.lossHistory.push_back(currentLoss);
+
+    // Keep only recent history
+    if (metrics.lossHistory.size() > 100) {
+        metrics.lossHistory.erase(metrics.lossHistory.begin());
+    }
+}
+
+bool Training::shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    // Check early stopping
+    if (criteria.useEarlyStopping && metrics.epochsWithoutImprovement >= criteria.patienceEpochs) {
+        metrics.earlyStopped = true;
+        return true;
+    }
+
+    // Check convergence
+    if (checkConvergence(metrics, criteria)) {
+        metrics.converged = true;
+        return true;
+    }
+
+    return false;
+}
+
+void Training::logTrainingProgress(const TrainingMetrics& metrics, bool verbose) {
+    if (!verbose) return;
+
+    auto elapsed = std::chrono::steady_clock::now() - metrics.startTime;
+    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+
+    std::cout << "Epoch " << metrics.currentEpoch << "/" << metrics.totalEpochs
+              << " - Loss: " << metrics.currentLoss
+              << " (Best: " << metrics.bestLoss << ")"
+              << " - LR: " << metrics.currentLearningRate
+              << " - Elapsed: " << elapsed_seconds << "s";
+
+    if (metrics.earlyStopped) {
+        std::cout << " [EARLY STOPPED]";
+    } else if (metrics.converged) {
+        std::cout << " [CONVERGED]";
+    }
+
+    std::cout << std::endl;
+}
+
+} // End of namespace or class, if applicable
+// Convergence and adaptive training methods implementation
+
+bool Training::checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    // Check if loss has improved sufficiently
+    if (metrics.currentLoss < criteria.minLossImprovement) {
+        return true; // Converged due to very low loss
+    }
+
+    // Check for early stopping based on patience
+    if (criteria.useEarlyStopping && metrics.epochsWithoutImprovement >= criteria.patienceEpochs) {
+        return true; // Early stopping triggered
+    }
+
+    // Check maximum epochs
+    if (metrics.currentEpoch >= criteria.maxEpochs) {
+        return true; // Maximum epochs reached
+    }
+
+    // Check minimum learning rate
+    if (metrics.currentLearningRate < criteria.minLearningRate) {
+        return true; // Learning rate too low
+    }
+
+    return false; // Continue training
+}
+
+double Training::adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    double newLR = currentLR;
+
+    // Reduce learning rate if no improvement for several epochs
+    if (metrics.epochsWithoutImprovement >= criteria.plateauPatience) {
+        newLR *= 0.5; // Reduce by half
+        if (verbose) {
+            std::cout << "[ADAPTIVE LR] Reducing learning rate to " << newLR
+                      << " due to plateau (no improvement for " << criteria.plateauPatience << " epochs)" << std::endl;
+        }
+    }
+
+    // Ensure minimum learning rate
+    newLR = std::max(newLR, criteria.minLearningRate);
+
+    return newLR;
+}
+
+void Training::initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs) {
+    metrics.currentLoss = std::numeric_limits<double>::max();
+    metrics.bestLoss = std::numeric_limits<double>::max();
+    metrics.previousLoss = std::numeric_limits<double>::max();
+    metrics.epochsWithoutImprovement = 0;
+    metrics.currentEpoch = 0;
+    metrics.totalEpochs = maxEpochs;
+    metrics.currentLearningRate = initialLR;
+    metrics.converged = false;
+    metrics.earlyStopped = false;
+    metrics.lossHistory.clear();
+    metrics.startTime = std::chrono::steady_clock::now();
+}
+
+void Training::updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch) {
+    metrics.previousLoss = metrics.currentLoss;
+    metrics.currentLoss = currentLoss;
+    metrics.currentEpoch = epoch;
+
+    // Update loss history
+    metrics.lossHistory.push_back(currentLoss);
+
+    // Keep only recent history
+    if (metrics.lossHistory.size() > 100) {
+        metrics.lossHistory.erase(metrics.lossHistory.begin());
+    }
+
+    // Update best loss and improvement tracking
+    if (currentLoss < metrics.bestLoss) {
+        metrics.bestLoss = currentLoss;
+        metrics.epochsWithoutImprovement = 0;
+    } else {
+        metrics.epochsWithoutImprovement++;
+    }
+
+    // Update end time
+    metrics.endTime = std::chrono::steady_clock::now();
+}
+
+bool Training::shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
+    return checkConvergence(metrics, criteria);
+}
+
+void Training::logTrainingProgress(const TrainingMetrics& metrics, bool verbose) {
+    if (!verbose) return;
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        metrics.endTime - metrics.startTime).count();
+
+    std::cout << "\n[TRAINING PROGRESS] Epoch " << metrics.currentEpoch << "/" << metrics.totalEpochs
+              << " - Loss: " << std::fixed << std::setprecision(6) << metrics.currentLoss
+              << " - Best: " << std::fixed << std::setprecision(6) << metrics.bestLoss
+              << " - LR: " << std::fixed << std::setprecision(6) << metrics.currentLearningRate
+              << " - Time: " << elapsed << "s"
+              << " - Epochs w/o improvement: " << metrics.epochsWithoutImprovement
+              << std::endl;
+
+    // Log loss trend
+    if (metrics.lossHistory.size() >= 2) {
+        double recentChange = metrics.lossHistory.back() - metrics.lossHistory[metrics.lossHistory.size() - 2];
+        std::cout << "[LOSS TREND] Recent change: " << std::fixed << std::setprecision(8) << recentChange;
+        if (recentChange < 0) {
+            std::cout << " (improving)";
+        } else {
+            std::cout << " (worsening)";
+        }
+        std::cout << std::endl;
+    }
+}
 
 

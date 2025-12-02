@@ -57,4 +57,18 @@ private:
     float minLearningRate;
 };
 
+class WarmupScheduler : public LearningRateScheduler {
+public:
+    WarmupScheduler(float initialLearningRate, int warmupEpochs, std::unique_ptr<LearningRateScheduler> mainScheduler);
+    ~WarmupScheduler() override = default;
+
+    float getLearningRate(int epoch) override;
+    std::string getName() const override { return "WarmupScheduler"; }
+    void reset() override;
+
+private:
+    int warmupEpochs;
+    std::unique_ptr<LearningRateScheduler> mainScheduler;
+};
+
 #endif // LEARNING_RATE_SCHEDULER_HPP

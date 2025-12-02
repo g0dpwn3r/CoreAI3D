@@ -37,6 +37,18 @@ enum class ActivationType {
     INTEGRAL_TANH       // Calculus-based: integral of tanh
 };
 
+// Weight initialization types
+enum class WeightInitialization {
+    XAVIER_UNIFORM,    // Xavier/Glorot uniform initialization
+    XAVIER_NORMAL,     // Xavier/Glorot normal initialization
+    HE_UNIFORM,        // He uniform initialization (for ReLU)
+    HE_NORMAL,         // He normal initialization (for ReLU)
+    LECUN_UNIFORM,     // LeCun uniform initialization
+    LECUN_NORMAL,      // LeCun normal initialization
+    RANDOM_UNIFORM,    // Random uniform [-limit, limit]
+    RANDOM_NORMAL      // Random normal with mean 0, std dev
+};
+
 // Activation configuration structure
 struct ActivationConfig {
     ActivationType type = ActivationType::SIGMOID;
@@ -181,6 +193,10 @@ public:
     bool use_batch_norm;
     bool use_l2_reg;
     bool use_grad_clip;
+    // Weight initialization configuration
+    WeightInitialization weight_init_type; // Type of weight initialization to use
+    float weight_init_scale; // Scale factor for initialization (default 1.0)
+    unsigned int weight_init_seed; // Random seed for reproducible initialization
 
     // Batch normalization parameters
     std::vector<float> bn_running_mean;
@@ -323,9 +339,9 @@ public:
                      float beta1 = 0.9f, float beta2 = 0.999f, float epsilon = 1e-8f,
                      float momentum = 0.0f, float rho = 0.9f);
     void setLearningRateScheduler(const std::string& schedulerType, float initialLearningRate,
-                                 float decayRate = 0.96f, int decaySteps = 1000,
-                                 float decayFactor = 0.1f, int totalEpochs = 100,
-                                 float minLearningRate = 0.0f);
+                                  float decayRate = 0.96f, int decaySteps = 1000,
+                                  float decayFactor = 0.1f, int totalEpochs = 100,
+                                  float minLearningRate = 0.0f, int warmupEpochs = 0);
     void resetOptimizerState();
 
     // Regularization and stability configuration
@@ -338,14 +354,6 @@ public:
     void enableResidualConnections(bool enable, const std::vector<std::vector<int>>& connections = {});
     void configureAttention(bool enable, float temperature = 1.0f, float weight = 1.0f);
     void setLayerNeurons(int layer_index, int neurons);
-    // Activation function configuration
-    void setLayerActivation(int layer_index, ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f,
-                           int calculus_N = 10, float calculus_SM = 1.0f, float calculus_a = 1.0f);
-    void setAllLayerActivations(ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f,
-                               int calculus_N = 10, float calculus_SM = 1.0f, float calculus_a = 1.0f);
-    // Multi-layer weight initialization
-    void initializeMultiLayerWeights();
-    void initializeAttentionWeights();
 
     // 3D transform configuration methods (for auto-tuning)
     void set3DTransformConfig(bool enable_polynomial, bool enable_trigonometric, bool enable_log_exp,

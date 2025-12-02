@@ -298,7 +298,8 @@ def main():
                         logging.info(f"Clearing tools directory: {dest}")
                         delete_directory(dest)
                     dest.mkdir(parents=True, exist_ok=True)
-
+                    # Copy files
+                    copy_source_to_destination(build_dir, dest)
                     # Copy the executable and config.json from build directory
                     executable_dest = dest / target_executable.name
                     config_src = source_dir / 'config.json'
