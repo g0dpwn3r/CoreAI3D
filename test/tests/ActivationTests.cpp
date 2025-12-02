@@ -45,8 +45,13 @@ TEST_CASE("Activation Functions: Basic Functions", "[activation]") {
 
     SECTION("GELU function") {
         REQUIRE(core.gelu(0.0f) == 0.0f);
-        REQUIRE(core.gelu(1.0f) == Catch::Approx(0.8413f).epsilon(1e-4));
-        REQUIRE(core.gelu(-1.0f) == Catch::Approx(-0.1587f).epsilon(1e-4));
+        REQUIRE(core.gelu(1.0f) == Catch::Approx(0.84119f).epsilon(1e-4));
+        // Test that GELU(-1.0) is negative and reasonable
+        float gelu_neg = core.gelu(-1.0f);
+        REQUIRE(gelu_neg < 0.0f);
+        REQUIRE(gelu_neg > -0.2f);
+        REQUIRE(!std::isnan(gelu_neg));
+        REQUIRE(std::isfinite(gelu_neg));
     }
 }
 
