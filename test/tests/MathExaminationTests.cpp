@@ -215,7 +215,7 @@ TEST_CASE("Math Examination: 3D Feature Engineering", "[math][3d]") {
 
     SECTION("Angular feature engineering") {
         core.set3DTransformConfig(false, false, false, false, true, false, false, false);
-        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f);
+        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
 
         auto coordinates = generate3DCoordinates(50);
 
@@ -231,7 +231,7 @@ TEST_CASE("Math Examination: 3D Feature Engineering", "[math][3d]") {
 
     SECTION("Projection feature engineering") {
         core.set3DTransformConfig(false, false, false, false, false, true, false, false);
-        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
 
         auto coordinates = generate3DCoordinates(50);
 
@@ -245,7 +245,7 @@ TEST_CASE("Math Examination: 3D Feature Engineering", "[math][3d]") {
 
     SECTION("Ratio feature engineering") {
         core.set3DTransformConfig(false, false, false, false, false, false, true, false);
-        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
 
         auto coordinates = generate3DCoordinates(50);
 
@@ -259,7 +259,7 @@ TEST_CASE("Math Examination: 3D Feature Engineering", "[math][3d]") {
 
     SECTION("Transformation feature engineering") {
         core.set3DTransformConfig(false, false, false, false, false, false, false, true);
-        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+        core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
         auto coordinates = generate3DCoordinates(50);
 
@@ -273,7 +273,7 @@ TEST_CASE("Math Examination: 3D Feature Engineering", "[math][3d]") {
 
     SECTION("Combined 3D feature engineering") {
         core.set3DTransformConfig(true, true, true, true, true, true, true, true);
-        core.set3DTransformWeights(0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f);
+        core.set3DTransformWeights(0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f, 0.2f);
 
         auto coordinates = generate3DCoordinates(80);
         std::vector<std::vector<float>> targets(coordinates.size(), std::vector<float>(1));
@@ -348,7 +348,7 @@ TEST_CASE("Math Examination: Realistic Mathematical Applications", "[math][reali
 
         // Enable spatial and transformation features
         physics_core.set3DTransformConfig(false, false, false, false, true, true, true, true);
-        physics_core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.3f, 0.3f, 0.2f, 0.2f);
+        physics_core.set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.3f, 0.3f, 0.2f);
 
         // Use spatial activation
         physics_core.setLayerActivation(2, ActivationType::SPATIAL_ELU);
@@ -457,7 +457,7 @@ TEST_CASE("Math Examination: Realistic Mathematical Applications", "[math][reali
 
         // Enable comprehensive 3D transforms
         graphics_core.set3DTransformConfig(true, true, true, true, true, true, true, true);
-        graphics_core.set3DTransformWeights(0.1f, 0.1f, 0.1f, 0.1f, 0.15f, 0.15f, 0.15f, 0.15f);
+        graphics_core.set3DTransformWeights(0.1f, 0.1f, 0.1f, 0.1f, 0.15f, 0.15f, 0.15f);
 
         graphics_core.train(coordinates, heights, 0.001, num_samples, 16);
 

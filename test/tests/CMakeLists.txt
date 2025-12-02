@@ -16,6 +16,9 @@ find_package(GTest REQUIRED)
 
 add_executable(CoreAI3D_GTest
     ../src/TrainTests.cpp
+    BenchmarkTests.cpp
+    PerformanceTests.cpp
+    ComparisonTests.cpp
 )
 
 target_link_libraries(CoreAI3D_GTest
@@ -43,6 +46,9 @@ add_executable(CoreAI3D_Catch2Tests
     ActivationTests.cpp
     OptimizerTests.cpp
     RegularizationTests.cpp
+    RegressionTests.cpp
+    ClassificationTests.cpp
+    MathExaminationTests.cpp
 )
 
 target_link_libraries(CoreAI3D_Catch2Tests

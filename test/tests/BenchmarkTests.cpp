@@ -398,68 +398,317 @@ TEST(BenchmarkTest, ReportGeneration) {
 
 TEST(BenchmarkTest, ValidationAndBenchmarkIntegration) {
     ValidationFramework validator(true);
-    
+
     // Create a comprehensive dataset
     createRealisticDataset("integration_test.csv", 100, 4, 0.05f, true);
-    
+
     // Step 1: Validate the dataset
     auto validationResult = validator.validateDataset("integration_test.csv", true);
     EXPECT_TRUE(validationResult.isValid);
-    
+
     if (validationResult.isValid) {
         // Step 2: Load the validated data
         Training loader(false, false);
         bool loaded = loader.loadCSV("integration_test.csv", 100, 1, true, false, ',', "integration");
         EXPECT_TRUE(loaded);
-        
+
         if (loaded) {
             const auto& inputs = loader.getInputs();
             const auto& targets_vec = loader.getTargets();
-            
+
             // Step 3: Preprocess the data
             std::vector<float> means, stds;
             auto normalized = validator.normalizeData(inputs, means, stds);
             EXPECT_EQ(normalized.size(), inputs.size());
-            
+
             // Step 4: Run benchmark
             auto results = validator.benchmarkAgainstBaselines(normalized, targets_vec, 0.2f);
-            
+
             EXPECT_FALSE(results.empty());
-            
+
             // Step 5: Run cross-validation on the best model
             auto trainer = std::make_unique<Training>(false, false);
-            auto cvResults = validator.kFoldCrossValidation(std::move(trainer), 
-                                                          normalized, targets_vec, 
+            auto cvResults = validator.kFoldCrossValidation(std::move(trainer),
+                                                          normalized, targets_vec,
                                                           5, 0.01, 20);
-            
+
             EXPECT_EQ(cvResults.size(), 5); // 5-fold CV
-            
+
             // Step 6: Generate comprehensive report
             std::string validationReport = validator.generateValidationReport(validationResult);
             std::string benchmarkReport = validator.generateBenchmarkReport(results);
-            
+
             EXPECT_FALSE(validationReport.empty());
             EXPECT_FALSE(benchmarkReport.empty());
-            
+
             // Step 7: Save reports
             validator.saveReportToFile("validation_report.txt", validationReport);
             validator.saveReportToFile("benchmark_report.txt", benchmarkReport);
-            
+
             // Verify files exist
             std::ifstream validationFile("validation_report.txt");
             std::ifstream benchmarkFile("benchmark_report.txt");
             EXPECT_TRUE(validationFile.is_open());
             EXPECT_TRUE(benchmarkFile.is_open());
-            
+
             validationFile.close();
             benchmarkFile.close();
         }
     }
-    
+
     // Clean up
     std::remove("integration_test.csv");
     std::remove("validation_report.txt");
     std::remove("benchmark_report.txt");
+}
+
+// Standard dataset benchmarks
+TEST(BenchmarkTest, IrisDatasetBenchmark) {
+    ValidationFramework validator(true);
+
+    std::vector<std::vector<float>> data;
+    std::vector<float> targets;
+
+    bool loaded = validator.loadIrisDataset(data, targets);
+    EXPECT_TRUE(loaded);
+
+    if (loaded) {
+        // Convert targets to vector of vectors for compatibility
+        std::vector<std::vector<float>> targets_vec;
+        for (float target : targets) {
+            targets_vec.push_back({target});
+        }
+
+        // Run benchmark on Iris dataset
+        auto results = validator.benchmarkAgainstBaselines(data, targets_vec, 0.3f);
+
+        EXPECT_FALSE(results.empty());
+        EXPECT_GE(results.size(), 2); // Should have at least CoreAI3D and one baseline
+
+        // Iris is a classification problem with 3 classes
+        for (const auto& result : results) {
+            EXPECT_GE(result.metrics.accuracy, 0.0f);
+            EXPECT_LE(result.metrics.accuracy, 1.0f);
+            // For classification, RMSE might not be meaningful, but should be reasonable
+            EXPECT_GE(result.metrics.rmse, 0.0f);
+        }
+
+        // Generate and save report
+        auto report = validator.generateBenchmarkReport(results);
+        validator.saveReportToFile("iris_benchmark_report.txt", report);
+
+        std::cout << "Iris dataset benchmark completed. Results saved to iris_benchmark_report.txt" << std::endl;
+
+        // Clean up
+        std::remove("iris_benchmark_report.txt");
+    }
+}
+
+TEST(BenchmarkTest, BostonHousingDatasetBenchmark) {
+    ValidationFramework validator(true);
+
+    std::vector<std::vector<float>> data;
+    std::vector<float> targets;
+
+    bool loaded = validator.loadBostonHousingDataset(data, targets);
+    EXPECT_TRUE(loaded);
+
+    if (loaded) {
+        std::vector<std::vector<float>> targets_vec;
+        for (float target : targets) {
+            targets_vec.push_back({target});
+        }
+
+        // Run benchmark on Boston Housing dataset (regression)
+        auto results = validator.benchmarkAgainstBaselines(data, targets_vec, 0.2f);
+
+        EXPECT_FALSE(results.empty());
+
+        // Boston Housing is a regression problem
+        for (const auto& result : results) {
+            EXPECT_GE(result.metrics.rmse, 0.0f);
+            EXPECT_GE(result.metrics.mae, 0.0f);
+            EXPECT_GE(result.metrics.r2_score, -1.0f); // R² can be negative
+            EXPECT_LE(result.metrics.r2_score, 1.0f);
+        }
+
+        auto report = validator.generateBenchmarkReport(results);
+        validator.saveReportToFile("boston_housing_benchmark_report.txt", report);
+
+        std::cout << "Boston Housing dataset benchmark completed. Results saved to boston_housing_benchmark_report.txt" << std::endl;
+
+        std::remove("boston_housing_benchmark_report.txt");
+    }
+}
+
+TEST(BenchmarkTest, WineDatasetBenchmark) {
+    ValidationFramework validator(true);
+
+    std::vector<std::vector<float>> data;
+    std::vector<float> targets;
+
+    bool loaded = validator.loadWineDataset(data, targets);
+    EXPECT_TRUE(loaded);
+
+    if (loaded) {
+        std::vector<std::vector<float>> targets_vec;
+        for (float target : targets) {
+            targets_vec.push_back({target});
+        }
+
+        // Run benchmark on Wine dataset (classification)
+        auto results = validator.benchmarkAgainstBaselines(data, targets_vec, 0.3f);
+
+        EXPECT_FALSE(results.empty());
+
+        // Wine dataset has 3 classes
+        for (const auto& result : results) {
+            EXPECT_GE(result.metrics.accuracy, 0.0f);
+            EXPECT_LE(result.metrics.accuracy, 1.0f);
+        }
+
+        auto report = validator.generateBenchmarkReport(results);
+        validator.saveReportToFile("wine_benchmark_report.txt", report);
+
+        std::cout << "Wine dataset benchmark completed. Results saved to wine_benchmark_report.txt" << std::endl;
+
+        std::remove("wine_benchmark_report.txt");
+    }
+}
+
+TEST(BenchmarkTest, DiabetesDatasetBenchmark) {
+    ValidationFramework validator(true);
+
+    std::vector<std::vector<float>> data;
+    std::vector<float> targets;
+
+    bool loaded = validator.loadDiabetesDataset(data, targets);
+    EXPECT_TRUE(loaded);
+
+    if (loaded) {
+        std::vector<std::vector<float>> targets_vec;
+        for (float target : targets) {
+            targets_vec.push_back({target});
+        }
+
+        // Run benchmark on Diabetes dataset (regression)
+        auto results = validator.benchmarkAgainstBaselines(data, targets_vec, 0.2f);
+
+        EXPECT_FALSE(results.empty());
+
+        for (const auto& result : results) {
+            EXPECT_GE(result.metrics.rmse, 0.0f);
+            EXPECT_GE(result.metrics.mae, 0.0f);
+        }
+
+        auto report = validator.generateBenchmarkReport(results);
+        validator.saveReportToFile("diabetes_benchmark_report.txt", report);
+
+        std::cout << "Diabetes dataset benchmark completed. Results saved to diabetes_benchmark_report.txt" << std::endl;
+
+        std::remove("diabetes_benchmark_report.txt");
+    }
+}
+
+TEST(BenchmarkTest, DigitsDatasetBenchmark) {
+    ValidationFramework validator(true);
+
+    std::vector<std::vector<float>> data;
+    std::vector<float> targets;
+
+    bool loaded = validator.loadDigitsDataset(data, targets);
+    EXPECT_TRUE(loaded);
+
+    if (loaded) {
+        std::vector<std::vector<float>> targets_vec;
+        for (float target : targets) {
+            targets_vec.push_back({target});
+        }
+
+        // Run benchmark on Digits dataset (MNIST-like, classification with 10 classes)
+        auto results = validator.benchmarkAgainstBaselines(data, targets_vec, 0.2f);
+
+        EXPECT_FALSE(results.empty());
+
+        // Digits dataset has 10 classes (0-9)
+        for (const auto& result : results) {
+            EXPECT_GE(result.metrics.accuracy, 0.0f);
+            EXPECT_LE(result.metrics.accuracy, 1.0f);
+        }
+
+        auto report = validator.generateBenchmarkReport(results);
+        validator.saveReportToFile("digits_benchmark_report.txt", report);
+
+        std::cout << "Digits dataset benchmark completed. Results saved to digits_benchmark_report.txt" << std::endl;
+
+        std::remove("digits_benchmark_report.txt");
+    }
+}
+
+// Comprehensive standard datasets comparison
+TEST(BenchmarkTest, StandardDatasetsComparison) {
+    ValidationFramework validator(true);
+
+    struct DatasetInfo {
+        std::string name;
+        std::function<bool(ValidationFramework&, std::vector<std::vector<float>>&, std::vector<float>&)> loader;
+        bool isClassification;
+    };
+
+    std::vector<DatasetInfo> datasets = {
+        {"Iris", &ValidationFramework::loadIrisDataset, true},
+        {"Boston Housing", &ValidationFramework::loadBostonHousingDataset, false},
+        {"Wine", &ValidationFramework::loadWineDataset, true},
+        {"Diabetes", &ValidationFramework::loadDiabetesDataset, false},
+        {"Digits", &ValidationFramework::loadDigitsDataset, true}
+    };
+
+    std::ofstream comparisonReport("standard_datasets_comparison.csv");
+    comparisonReport << "Dataset,Model,Accuracy,RMSE,MAE,R2_Score,TrainingTime_ms,MemoryUsage_KB\n";
+
+    for (const auto& dataset : datasets) {
+        std::vector<std::vector<float>> data;
+        std::vector<float> targets;
+
+        bool loaded = (validator.*(dataset.loader))(data, targets);
+        EXPECT_TRUE(loaded) << "Failed to load " << dataset.name << " dataset";
+
+        if (loaded) {
+            std::vector<std::vector<float>> targets_vec;
+            for (float target : targets) {
+                targets_vec.push_back({target});
+            }
+
+            auto results = validator.benchmarkAgainstBaselines(data, targets_vec, 0.2f);
+
+            for (const auto& result : results) {
+                comparisonReport << dataset.name << ","
+                               << result.modelName << ","
+                               << result.metrics.accuracy << ","
+                               << result.metrics.rmse << ","
+                               << result.metrics.mae << ","
+                               << result.metrics.r2_score << ","
+                               << (result.trainingTime.count() / 1000.0) << ","
+                               << (result.metrics.memoryUsage / 1024) << "\n";
+            }
+
+            std::cout << "Completed benchmark for " << dataset.name << " dataset" << std::endl;
+        }
+    }
+
+    comparisonReport.close();
+
+    // Verify the comparison file was created and has content
+    std::ifstream file("standard_datasets_comparison.csv");
+    EXPECT_TRUE(file.is_open());
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    EXPECT_FALSE(content.empty());
+    EXPECT_TRUE(content.find("Dataset,Model,Accuracy") != std::string::npos);
+    file.close();
+
+    std::cout << "Standard datasets comparison completed. Results saved to standard_datasets_comparison.csv" << std::endl;
+
+    std::remove("standard_datasets_comparison.csv");
 }
 
 int main(int argc, char** argv) {
