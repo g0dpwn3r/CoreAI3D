@@ -196,7 +196,7 @@ TEST(BenchmarkTest, CrossValidationTest) {
     };
     
     // Test k-fold cross-validation with CoreAI3D
-    auto trainer = std::make_unique<Training>(false, verbose);
+    auto trainer = std::make_unique<Training>(false, false);
     
     auto cvResults = validator.kFoldCrossValidation(std::move(trainer), data, targets, 3, 0.01, 10);
     
@@ -651,16 +651,15 @@ TEST(BenchmarkTest, StandardDatasetsComparison) {
 
     struct DatasetInfo {
         std::string name;
-        std::function<bool(ValidationFramework&, std::vector<std::vector<float>>&, std::vector<float>&)> loader;
         bool isClassification;
     };
 
     std::vector<DatasetInfo> datasets = {
-        {"Iris", &ValidationFramework::loadIrisDataset, true},
-        {"Boston Housing", &ValidationFramework::loadBostonHousingDataset, false},
-        {"Wine", &ValidationFramework::loadWineDataset, true},
-        {"Diabetes", &ValidationFramework::loadDiabetesDataset, false},
-        {"Digits", &ValidationFramework::loadDigitsDataset, true}
+        {"Iris", true},
+        {"Boston Housing", false},
+        {"Wine", true},
+        {"Diabetes", false},
+        {"Digits", true}
     };
 
     std::ofstream comparisonReport("standard_datasets_comparison.csv");
@@ -670,7 +669,19 @@ TEST(BenchmarkTest, StandardDatasetsComparison) {
         std::vector<std::vector<float>> data;
         std::vector<float> targets;
 
-        bool loaded = (validator.*(dataset.loader))(data, targets);
+        bool loaded = false;
+        if (dataset.name == "Iris") {
+            loaded = validator.loadIrisDataset(data, targets);
+        } else if (dataset.name == "Boston Housing") {
+            loaded = validator.loadBostonHousingDataset(data, targets);
+        } else if (dataset.name == "Wine") {
+            loaded = validator.loadWineDataset(data, targets);
+        } else if (dataset.name == "Diabetes") {
+            loaded = validator.loadDiabetesDataset(data, targets);
+        } else if (dataset.name == "Digits") {
+            loaded = validator.loadDigitsDataset(data, targets);
+        }
+
         EXPECT_TRUE(loaded) << "Failed to load " << dataset.name << " dataset";
 
         if (loaded) {
@@ -709,9 +720,4 @@ TEST(BenchmarkTest, StandardDatasetsComparison) {
     std::cout << "Standard datasets comparison completed. Results saved to standard_datasets_comparison.csv" << std::endl;
 
     std::remove("standard_datasets_comparison.csv");
-}
-
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }

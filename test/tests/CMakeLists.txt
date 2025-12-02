@@ -19,6 +19,9 @@ add_executable(CoreAI3D_GTest
     BenchmarkTests.cpp
     PerformanceTests.cpp
     ComparisonTests.cpp
+    EdgeCaseTests.cpp
+    StressTests.cpp
+    RealisticUseCaseTests.cpp
 )
 
 target_link_libraries(CoreAI3D_GTest

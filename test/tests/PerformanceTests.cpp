@@ -88,8 +88,11 @@ TEST_F(PerformanceTests, TrainingTimeBenchmark) {
 
         // Create and train network
         auto trainer = std::make_unique<Training>(false, false);
-        trainer->setNetworkConfig(layers, neurons, inputs[0].size(), targets[0].size());
-        trainer->train(inputs, targets, defaultConfig.learningRate, defaultConfig.numEpochs);
+        trainer->layers = layers;
+        trainer->neurons = neurons;
+        trainer->inputSize = inputs[0].size();
+        trainer->outputSize = targets[0].size();
+        trainer->train(defaultConfig.learningRate, defaultConfig.numEpochs, 32);
 
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -117,15 +120,19 @@ TEST_F(PerformanceTests, InferenceSpeedBenchmark) {
 
     // Train a network first
     auto trainer = std::make_unique<Training>(false, false);
-    trainer->setNetworkConfig(2, 16, inputs[0].size(), targets[0].size());
-    trainer->train(inputs, targets, 0.01, 20);
+    trainer->layers = 2;
+    trainer->neurons = 16;
+    trainer->inputSize = inputs[0].size();
+    trainer->outputSize = targets[0].size();
+    trainer->train(0.01, 20, 32);
 
     // Test inference speed
     const int numInferenceRuns = 1000;
+    auto core = trainer->getCore();
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < numInferenceRuns; i++) {
-        auto predictions = trainer->predict(inputs[i % inputs.size()]);
+        auto predictions = core->forward({inputs[i % inputs.size()]});
         ASSERT_FALSE(predictions.empty());
     }
 
@@ -220,17 +227,21 @@ TEST_F(PerformanceTests, ScalabilityTest) {
 
         // Train network
         auto trainer = std::make_unique<Training>(false, false);
-        trainer->setNetworkConfig(1, 8, inputs[0].size(), targets[0].size());
+        trainer->layers = 1;
+        trainer->neurons = 8;
+        trainer->inputSize = inputs[0].size();
+        trainer->outputSize = targets[0].size();
 
         auto trainStart = std::chrono::high_resolution_clock::now();
-        trainer->train(inputs, targets, 0.01, 10); // Fewer epochs for scalability test
+        trainer->train(0.01, 10, 32); // Fewer epochs for scalability test
         auto trainEnd = std::chrono::high_resolution_clock::now();
         auto trainDuration = std::chrono::duration_cast<std::chrono::milliseconds>(trainEnd - trainStart);
 
         // Test inference speed
+        auto core = trainer->getCore();
         auto inferenceStart = std::chrono::high_resolution_clock::now();
         for (size_t i = 0; i < std::min(100UL, inputs.size()); i++) {
-            auto predictions = trainer->predict(inputs[i]);
+            auto predictions = core->forward({inputs[i]});
             ASSERT_FALSE(predictions.empty());
         }
         auto inferenceEnd = std::chrono::high_resolution_clock::now();
@@ -277,10 +288,13 @@ TEST_F(PerformanceTests, ConcurrentPerformanceTest) {
     auto concurrentTrain = [&](int threadId, const std::vector<std::vector<float>>& threadInputs,
                               const std::vector<std::vector<float>>& threadTargets) {
         auto trainer = std::make_unique<Training>(false, false);
-        trainer->setNetworkConfig(1, 8, threadInputs[0].size(), threadTargets[0].size());
+        trainer->layers = 1;
+        trainer->neurons = 8;
+        trainer->inputSize = threadInputs[0].size();
+        trainer->outputSize = threadTargets[0].size();
 
         auto start = std::chrono::high_resolution_clock::now();
-        trainer->train(threadInputs, threadTargets, 0.01, 20);
+        trainer->train(0.01, 20, 32);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
@@ -373,9 +387,4 @@ TEST_F(PerformanceTests, BenchmarkResultTracking) {
     }
 
     std::remove("tracking_test.csv");
-}
-
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }
