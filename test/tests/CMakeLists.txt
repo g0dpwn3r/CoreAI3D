@@ -15,7 +15,7 @@ include_directories(
 find_package(GTest REQUIRED)
 
 add_executable(CoreAI3D_GTest
-    TrainTests.cpp
+    ../src/TrainTests.cpp
 )
 
 target_link_libraries(CoreAI3D_GTest
@@ -39,6 +39,10 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(CoreAI3D_Catch2Tests
     CoreTests.cpp
     DatabaseTests.cpp
+    NeuralNetworkTests.cpp
+    ActivationTests.cpp
+    OptimizerTests.cpp
+    RegularizationTests.cpp
 )
 
 target_link_libraries(CoreAI3D_Catch2Tests
@@ -51,11 +55,11 @@ include(Catch)
 catch_discover_tests(CoreAI3D_Catch2Tests)
 
 # ---- Standalone Test Executables ----
-add_executable(simple_test simple_test.cpp)
+add_executable(simple_test ../src/simple_test.cpp)
 target_link_libraries(simple_test PRIVATE CoreAI3DLib)
 add_test(NAME SimpleTest COMMAND simple_test)
 
-add_executable(test_simple_training ../test_simple_training.cpp)
+add_executable(test_simple_training ../src/test_simple_training.cpp)
 target_link_libraries(test_simple_training PRIVATE CoreAI3DLib)
 add_test(NAME TestSimpleTraining COMMAND test_simple_training)
 
