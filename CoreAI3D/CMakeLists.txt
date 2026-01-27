@@ -34,7 +34,6 @@ if(NOT DEFINED _VCPKG_PROBED)
             message(STATUS "Appended vcpkg installed prefix to CMAKE_PREFIX_PATH: ${_vcpkg_installed}")
             # set Boost_ROOT to help FindBoost in CONFIG mode
             set(Boost_ROOT "${_vcpkg_installed}")
-            set(Boost_NO_SYSTEM_PATHS ON)
         endif()
     endif()
 endif()
