@@ -31,7 +31,7 @@ services:
       - ./linux_gui/training_data:/training_data
     command:
       - "/app/build/CoreAI3D"
-      - "-i"
+      - "--input-file"
       - "gold.csv"
       - "-d"
       - ","
