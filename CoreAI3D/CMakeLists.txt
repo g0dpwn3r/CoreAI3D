@@ -45,16 +45,7 @@ if(Boost_FOUND)
 else()
     message(WARNING "Boost not found. Install Boost via system package manager.")
 endif()
-# Find MySQL Connector/C++ using system package (optional)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(MYSQLCPP libmysqlcppconn)
-if(MYSQLCPP_FOUND)
-    include_directories(${MYSQLCPP_INCLUDE_DIRS})
-    link_directories(${MYSQLCPP_LIBRARY_DIRS})
-    message(STATUS "MySQL Connector/C++ found - can be enabled with USE_MYSQL=ON")
-else()
-    message(STATUS "MySQL Connector/C++ not found - MySQL support disabled")
-endif()
+
 find_package(absl CONFIG REQUIRED)
 # pkg_check_modules(UTF8_RANGE utf8_range)
 find_package(ZLIB REQUIRED)
@@ -228,17 +219,56 @@ target_precompile_headers(CoreAI3DLib
 
 # Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
 option(USE_MYSQL "Enable MySQL support" ON)
+
 if(USE_MYSQL)
-    if(MYSQLCPP_FOUND)
-        target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
-        message(STATUS "MySQL support enabled")
+    message(STATUS "Attempting to manually find MySQL Connector/C++...")
+
+    # 1. Manually find the header file
+    # Vcpkg puts ALL headers in the root include folder, not debug/include
+    find_path(MYSQL_INCLUDE_DIR 
+        NAMES mysqlx/xdevapi.h 
+        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/include"
+        NO_DEFAULT_PATH
+    )
+
+    # 2. Determine the correct library path based on Build Type
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(MYSQL_LIB_PATH_SUFFIX "debug/lib")
     else()
-        message(FATAL_ERROR "USE_MYSQL=ON but MySQL Connector/C++ not found")
+        set(MYSQL_LIB_PATH_SUFFIX "lib")
+    endif()
+
+    # 3. Manually find the library file
+    find_library(MYSQL_LIB 
+        NAMES mysqlcppconn8-static mysqlcppconn8 mysqlcppconn
+        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}"
+        NO_DEFAULT_PATH
+    )
+
+    if(MYSQL_INCLUDE_DIR AND MYSQL_LIB)
+        message(STATUS "Found MySQL Header: ${MYSQL_INCLUDE_DIR}")
+        message(STATUS "Found MySQL Lib: ${MYSQL_LIB}")
+
+        if(NOT TARGET mysql-connector-cpp::connector)
+            add_library(mysql-connector-cpp::connector UNKNOWN IMPORTED)
+            set_target_properties(mysql-connector-cpp::connector PROPERTIES
+                IMPORTED_LOCATION "${MYSQL_LIB}"
+                INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_INCLUDE_DIR}"
+            )
+        endif()
+
+        target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::connector)
+        target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
+        
+        find_package(OpenSSL REQUIRED)
+        target_link_libraries(CoreAI3DLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    else()
+        # This will print exactly what is missing
+        message(FATAL_ERROR "Could NOT find MySQL. \nLooking for header in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/include \nLooking for lib in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}")
     endif()
 else()
     message(STATUS "MySQL support disabled - running in offline mode")
 endif()
-
 # If we copied local google/googleapis into the build tree, include them too
 if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
     target_include_directories(CoreAI3DLib PUBLIC
@@ -344,14 +374,6 @@ target_link_libraries(CoreAI3DLib PUBLIC
     $<$<TARGET_EXISTS:lz4::lz4_static>:lz4::lz4_static>
     $<$<BOOL:${LZ4_FOUND}>:${LZ4_LIBRARIES}>
 )
-
-# Add MySQL Connector/C++ libraries if found and enabled
-if(USE_MYSQL AND MYSQLCPP_FOUND)
-    target_link_libraries(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARIES} mysqlcppconnx)
-    target_include_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_INCLUDE_DIRS})
-    target_link_directories(CoreAI3DLib PUBLIC ${MYSQLCPP_LIBRARY_DIRS})
-    message(STATUS "MySQL Connector/C++ linked")
-endif()
 
 add_executable(CoreAI3D main.cpp)
 
