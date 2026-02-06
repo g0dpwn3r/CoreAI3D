@@ -252,6 +252,19 @@ bool Predict::loadModel(const std::string& loadModelId, int datasetId) {
 bool Predict::preprocessData(float minRange, float maxRange) {
     if (verbose_) {
         std::cout << "[PREDICT] Preprocessing data..." << std::endl;
+        std::cout << "[PREDICT] Parameters - minRange: " << minRange << ", maxRange: " << maxRange << std::endl;
+        std::cout << "[PREDICT] Current state - numSamples: " << trainer_->numSamples
+                  << ", inputSize: " << trainer_->inputSize << ", outputSize: " << trainer_->outputSize << std::endl;
+        if (!trainer_->getInputs().empty()) {
+            std::cout << "[PREDICT] First input sample: ";
+            for (float val : trainer_->getInputs()[0]) {
+                std::cout << val << " ";
+            }
+            std::cout << std::endl;
+        }
+        if (!trainer_->getTargets().empty()) {
+            std::cout << "[PREDICT] First target value: " << trainer_->getTargets()[0][0] << std::endl;
+        }
     }
 
     try {
@@ -274,6 +287,16 @@ bool Predict::preprocessData(float minRange, float maxRange) {
 bool Predict::trainModel(double learningRate, int epochs) {
     if (verbose_) {
         std::cout << "[PREDICT] Starting model training..." << std::endl;
+    }
+
+    // Validate learning rate
+    if (learningRate <= 0.0 || learningRate > 1.0) {
+        std::cerr << "[PREDICT] Invalid learning rate: " << learningRate << ". Using default 0.001" << std::endl;
+        learningRate = 0.001;
+    }
+    
+    if (verbose_) {
+        std::cout << "[PREDICT] Training with learning rate: " << learningRate << ", epochs: " << epochs << std::endl;
     }
 
     try {

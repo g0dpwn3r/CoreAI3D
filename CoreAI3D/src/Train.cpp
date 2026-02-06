@@ -11,7 +11,7 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
     isOfflineMode(false), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
-    verbose(verbose), // Initialize verbose from parameter
+    verbose(verbose), // Initialize verbosgit reset HEAD custom-ports/mysql-connector-cpp/vcpkg_installede from parameter
     webSocketServer(wsServer), // Initialize WebSocket server
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking

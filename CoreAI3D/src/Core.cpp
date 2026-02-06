@@ -212,6 +212,12 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     weight_init_scale = 1.0f;
     weight_init_seed = 42;
     std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
+    
+    // DEBUG: Verify weight initialization parameters
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Weight initialization: type=" << static_cast<int>(weight_init_type)
+                  << ", scale=" << weight_init_scale << ", seed=" << weight_init_seed << std::endl;
+    }
 
     // Initialize thread pool with number of hardware threads
     unsigned int num_threads = std::thread::hardware_concurrency();
@@ -1034,10 +1040,13 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         }
     }
 
-    // Store normalization parameters in trainer if available
-    if (trainer) {
-        trainer->original_data_global_min = target_min;
-        trainer->original_data_global_max = target_max;
+    // Do NOT overwrite the trainer's original data global min/max with normalized target min/max
+    // The trainer already has the correct original data range from the preprocess step
+    if (verbose && trainer) {
+        std::cout << "[DEBUG TRAIN] Target normalization - min: " << target_min
+                  << ", max: " << target_max
+                  << ", trainer original min: " << trainer->original_data_global_min
+                  << ", trainer original max: " << trainer->original_data_global_max << std::endl;
     }
 
     // Ensure forward pass has been run
@@ -1903,6 +1912,14 @@ void CoreAI::setWeightInitialization(WeightInitialization type, float scale, uns
 void CoreAI::initializeWeightsAdaptive(int from_size, int to_size, std::vector<std::vector<float>>& weights, ActivationType activation_type) {
     std::mt19937 gen(weight_init_seed);
     float scale = weight_init_scale;
+    
+    // Ensure scale is not zero
+    if (scale <= 0.0f) {
+        scale = 1.0f;
+        if (verbose) {
+            std::cout << "[WARNING] Weight initialization scale was <= 0.0, using default 1.0" << std::endl;
+        }
+    }
 
     // Adaptive initialization based on activation function
     switch (activation_type) {

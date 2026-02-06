@@ -36,9 +36,12 @@ RUN cd CoreAI3D && git lfs pull
 RUN cd vcpkg && ./bootstrap-vcpkg.sh && ./vcpkg integrate install
 
 # Create build directory and configure CMake for release build
+# (Fixed line)
 RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake
-
+    cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake \
+    -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports
 # Build the release version
 RUN cd CoreAI3D/build && make -j$(nproc)
 
