@@ -50,15 +50,9 @@ find_package(absl CONFIG REQUIRED)
 # pkg_check_modules(UTF8_RANGE utf8_range)
 find_package(ZLIB REQUIRED)
 find_package(CURL REQUIRED)
-pkg_check_modules(ZSTD libzstd)
-if(NOT ZSTD_FOUND)
-    message(WARNING "zstd not found, skipping zstd dependency")
-endif()
+find_package(zstd CONFIG REQUIRED)
+find_package(lz4 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-# find_package(google_cloud_cpp_speech CONFIG REQUIRED)
-# find_package(google_cloud_cpp_common CONFIG REQUIRED)
-# find_package(OpenCV REQUIRED)
-pkg_check_modules(LZ4 liblz4)
 
 find_package(gRPC REQUIRED)
 find_package(Protobuf REQUIRED)
@@ -170,7 +164,6 @@ set(SOURCE_FILES
     src/Core.cpp
     src/Train.cpp
     src/Predict.cpp
-    src/Database.cpp
     src/Language.cpp
     src/APIServer.cpp
     src/AudioModule.cpp
@@ -188,6 +181,10 @@ set(SOURCE_FILES
     src/BenchmarkingEngine.cpp
     # src/HyperparameterTuner.cpp
 )
+
+if(USE_MYSQL)
+    list(APPEND SOURCE_FILES src/Database.cpp)
+endif()
 
 # Add Linux-specific modules only on Linux
 if(NOT WIN32)
@@ -222,52 +219,75 @@ option(USE_MYSQL "Enable MySQL support" ON)
 
 if(USE_MYSQL)
     message(STATUS "Attempting to manually find MySQL Connector/C++...")
+    message(STATUS "Searching in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}")
 
-    # 1. Manually find the header file
-    # Vcpkg puts ALL headers in the root include folder, not debug/include
+    # 1. Find Header
     find_path(MYSQL_INCLUDE_DIR 
         NAMES mysqlx/xdevapi.h 
         PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/include"
         NO_DEFAULT_PATH
     )
 
-    # 2. Determine the correct library path based on Build Type
+    # 2. Set Library Suffix (Debug vs Release)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(MYSQL_LIB_PATH_SUFFIX "debug/lib")
     else()
         set(MYSQL_LIB_PATH_SUFFIX "lib")
     endif()
 
-    # 3. Manually find the library file
-    find_library(MYSQL_LIB 
-        NAMES mysqlcppconn8-static mysqlcppconn8 mysqlcppconn
+    # 3. Find X DevAPI Library (libmysqlcppconn8x.a)
+    # Note: We look for 'mysqlcppconn8x' because that is what is on disk.
+    find_library(MYSQLX_LIB 
+        NAMES mysqlcppconn8x mysqlcppconnx mysqlcppconnx-static
         PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}"
         NO_DEFAULT_PATH
     )
 
-    if(MYSQL_INCLUDE_DIR AND MYSQL_LIB)
-        message(STATUS "Found MySQL Header: ${MYSQL_INCLUDE_DIR}")
-        message(STATUS "Found MySQL Lib: ${MYSQL_LIB}")
+    # 4. Find JDBC Library (libmysqlcppconn8.a)
+    find_library(MYSQL_LIB 
+        NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn-static
+        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}"
+        NO_DEFAULT_PATH
+    )
 
-        if(NOT TARGET mysql-connector-cpp::connector)
+    if(MYSQL_INCLUDE_DIR AND MYSQLX_LIB)
+        message(STATUS "Found MySQL Header: ${MYSQL_INCLUDE_DIR}")
+        message(STATUS "Found MySQL X Lib: ${MYSQLX_LIB}")
+        
+        # Link X DevAPI
+        add_library(mysql-connector-cpp::xconnector UNKNOWN IMPORTED)
+        set_target_properties(mysql-connector-cpp::xconnector PROPERTIES
+            IMPORTED_LOCATION "${MYSQLX_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_INCLUDE_DIR}"
+        )
+        target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::xconnector)
+
+        # Link JDBC (Optional but recommended)
+        if(MYSQL_LIB)
+            message(STATUS "Found MySQL JDBC Lib: ${MYSQL_LIB}")
             add_library(mysql-connector-cpp::connector UNKNOWN IMPORTED)
             set_target_properties(mysql-connector-cpp::connector PROPERTIES
                 IMPORTED_LOCATION "${MYSQL_LIB}"
                 INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_INCLUDE_DIR}"
             )
+            target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::connector)
         endif()
 
-        target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::connector)
         target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
         
+        # Required dependencies for static linking
         find_package(OpenSSL REQUIRED)
         target_link_libraries(CoreAI3DLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+        
+        # Manually link ZLIB/ZSTD/LZ4 if they exist (Critical for static MySQL)
+        find_package(ZLIB REQUIRED)
+        target_link_libraries(CoreAI3DLib PUBLIC ZLIB::ZLIB)
+        
     else()
-        # This will print exactly what is missing
-        message(FATAL_ERROR "Could NOT find MySQL. \nLooking for header in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/include \nLooking for lib in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}")
+        message(FATAL_ERROR "Could NOT find MySQL libraries.\n  Expected to find: libmysqlcppconn8x.a or libmysqlcppconnx.a\n  Checked: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}")
     endif()
 else()
-    message(STATUS "MySQL support disabled - running in offline mode")
+    message(STATUS "MySQL support disabled")
 endif()
 # If we copied local google/googleapis into the build tree, include them too
 if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
@@ -359,10 +379,7 @@ target_link_libraries(CoreAI3DLib PUBLIC
     ZLIB::ZLIB
     CURL::libcurl
     gRPC::grpc++
-    $<$<TARGET_EXISTS:zstd::libzstd>:zstd::libzstd>
-    $<$<TARGET_EXISTS:zstd::libzstd_shared>:zstd::libzstd_shared>
-    $<$<TARGET_EXISTS:zstd::libzstd_static>:zstd::libzstd_static>
-    $<$<BOOL:${ZSTD_FOUND}>:${ZSTD_LIBRARIES}>
+    zstd::libzstd
     protobuf::libprotoc
     protobuf::libprotobuf
     protobuf::libprotobuf-lite
@@ -370,9 +387,7 @@ target_link_libraries(CoreAI3DLib PUBLIC
     $<$<TARGET_EXISTS:google-cloud-cpp::speech>:google-cloud-cpp::speech>
     $<$<TARGET_EXISTS:google-cloud-cpp::common>:google-cloud-cpp::common>
     resolv
-    $<$<TARGET_EXISTS:lz4::lz4>:lz4::lz4>
-    $<$<TARGET_EXISTS:lz4::lz4_static>:lz4::lz4_static>
-    $<$<BOOL:${LZ4_FOUND}>:${LZ4_LIBRARIES}>
+    lz4::lz4
 )
 
 add_executable(CoreAI3D main.cpp)
@@ -417,18 +432,18 @@ add_custom_command(TARGET CoreAI3D POST_BUILD
     COMMENT "Copying CoreAI3D executable to $HOME/tools/CoreAI3D"
     VERBATIM)
 
-# Add post-build automation script
-add_custom_command(TARGET CoreAI3D POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo "SKIP_POST_BUILD=$ENV{SKIP_POST_BUILD}"
-    COMMAND python3 /home/carlon/code/CoreAI3D/post_build_automation.py
-        --source-dir $<TARGET_FILE_DIR:CoreAI3D>
-        --build-dir $<TARGET_FILE_DIR:CoreAI3D>
-        --target-executable $<TARGET_FILE:CoreAI3D>
-        --workspace-dir /home/carlon/code/CoreAI3D
-        --skip-post "$ENV{SKIP_POST_BUILD}"
-    COMMENT "Running post-build automation script"
-    VERBATIM
-)
+# Add post-build automation script (disabled for now)
+# add_custom_command(TARGET CoreAI3D POST_BUILD
+#     COMMAND ${CMAKE_COMMAND} -E echo "SKIP_POST_BUILD=$ENV{SKIP_POST_BUILD}"
+#     COMMAND python3 /home/carlon/code/CoreAI3D/post_build_automation.py
+#         --source-dir $<TARGET_FILE_DIR:CoreAI3D>
+#         --build-dir $<TARGET_FILE_DIR:CoreAI3D>
+#         --target-executable $<TARGET_FILE:CoreAI3D>
+#         --workspace-dir /home/carlon/code/CoreAI3D
+#         --skip-post "$ENV{SKIP_POST_BUILD}"
+#     COMMENT "Running post-build automation script"
+#     VERBATIM
+# )
 
 # After computing VALID_PROTOBUF_IMPORT_DIRS, print them for diagnostics
 message(STATUS "Proto import dirs used for generation: ${VALID_PROTOBUF_IMPORT_DIRS}")

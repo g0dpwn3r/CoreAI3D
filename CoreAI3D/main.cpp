@@ -590,9 +590,8 @@ int main(int argc, char* argv[]) {
             bool success = predictor.runPrediction(
                 inputFile, outputCsvFile, targetFile, loadModelId, datasetId_val,
                 layers_val, neurons_val, minRange_val, maxRange_val,
-                0, 1, numSamples_val, batchSize_val,  // inputSize=0 (dynamic), outputSize=1
-                learningRate_val, epochs_val, embeddingFile, language,
-                datasetName, hasHeader, containsText, delimiter_char,
+                0, 1, numSamples_val, learningRate_val, epochs_val,  // inputSize=0 (dynamic), outputSize=1
+                embeddingFile, language, datasetName, containsHeader, containsTextFlag, delimiter_char,
                 isOfflineMode, dbHost, dbPort_val, dbUser, dbPassword, dbSchema
             );
 

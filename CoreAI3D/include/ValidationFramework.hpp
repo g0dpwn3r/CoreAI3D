@@ -54,6 +54,7 @@ struct PerformanceMetrics {
     float recall;
     float f1_score;
     float rmse;
+    float mse; // Added missing field
     float mae;
     float r2_score;
     float auc_roc;
@@ -114,11 +115,15 @@ public:
     
     // Data preprocessing for validation
     std::vector<std::vector<float>> normalizeData(const std::vector<std::vector<float>>& data, 
-                                                 std::vector<float>& means, 
-                                                 std::vector<float>& stds);
+                                                 std::vector<float>* means = nullptr, 
+                                                 std::vector<float>* stds = nullptr);
     std::vector<std::vector<float>> standardizeData(const std::vector<std::vector<float>>& data,
-                                                   std::vector<float>& means,
-                                                   std::vector<float>& stds);
+                                                   std::vector<float>* means = nullptr,
+                                                   std::vector<float>* stds = nullptr);
+    
+    // Performance metrics calculation
+    PerformanceMetrics calculateMetrics(const std::vector<std::vector<float>>& predictions, 
+                                       const std::vector<std::vector<float>>& targets);
     void splitData(const std::vector<std::vector<float>>& data,
                     const std::vector<std::vector<float>>& targets,
                     float trainRatio,
@@ -148,6 +153,9 @@ public:
 
     // Problem type detection
     bool isClassificationProblem(const std::vector<std::vector<float>>& targets);
+    
+    // Memory usage monitoring
+    size_t getCurrentMemoryUsage() const;
     int getNumClasses(const std::vector<std::vector<float>>& targets);
     
     // Benchmarking methods

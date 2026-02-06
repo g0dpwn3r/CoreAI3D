@@ -1,5 +1,48 @@
 ﻿#include "Core.hpp"
 
+CoreAI::CoreAI()
+    : inputSize(0), layers(0), neurons(0), outputSize(0),
+    minVal(0.0f), maxVal(1.0f), verbose(false),
+    x(1.0f), y(1.0f), z(1.0f)  // Initialize transform variables to meaningful values
+{
+    // Default initialization of advanced 3D transform parameters
+    this->enable_polynomial = false;
+    this->enable_trigonometric = false;
+    this->enable_log_exp = false;
+    this->enable_rbf = false;
+    this->polynomial_weight = 0.0f;
+    this->trig_weight = 0.0f;
+    this->log_exp_weight = 0.0f;
+    this->rbf_weight = 0.0f;
+    this->rbf_center = {0.0f, 0.0f, 0.0f};
+    this->rbf_sigma = 1.0f;
+
+    // Initialize new 3D feature engineering parameters
+    this->enable_angular = false;
+    this->enable_projections = false;
+    this->enable_ratios = false;
+    this->enable_transformations = false;
+    this->angular_weight = 0.0f;
+    this->projections_weight = 0.0f;
+    this->ratios_weight = 0.0f;
+    this->transformations_weight = 0.0f;
+
+    // Initialize transformation parameters
+    this->rotation_angle_x = 0.0f;
+    this->rotation_angle_y = 0.0f;
+    this->rotation_angle_z = 0.0f;
+    this->scale_x = 1.0f;
+    this->scale_y = 1.0f;
+    this->scale_z = 1.0f;
+    this->translation_x = 0.0f;
+    this->translation_y = 0.0f;
+    this->translation_z = 0.0f;
+
+    if (verbose) {
+        std::cout << "[DEBUG CONSTRUCTOR] Starting CoreAI default constructor" << std::endl;
+    }
+}
+
 CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     float min_, float max_, bool verbose_)
     : inputSize(inputSize_), layers(layers_), neurons(neurons_),
@@ -108,7 +151,7 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
             }
             std::cout << std::endl;
         }
-        std::cout << "[DEBUG CONSTRUCTOR] Weight range: [" << -scale << ", " << scale << "]" << std::endl;
+        std::cout << "[DEBUG CONSTRUCTOR] Weight range: [" << -this->weight_init_scale << ", " << this->weight_init_scale << "]" << std::endl;
     }
 
     // Initialize trainer pointer to nullptr
@@ -154,14 +197,6 @@ CoreAI::CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
     }
     std::fill(this->bn_beta.begin(), this->bn_beta.end(), 0.0f);
 
-    // Initialize activation configurations (default to sigmoid for backward compatibility)
-    ActivationConfig default_config;
-    default_config.type = ActivationType::SIGMOID;
-    default_config.alpha = 1.0f;
-    default_config.beta = 0.1f;
-    default_config.spatial_weight = 1.0f;
-    default_config.calculus_config = {10, 1.0f, 1.0f};
-    layer_activation_configs.resize(layer_sizes.size(), default_config);
     // Initialize activation configurations (default to sigmoid for backward compatibility)
     ActivationConfig default_config;
     default_config.type = ActivationType::SIGMOID;
@@ -1838,6 +1873,20 @@ void CoreAI::setRegularizationParams(float l2_lambda, float dropout_rate,
 
 void CoreAI::enableRegularization(bool dropout, bool batch_norm,
                                   bool l2_reg, bool grad_clip) {
+    this->use_dropout = dropout;
+    this->use_batch_norm = batch_norm;
+    this->use_l2_reg = l2_reg;
+    this->use_grad_clip = grad_clip;
+
+    if (verbose) {
+        std::cout << "[DEBUG REGULARIZATION] Enabled features:" << std::endl;
+        std::cout << "  Dropout: " << (dropout ? "yes" : "no") << std::endl;
+        std::cout << "  Batch norm: " << (batch_norm ? "yes" : "no") << std::endl;
+        std::cout << "  L2 regularization: " << (l2_reg ? "yes" : "no") << std::endl;
+        std::cout << "  Gradient clipping: " << (grad_clip ? "yes" : "no") << std::endl;
+    }
+}
+
 // Weight initialization configuration methods
 
 void CoreAI::setWeightInitialization(WeightInitialization type, float scale, unsigned int seed) {
@@ -1965,24 +2014,6 @@ void CoreAI::initializeWeightsAdaptive(int from_size, int to_size, std::vector<s
 }
 
 // Multi-layer architecture implementation
-
-void CoreAI::initializeMultiLayerWeights() {
-    this->use_dropout = dropout;
-    this->use_batch_norm = batch_norm;
-    this->use_l2_reg = l2_reg;
-    this->use_grad_clip = grad_clip;
-
-    if (verbose) {
-        std::cout << "[DEBUG REGULARIZATION] Enabled features:" << std::endl;
-        std::cout << "  Dropout: " << (dropout ? "yes" : "no") << std::endl;
-        std::cout << "  Batch norm: " << (batch_norm ? "yes" : "no") << std::endl;
-        std::cout << "  L2 regularization: " << (l2_reg ? "yes" : "no") << std::endl;
-        std::cout << "  Gradient clipping: " << (grad_clip ? "yes" : "no") << std::endl;
-    }
-}
-
-// Multi-layer architecture implementation
-
 void CoreAI::initializeMultiLayerWeights() {
     layer_weights.clear();
     layer_weights.resize(layer_sizes.size() - 1); // weights between layers
@@ -2014,6 +2045,7 @@ void CoreAI::initializeMultiLayerWeights() {
         std::cout << std::endl;
     }
 }
+
 
 void CoreAI::initializeAttentionWeights() {
     if (inputSize % 3 != 0) {

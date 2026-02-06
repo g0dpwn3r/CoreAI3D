@@ -460,17 +460,24 @@ float ValidationFramework::computePearsonCorrelation(const std::vector<float>& x
 }
 
 std::vector<std::vector<float>> ValidationFramework::normalizeData(const std::vector<std::vector<float>>& data,
-                                                                  std::vector<float>& means,
-                                                                  std::vector<float>& stds) {
-    means = computeMean(data);
-    stds = computeStd(data);
+                                                                  std::vector<float>* means,
+                                                                  std::vector<float>* stds) {
+    auto computedMeans = computeMean(data);
+    auto computedStds = computeStd(data);
+    
+    if (means) {
+        *means = computedMeans;
+    }
+    if (stds) {
+        *stds = computedStds;
+    }
     
     std::vector<std::vector<float>> normalizedData = data;
     
     for (size_t i = 0; i < data.size(); i++) {
         for (size_t j = 0; j < data[i].size(); j++) {
-            if (stds[j] > 1e-6f) { // Avoid division by zero
-                normalizedData[i][j] = (data[i][j] - means[j]) / stds[j];
+            if (computedStds[j] > 1e-6f) { // Avoid division by zero
+                normalizedData[i][j] = (data[i][j] - computedMeans[j]) / computedStds[j];
             } else {
                 normalizedData[i][j] = 0.0f;
             }
@@ -481,12 +488,9 @@ std::vector<std::vector<float>> ValidationFramework::normalizeData(const std::ve
 }
 
 std::vector<std::vector<float>> ValidationFramework::standardizeData(const std::vector<std::vector<float>>& data,
-                                                                    std::vector<float>& means,
-                                                                    std::vector<float>& stds) {
+                                                                    std::vector<float>* means,
+                                                                    std::vector<float>* stds) {
     // For standardization, we use min-max scaling
-    means.clear();
-    stds.clear();
-    
     std::vector<float> mins, maxs;
     mins.resize(data[0].size());
     maxs.resize(data[0].size());
@@ -500,9 +504,20 @@ std::vector<std::vector<float>> ValidationFramework::standardizeData(const std::
             mins[j] = std::min(mins[j], row[j]);
             maxs[j] = std::max(maxs[j], row[j]);
         }
-        
-        means.push_back((mins[j] + maxs[j]) / 2.0f);
-        stds.push_back((maxs[j] - mins[j]) / 2.0f);
+    }
+    
+    std::vector<float> computedMeans;
+    std::vector<float> computedStds;
+    for (size_t j = 0; j < data[0].size(); j++) {
+        computedMeans.push_back((mins[j] + maxs[j]) / 2.0f);
+        computedStds.push_back((maxs[j] - mins[j]) / 2.0f);
+    }
+    
+    if (means) {
+        *means = computedMeans;
+    }
+    if (stds) {
+        *stds = computedStds;
     }
     
     // Apply standardization
@@ -510,7 +525,7 @@ std::vector<std::vector<float>> ValidationFramework::standardizeData(const std::
     
     for (size_t i = 0; i < data.size(); i++) {
         for (size_t j = 0; j < data[i].size(); j++) {
-            if (stds[j] > 1e-6f) { // Avoid division by zero
+            if (computedStds[j] > 1e-6f) { // Avoid division by zero
                 standardizedData[i][j] = (data[i][j] - mins[j]) / (maxs[j] - mins[j]);
             } else {
                 standardizedData[i][j] = 0.5f; // Middle value for zero variance features
@@ -847,87 +862,7 @@ float ValidationFramework::calculateR2Score(const std::vector<float>& prediction
     return totalSumSquares > 0 ? 1.0f - (residualSumSquares / totalSumSquares) : 0.0f;
 }
 
-// Performance evaluation methods
-PerformanceMetrics ValidationFramework::evaluateModel(std::unique_ptr<Training> trainer,
-                                    const std::vector<std::vector<float>>& testData,
-                                    const std::vector<std::vector<float>>& testTargets) {
-    PerformanceMetrics metrics = {};
-    metrics.isClassification = isClassificationProblem(testTargets);
 
-    if (verbose) {
-        std::cout << "Evaluating model (" << (metrics.isClassification ? "classification" : "regression") << ")..." << std::endl;
-    }
-
-    // Get predictions from the model
-    auto predictions_matrix = trainer->getCore()->forward(testData, false); // false = not training
-
-    // Convert to flat vectors for metric calculation
-    std::vector<float> predictions, targets;
-    for (const auto& pred_row : predictions_matrix) {
-        if (!pred_row.empty()) {
-            predictions.push_back(pred_row[0]);
-        }
-    }
-    for (const auto& target_row : testTargets) {
-        if (!target_row.empty()) {
-            targets.push_back(target_row[0]);
-        }
-    }
-
-    if (predictions.size() != targets.size()) {
-        if (verbose) {
-            std::cout << "Warning: Prediction and target sizes don't match" << std::endl;
-        }
-        return metrics;
-    }
-
-    // Calculate appropriate metrics based on problem type
-    if (metrics.isClassification) {
-        // Classification metrics
-        metrics.accuracy = calculateAccuracy(predictions, targets);
-        metrics.precision = calculatePrecision(predictions, targets, 0.5f);
-        metrics.recall = calculateRecall(predictions, targets, 0.5f);
-        metrics.f1_score = calculateF1Score(predictions, targets, 0.5f);
-
-        // Set regression metrics to 0 for classification
-        metrics.rmse = 0.0f;
-        metrics.mae = 0.0f;
-        metrics.r2_score = 0.0f;
-        metrics.auc_roc = 0.0f; // Would need probabilities for AUC
-    } else {
-        // Regression metrics
-        metrics.rmse = calculateRMSE(predictions, targets);
-        metrics.mae = calculateMAE(predictions, targets);
-        metrics.r2_score = calculateR2Score(predictions, targets);
-
-        // Set classification metrics to 0 for regression
-        metrics.accuracy = 0.0f;
-        metrics.precision = 0.0f;
-        metrics.recall = 0.0f;
-        metrics.f1_score = 0.0f;
-        metrics.auc_roc = 0.0f;
-    }
-
-    // Get memory usage
-    metrics.memoryUsage = 0; // Would need to implement memory tracking
-
-    if (verbose) {
-        if (metrics.isClassification) {
-            std::cout << "Classification Results:" << std::endl;
-            std::cout << "  Accuracy: " << metrics.accuracy * 100 << "%" << std::endl;
-            std::cout << "  Precision: " << metrics.precision << std::endl;
-            std::cout << "  Recall: " << metrics.recall << std::endl;
-            std::cout << "  F1-Score: " << metrics.f1_score << std::endl;
-        } else {
-            std::cout << "Regression Results:" << std::endl;
-            std::cout << "  RMSE: " << metrics.rmse << std::endl;
-            std::cout << "  MAE: " << metrics.mae << std::endl;
-            std::cout << "  R² Score: " << metrics.r2_score << std::endl;
-        }
-    }
-
-    return metrics;
-}
 
 // Scikit-learn benchmarking integration
 std::vector<BenchmarkResult> ValidationFramework::benchmarkAgainstScikitLearn(
@@ -1142,4 +1077,97 @@ int ValidationFramework::extractJsonInt(const std::string& json, const std::stri
     } catch (...) {
         return 0;
     }
+}
+
+size_t ValidationFramework::getCurrentMemoryUsage() const {
+    // This is a placeholder implementation
+    // On Linux, you could read from /proc/self/status
+    // For cross-platform compatibility, we return a dummy value
+    #ifdef __linux__
+        std::ifstream status("/proc/self/status");
+        if (status.is_open()) {
+            std::string line;
+            while (std::getline(status, line)) {
+                if (line.substr(0, 6) == "VmRSS:") {
+                    std::istringstream iss(line.substr(6));
+                    size_t memory;
+                    iss >> memory;
+                    return memory * 1024; // Convert KB to bytes
+                }
+            }
+        }
+    #endif
+    
+    // Fallback: return dummy value
+    return 0;
+}
+
+PerformanceMetrics ValidationFramework::calculateMetrics(const std::vector<std::vector<float>>& predictions, 
+                                                         const std::vector<std::vector<float>>& targets) {
+    PerformanceMetrics metrics;
+    
+    // Initialize all metrics to zero
+    metrics.accuracy = 0.0f;
+    metrics.precision = 0.0f;
+    metrics.recall = 0.0f;
+    metrics.f1_score = 0.0f;
+    metrics.rmse = 0.0f;
+    metrics.mae = 0.0f;
+    metrics.r2_score = 0.0f;
+    metrics.auc_roc = 0.0f;
+    metrics.trainingTime = 0.0;
+    metrics.inferenceTime = 0.0;
+    metrics.memoryUsage = 0;
+    metrics.parameters = 0;
+    metrics.isClassification = false;
+    
+    if (predictions.empty() || targets.empty() || predictions.size() != targets.size()) {
+        return metrics;
+    }
+    
+    float mse = 0.0f;
+    float mae = 0.0f;
+    float sumTargets = 0.0f;
+    float sumPredictions = 0.0f;
+    float sumSquaredTargets = 0.0f;
+    
+    size_t numSamples = predictions.size();
+    size_t outputSize = targets[0].size();
+    
+    for (size_t i = 0; i < numSamples; ++i) {
+        for (size_t j = 0; j < outputSize; ++j) {
+            float prediction = predictions[i][j];
+            float target = targets[i][j];
+            
+            float error = prediction - target;
+            mse += error * error;
+            mae += std::abs(error);
+            
+            sumTargets += target;
+            sumPredictions += prediction;
+            sumSquaredTargets += target * target;
+        }
+    }
+    
+    mse /= (numSamples * outputSize);
+    mae /= (numSamples * outputSize);
+    float rmse = std::sqrt(mse);
+    
+    float meanTarget = sumTargets / (numSamples * outputSize);
+    float meanPrediction = sumPredictions / (numSamples * outputSize);
+    
+    float sst = sumSquaredTargets / (numSamples * outputSize) - meanTarget * meanTarget;
+    float sse = mse;
+    
+    float r2 = 0.0f;
+    if (sst > 1e-6f) {
+        r2 = 1.0f - (sse / sst);
+    }
+    
+    metrics.rmse = rmse;
+    metrics.mse = mse;
+    metrics.mae = mae;
+    metrics.r2_score = r2;
+    
+    return metrics;
 }

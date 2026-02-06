@@ -418,7 +418,7 @@ TEST(BenchmarkTest, ValidationAndBenchmarkIntegration) {
 
             // Step 3: Preprocess the data
             std::vector<float> means, stds;
-            auto normalized = validator.normalizeData(inputs, means, stds);
+            auto normalized = validator.normalizeData(inputs, &means, &stds);
             EXPECT_EQ(normalized.size(), inputs.size());
 
             // Step 4: Run benchmark

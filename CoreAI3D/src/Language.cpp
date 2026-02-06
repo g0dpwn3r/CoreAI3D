@@ -7,9 +7,11 @@ Language::Language(std::string& embedingFile, int& embeddingDim, std::string& db
 {
     // Initialize trainer with database connection
     trainer = std::make_unique<Training>(true, false); // offline mode, non-verbose
-    core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, -1.0f, 1.0f);
+    core = std::make_unique<CoreAI>(static_cast<int>(inputSize), static_cast<int>(layers), static_cast<int>(neurons), static_cast<int>(outputSize), -1.0f, 1.0f);
 
-    // Initialize database connection only if not in offline mode
+    // Initialize database connection only if not in offline mode and MySQL support is enabled
+    database = nullptr;
+#ifdef USE_MYSQL
     if (!dbHost.empty() && dbHost != "offline") {
         try {
             std::cout << "DEBUG: Initializing database connection in Language constructor..." << std::endl;
@@ -24,6 +26,7 @@ Language::Language(std::string& embedingFile, int& embeddingDim, std::string& db
         std::cout << "DEBUG: Running in offline mode - skipping database initialization" << std::endl;
         database = nullptr;
     }
+#endif
 }
 CoreAI*
 Language::getCore()
@@ -149,6 +152,7 @@ int Language::chat() {
     // Load existing chat history and model state at startup (only if database is available)
     std::vector<std::pair<std::string, std::string>> chatHistory;
     nlohmann::json modelState;
+#ifdef USE_MYSQL
     if (database) {
         try {
             chatHistory = database->loadChatHistory(sessionId);
@@ -160,6 +164,9 @@ int Language::chat() {
     } else {
         std::cout << "DEBUG: Database not available - starting chat with empty history" << std::endl;
     }
+#else
+    std::cout << "DEBUG: MySQL support is disabled - starting chat with empty history" << std::endl;
+#endif
 
     // Load model state if available
     if (!modelState.empty() && core) {
@@ -213,7 +220,8 @@ int Language::chat() {
         }
         if (inputText == "exit")
         {
-            // Save chat history and model state before exiting (only if database is available)
+            // Save chat history and model state before exiting (only if database is available and MySQL support is enabled)
+#ifdef USE_MYSQL
             if (database) {
                 try {
                     for (const auto& turn : chatHistory) {
@@ -247,6 +255,7 @@ int Language::chat() {
                     std::cerr << "DEBUG: Failed to save final chat history/model state to database: " << ex.what() << std::endl;
                 }
             }
+#endif
             break;
         }
         currentLang = detectLanguage(inputText);
@@ -337,6 +346,7 @@ int Language::chat() {
         chatHistory.emplace_back("AI", aiResponse);
 
         // Save chat messages to database after each exchange (only if database is available)
+#ifdef USE_MYSQL
         if (database) {
             try {
                 database->saveChatMessage(sessionId, "User", inputText);
@@ -345,6 +355,7 @@ int Language::chat() {
                 std::cerr << "DEBUG: Failed to save chat messages to database: " << ex.what() << std::endl;
             }
         }
+#endif
 
         // Perform simple online training with the new data
         // For now, we'll just update the model state periodically
@@ -372,12 +383,14 @@ int Language::chat() {
                     jsonData["embeddings"][pair.first] = pair.second;
                 }
 
+#ifdef USE_MYSQL
                 database->saveModelState(sessionId, jsonData);
                 if (trainer && trainer->verbose) {
                     std::cout << "Model state saved to database." << std::endl;
                 }
             } catch (const std::exception& ex) {
                 std::cerr << "DEBUG: Failed to save model state to database: " << ex.what() << std::endl;
+#endif
             }
         }
 
@@ -607,9 +620,11 @@ void Language::learnFromConversation(const std::string& conversation) {
     // Integrate with training system - file-based approach
     if (trainer) {
         // Save conversation data to database for learning
+#ifdef USE_MYSQL
         for (const auto& turn : parsedTurns) {
             database->saveChatMessage(sessionId, turn.first, turn.second);
         }
+#endif
 
         // Load and train on the conversation data using existing training methods
         // Since we're removing DB dependency, we'll create a simple in-memory training approach

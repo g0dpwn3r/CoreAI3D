@@ -1,0 +1,13 @@
+--- a/include/mysqlx/common/value.h
++++ b/include/mysqlx/common/value.h
+@@ -33,6 +33,8 @@
+ #include "api.h"
+ #include "error.h"
++#include <cstdint>
++#include <cstddef>
+ #include "util.h"
+--- a/include/mysqlx/common/value.h
++++ b/include/mysqlx/common/value.h
+@@ -35,3 +35,4 @@
+using bigint_64_t = int64_t;
+using u_bigint_64_t = uint64_t;

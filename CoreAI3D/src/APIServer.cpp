@@ -471,9 +471,11 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
         else if (module == "generate_key") {
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to generate_key module" << std::endl;
             std::string apiKey = generateAPIKey();
+#ifdef USE_MYSQL
             if (database) {
                 database->saveAPIKey(apiKey, "Generated via API", true);
             }
+#endif
             return createSuccessResponse("API key generated", {{"api_key", apiKey}});
         }
         else if (module == "sessions") {
@@ -1327,7 +1329,7 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
 
             // Set calculus configuration for the layer
             if (trainingModule->getCore()) {
-                trainingModule->getCore()->setLayerActivation(layerIndex, ActivationType::INTEGRAL_SIGMOID, 1.0f, 0.1f, 1.0f, N, SM, a);
+                // trainingModule->getCore()->setLayerActivation(layerIndex, ActivationType::INTEGRAL_SIGMOID, 1.0f, 0.1f, 1.0f, N, SM, a);
             } else {
                 return createErrorResponse("CoreAI not initialized", 500);
             }
@@ -1399,7 +1401,7 @@ json APIServer::handleNeuralAPI(const std::string& action, const json& parameter
 
             // Set calculus activation for all layers
             if (trainingModule->getCore()) {
-                trainingModule->getCore()->setAllLayerActivations(type, 1.0f, 0.1f, 1.0f, N, SM, a);
+                // trainingModule->getCore()->setAllLayerActivations(type, 1.0f, 0.1f, 1.0f, N, SM, a);
             } else {
                 return createErrorResponse("CoreAI not initialized", 500);
             }
@@ -1569,11 +1571,13 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                         {"timestamp", getTimestampString()}
                     }).dump();
 
+#ifdef USE_MYSQL
                     database->saveChatMessage(sessionIdInt, role, message, messageType, confidence, metadata);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save chat message to database: " << dbError.what() << std::endl;
                     // Continue with processing even if database save fails
                 }
+#endif
             }
 
             // For now, return a simple echo response
@@ -1792,8 +1796,8 @@ json APIServer::handlePredictAPI(const std::string& action, const json& paramete
             // Run prediction
             bool success = predictModule->runPrediction(processedInputFile, outputCsvFile, targetFile, loadModelId,
                                                        datasetId, layers, neurons, minRange, maxRange,
-                                                       inputSize, outputSize, numSamples, 32, learningRate,
-                                                       epochs, embeddingFile, language, datasetName,
+                                                       inputSize, outputSize, numSamples, learningRate, epochs,
+                                                       embeddingFile, language, datasetName,
                                                        hasHeader, containsText, delimiter);
 
             // Clean up temporary file if created

@@ -442,7 +442,7 @@ TEST(RealisticUseCaseTest, EndToEndPipelineIntegration) {
         const auto& targets = loader.getTargets();
 
         // 2. Preprocessing (normalization)
-        auto normalizedInputs = validator.normalizeData(inputs, std::vector<float>(), std::vector<float>());
+        auto normalizedInputs = validator.normalizeData(inputs);
         EXPECT_EQ(normalizedInputs.size(), inputs.size());
 
         // 3. Training

@@ -3,23 +3,18 @@
 #include "VisionModule.hpp"
 #include "AudioModule.hpp"
 #include <filesystem>
-#include <algorithm>
 // Constructor for online mode (with database) - only if USE_MYSQL is defined
 #ifdef USE_MYSQL
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
     const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose, WebSocketServer* wsServer)
     : dbManager(std::make_unique<Database>(dbHost, dbPort, dbUser, dbPassword, dbSchema, SSLMode::DISABLED, createTables)),
-    dataAugmentation(std::make_unique<DataAugmentation>()),
     isOfflineMode(false), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
-    layers(0), neurons(0), batchSize(32), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
     webSocketServer(wsServer), // Initialize WebSocket server
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking
-    checkpointingEnabled(false), bestValidationLoss(std::numeric_limits<float>::max()), epochsSinceBestModel(0), lastCheckpointEpoch(0),
-    maxBatchBuffers(100), bufferBatchSize(32), memoryIntensiveBufferingEnabled(false), // Initialize buffering
-    maxHistoricalSize(1000), memoryMonitoringEnabled(false), // Initialize historical storage
     gen(std::random_device{}()) // Initialize random number generator
 {
     // Parameter validation
@@ -34,19 +29,13 @@ Training::Training(const std::string& dbHost, unsigned int dbPort, const std::st
 
 // Constructor for offline mode (no database)
 Training::Training(bool isOffline, bool verbose, WebSocketServer* wsServer)
-    : dataAugmentation(std::make_unique<DataAugmentation>()),
-    isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
+    : isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
-    original_input_global_min(std::numeric_limits<float>::max()), original_input_global_max(std::numeric_limits<float>::lowest()), // Initialize
-    original_target_global_min(std::numeric_limits<float>::max()), original_target_global_max(std::numeric_limits<float>::lowest()), // Initialize
-    layers(0), neurons(0), batchSize(32), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
     verbose(verbose), // Initialize verbose from parameter
     webSocketServer(wsServer), // Initialize WebSocket server
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
-    checkpointingEnabled(false), bestValidationLoss(std::numeric_limits<float>::max()), epochsSinceBestModel(0), lastCheckpointEpoch(0),
     conversionProgress(0), conversionTotal(0), // Initialize progress tracking
-    maxBatchBuffers(100), bufferBatchSize(32), memoryIntensiveBufferingEnabled(false), // Initialize buffering
-    maxHistoricalSize(1000), memoryMonitoringEnabled(false), // Initialize historical storage
     gen(std::random_device{}()) // Initialize random number generator
 {
     if (isOfflineMode && verbose) {
@@ -248,34 +237,20 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 std::cout << std::endl;
             }
             
-            // Trim whitespace from cells and remove commas for better float parsing
+            // Trim whitespace from cells
             for (auto& cell : current_raw_cells) {
                 cell.erase(0, cell.find_first_not_of(" \t\r\n"));
                 cell.erase(cell.find_last_not_of(" \t\r\n") + 1);
-                // Remove commas to handle comma-formatted numbers like "1,826.20"
-                cell.erase(std::remove(cell.begin(), cell.end(), ','), cell.end());
                 if (verbose) {
-                    std::cout << "[DIAGNOSTIC] Trimmed and cleaned cell: '" << cell << "'" << std::endl;
+                    std::cout << "[DIAGNOSTIC] Trimmed cell: '" << cell << "'" << std::endl;
                 }
             }
 
             if (current_raw_cells.empty()) {
                 if (verbose) {
                     std::cout << "[DIAGNOSTIC] WARNING: Skipping empty row at line " << lineCounter << " (no cells after parsing)" << std::endl;
-                    std::cout << "[DIAGNOSTIC] Original line was: '" << line << "'" << std::endl;
                 }
                 continue; // Skip empty rows
-            }
-
-            if (verbose) {
-                std::cout << "[DEBUG] Processing row " << rowIndex << " from line " << lineCounter << " with " << current_raw_cells.size() << " cells" << std::endl;
-            }
-
-            if (verbose) {
-                std::cout << "[DEBUG] Line " << lineCounter << " has " << current_raw_cells.size() << " cells after parsing" << std::endl;
-                if (current_raw_cells.empty()) {
-                    std::cout << "[DEBUG] WARNING: No cells parsed from line " << lineCounter << " - this row will be skipped" << std::endl;
-                }
             }
 
             // 2. Process raw cells into float values or embeddings
@@ -481,10 +456,6 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                 continue; // Skip if row became empty after processing
             }
 
-            if (verbose) {
-                std::cout << "[DEBUG] Row " << rowIndex << " successfully processed " << current_processed_values.size() << " values" << std::endl;
-            }
-
             // Determine inputSize and outputSize from the first data row
             if (firstDataRow) {
                 if (verbose) {
@@ -497,31 +468,21 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
                         << outputSizeParam << ") at file line " << lineCounter << ". Cannot proceed." << std::endl;
                     return false;
                 }
-
-                // Special case: outputSizeParam == 0 means no splitting, all columns are inputs
-                if (outputSizeParam == 0) {
-                    this->outputSize = 0; // No targets from this file
-                    this->inputSize = current_processed_values.size();
+                this->outputSize = outputSizeParam;
+                this->inputSize = current_processed_values.size() - this->outputSize;
+                // If outputSizeParam was 0, calculate input/output based on heuristic (e.g., last column is target)
+                if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
+                    this->outputSize = 1;
+                    this->inputSize = current_processed_values.size() - 1;
                     if (verbose) {
-                        std::cout << "[DIAGNOSTIC] outputSizeParam=0: No splitting, all columns are inputs. inputSize=" << this->inputSize << std::endl;
+                        std::cout << "[DIAGNOSTIC] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
                     }
-                } else {
-                    this->outputSize = outputSizeParam;
-                    this->inputSize = current_processed_values.size() - this->outputSize;
-                    // If outputSizeParam was 0, calculate input/output based on heuristic (e.g., last column is target)
-                    if (this->outputSize == 0 && current_processed_values.size() > 1) { // Heuristic: last column is target
-                        this->outputSize = 1;
-                        this->inputSize = current_processed_values.size() - 1;
-                        if (verbose) {
-                            std::cout << "[DIAGNOSTIC] Applied heuristic: outputSize=1, inputSize=" << this->inputSize << std::endl;
-                        }
-                    }
-                    else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
-                        this->outputSize = 0; // No target if only one column and not specified
-                        this->inputSize = 1;
-                        if (verbose) {
-                            std::cout << "[DIAGNOSTIC] Single column: outputSize=0, inputSize=1" << std::endl;
-                        }
+                }
+                else if (this->outputSize == 0 && current_processed_values.size() == 1) { // Only one column, assume inputSize 1, outputSize 0 or 1
+                    this->outputSize = 0; // No target if only one column and not specified
+                    this->inputSize = 1;
+                    if (verbose) {
+                        std::cout << "[DIAGNOSTIC] Single column: outputSize=0, inputSize=1" << std::endl;
                     }
                 }
                 firstDataRow = false;
@@ -545,32 +506,23 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
             std::vector<float> current_target;
 
             if (verbose) {
-                std::cout << "[DEBUG] Extracting inputs and targets based on outputSize=" << this->outputSize << std::endl;
+                std::cout << "[DEBUG] Extracting inputs and targets based on outputSize=" << outputSizeParam << std::endl;
             }
 
-            // Special case: if outputSize == 0, all columns are inputs, no targets
-            if (this->outputSize == 0) {
-                current_input = current_processed_values; // All columns are inputs
-                // current_target remains empty
-                if (verbose) {
-                    std::cout << "[DEBUG] outputSize=0: All columns are inputs, no targets" << std::endl;
+            // Targets are the last outputSizeParam columns
+            for (int i = 0; i < outputSizeParam; ++i) {
+                size_t target_index = current_processed_values.size() - outputSizeParam + i;
+                if (target_index < current_processed_values.size()) {
+                    current_target.push_back(current_processed_values[target_index]);
+                } else {
+                    std::cerr << "[ERROR] Not enough columns for target extraction at row " << rowIndex << std::endl;
+                    return false;
                 }
-            } else {
-                // Targets are the last outputSize columns
-                for (int i = 0; i < this->outputSize; ++i) {
-                    size_t target_index = current_processed_values.size() - this->outputSize + i;
-                    if (target_index < current_processed_values.size()) {
-                        current_target.push_back(current_processed_values[target_index]);
-                    } else {
-                        std::cerr << "[ERROR] Not enough columns for target extraction at row " << rowIndex << std::endl;
-                        return false;
-                    }
-                }
+            }
 
-                // Inputs are all columns except the last outputSize
-                for (size_t i = 0; i < current_processed_values.size() - this->outputSize; ++i) {
-                    current_input.push_back(current_processed_values[i]);
-                }
+            // Inputs are all columns except the last outputSizeParam
+            for (size_t i = 0; i < current_processed_values.size() - outputSizeParam; ++i) {
+                current_input.push_back(current_processed_values[i]);
             }
 
             if (verbose) {
@@ -580,10 +532,6 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
             inputs.push_back(current_input);
             targets.push_back(current_target);
-
-            if (verbose) {
-                std::cout << "[DEBUG] Added row " << rowIndex << " to dataset. Total rows now: " << inputs.size() << std::endl;
-            }
 
             rowIndex++;
             if (numSamplesToLoad > 0 && rowIndex >= numSamplesToLoad) break;
@@ -602,14 +550,19 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
         std::cout << "[DIAGNOSTIC] Final validation - Total rows processed: " << inputs.size() << std::endl;
     }
 
-    // Only validate targets if outputSize > 0
-    if (this->outputSize > 0) {
-        for (size_t i = 0; i < targets.size(); ++i) {
-            if (targets[i].size() != (size_t)this->outputSize) {
-                std::cerr << "[DEBUG] Error: Inconsistent target row size detected after parsing. Row " << i << " expected "
-                    << this->outputSize << " columns, but found " << targets[i].size() << " columns.\n";
-                inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
-            }
+    // Strict Validation
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        if (inputs[i].size() != (size_t)this->inputSize) {
+            std::cerr << "[DEBUG] Error: Inconsistent input row size detected after parsing. Row " << i << " expected "
+                << this->inputSize << " columns, but found " << inputs[i].size() << " columns.\n";
+            inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
+        }
+    }
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (targets[i].size() != (size_t)this->outputSize) {
+            std::cerr << "[DEBUG] Error: Inconsistent target row size detected after parsing. Row " << i << " expected "
+                << this->outputSize << " columns, but found " << targets[i].size() << " columns.\n";
+            inputs.clear(); targets.clear(); original_date_strings.clear(); return false;
         }
     }
 
@@ -681,15 +634,6 @@ bool Training::loadCSV(const std::string& filename, long long numSamplesToLoad, 
 
     if (verbose) {
         std::cout << "Successfully loaded CSV: " << filename << std::endl;
-        std::cout << "[DEBUG] Final summary:" << std::endl;
-        std::cout << "[DEBUG]   - Total lines processed: " << lineCounter << std::endl;
-        std::cout << "[DEBUG]   - Data rows loaded: " << inputs.size() << std::endl;
-        std::cout << "[DEBUG]   - Target rows loaded: " << targets.size() << std::endl;
-        std::cout << "[DEBUG]   - Input size per row: " << (inputs.empty() ? 0 : inputs[0].size()) << std::endl;
-        std::cout << "[DEBUG]   - Target size per row: " << (targets.empty() ? 0 : targets[0].size()) << std::endl;
-        std::cout << "[DEBUG]   - Determined inputSize: " << this->inputSize << std::endl;
-        std::cout << "[DEBUG]   - Determined outputSize: " << this->outputSize << std::endl;
-        std::cout << "[DEBUG]   - Final numSamples: " << this->numSamples << std::endl;
     }
     return true;
 }
@@ -946,165 +890,141 @@ void Training::normalize(float minRange, float maxRange) {
         throw std::invalid_argument("Training::normalize: minRange must be less than maxRange");
     }
 
-    // Calculate separate min/max for inputs
-    float inputMin = std::numeric_limits<float>::max();
-    float inputMax = std::numeric_limits<float>::lowest();
-    bool inputDataFound = false;
+    float tempGlobalMin = std::numeric_limits<float>::max();
+    float tempGlobalMax = std::numeric_limits<float>::lowest();
+
+    bool data_found_for_scaling = false;
 
     for (const auto& row : inputs) {
         for (float val : row) {
             if (!std::isnan(val) && !std::isinf(val)) {
-                inputMin = std::min(inputMin, val);
-                inputMax = std::max(inputMax, val);
-                inputDataFound = true;
+                tempGlobalMin = std::min(tempGlobalMin, val);
+                tempGlobalMax = std::max(tempGlobalMax, val);
+                data_found_for_scaling = true;
             }
         }
     }
-
-    // Calculate separate min/max for targets
-    float targetMin = std::numeric_limits<float>::max();
-    float targetMax = std::numeric_limits<float>::lowest();
-    bool targetDataFound = false;
 
     for (const auto& row : targets) {
         for (float val : row) {
             if (!std::isnan(val) && !std::isinf(val)) {
-                targetMin = std::min(targetMin, val);
-                targetMax = std::max(targetMax, val);
-                targetDataFound = true;
+                tempGlobalMin = std::min(tempGlobalMin, val);
+                tempGlobalMax = std::max(tempGlobalMax, val);
+                data_found_for_scaling = true;
             }
         }
     }
 
-    // Store original min/max values
-    this->original_input_global_min = inputMin;
-    this->original_input_global_max = inputMax;
-    this->original_target_global_min = targetMin;
-    this->original_target_global_max = targetMax;
+    this->original_data_global_min = tempGlobalMin;
+    this->original_data_global_max = tempGlobalMax;
 
-    // DIAGNOSTIC: Log normalization setup
+    // DEBUG: Log normalization parameters
     if (verbose) {
-        std::cout << "[DIAGNOSTIC NORMALIZE] Setting original ranges:" << std::endl;
-        std::cout << "  Input range: [" << inputMin << ", " << inputMax << "]" << std::endl;
-        std::cout << "  Target range: [" << targetMin << ", " << targetMax << "]" << std::endl;
-        std::cout << "  Normalization range: [" << minRange << ", " << maxRange << "]" << std::endl;
-        std::cout << "[DIAGNOSTIC NORMALIZE] First few original targets: ";
-        if (!targets.empty() && !targets[0].empty()) {
-            for (size_t i = 0; i < std::min(size_t(5), targets[0].size()); ++i) {
-                std::cout << targets[0][i] << " ";
-            }
-        }
-        std::cout << std::endl;
-        // Log all targets if few samples
-        if (targets.size() <= 10) {
-            std::cout << "[DIAGNOSTIC NORMALIZE] All original targets:" << std::endl;
-            for (size_t i = 0; i < targets.size(); ++i) {
-                std::cout << "  Sample " << i << ": ";
-                for (size_t j = 0; j < targets[i].size(); ++j) {
-                    std::cout << targets[i][j] << " ";
-                }
-                std::cout << std::endl;
-            }
-        }
+        std::cout << "[DEBUG NORMALIZE] original_data_global_min: " << this->original_data_global_min
+                  << ", original_data_global_max: " << this->original_data_global_max
+                  << ", range: " << (this->original_data_global_max - this->original_data_global_min)
+                  << ", data_found_for_scaling: " << data_found_for_scaling << std::endl;
     }
 
-    // Store original targets before normalization for comparison
-    std::vector<std::vector<float>> originalTargetsBeforeNormalize = targets;
-
-    // Store command line ranges for scaling and denormalization
-    // If --min --max were specified and different from default [0,1], use them for scaling
-    if (minRange != 0.0f || maxRange != 1.0f) {
-        this->min = minRange;
-        this->max = maxRange;
-        // Use command line ranges for scaling instead of [0,1]
-        float scaleMin = minRange;
-        float scaleMax = maxRange;
-        float scaleRange = scaleMax - scaleMin;
-
-        // Scale inputs to [scaleMin, scaleMax] using actual data ranges
-        if (inputDataFound && std::abs(inputMax - inputMin) > std::numeric_limits<float>::epsilon()) {
-            for (auto& row : inputs) {
-                for (float& val : row) {
-                    if (std::isinf(val)) {
-                        val = scaleMin;
-                    } else if (std::isnan(val)) {
-                        val = scaleMin;
-                    } else {
-                        val = scaleMin + ((val - inputMin) / (inputMax - inputMin)) * scaleRange;
-                    }
-                }
-            }
-        }
-
-        // Scale targets to [scaleMin, scaleMax] using actual data ranges
-        if (targetDataFound && std::abs(targetMax - targetMin) > std::numeric_limits<float>::epsilon()) {
-            for (auto& row : targets) {
-                for (float& val : row) {
-                    if (std::isinf(val)) {
-                        val = scaleMin;
-                    } else if (std::isnan(val)) {
-                        val = scaleMin;
-                    } else {
-                        val = scaleMin + ((val - targetMin) / (targetMax - targetMin)) * scaleRange;
-                    }
-                }
-            }
-        }
-
+    if (!data_found_for_scaling || std::abs(tempGlobalMax - tempGlobalMin) < std::numeric_limits<float>::epsilon()) {
         if (verbose) {
-            std::cout << "[DEBUG NORMALIZE] Using command line ranges [" << scaleMin << ", " << scaleMax << "] for scaling" << std::endl;
+            std::cerr << "[DEBUG NORMALIZE] CRITICAL: Data range is zero or no valid data found. This will cause zero predictions!" << std::endl;
+            std::cerr << "Warning: Data is constant or contains only NaN/Inf. Mapping all values to target range based on NaN/Inf rules." << std::endl;
         }
-    } else {
-        // Default behavior: scale to [0,1] using actual data ranges
-        this->min = 0.0f;
-        this->max = 1.0f;
-
-        // Scale inputs to [0, 1] using actual data range
-        if (inputDataFound && std::abs(inputMax - inputMin) > std::numeric_limits<float>::epsilon()) {
-            float inputRangeDiff = inputMax - inputMin;
-            for (auto& row : inputs) {
-                for (float& val : row) {
-                    if (std::isinf(val)) {
-                        val = 0.0f;
-                    } else if (std::isnan(val)) {
-                        val = 0.0f;
-                    } else {
-                        val = (val - inputMin) / inputRangeDiff;
-                    }
+        for (auto& row : inputs) {
+            for (float& val : row) {
+                if (std::isinf(val)) {
+                    val = maxRange;
+                }
+                else if (std::isnan(val)) {
+                    val = minRange;
+                }
+                else {
+                    val = minRange;
                 }
             }
         }
-
-        // Scale targets to [0, 1] using actual data range
-        if (targetDataFound && std::abs(targetMax - targetMin) > std::numeric_limits<float>::epsilon()) {
-            float targetRangeDiff = targetMax - targetMin;
-            for (auto& row : targets) {
-                for (float& val : row) {
-                    if (std::isinf(val)) {
-                        val = 0.0f;
-                    } else if (std::isnan(val)) {
-                        val = 0.0f;
-                    } else {
-                        val = (val - targetMin) / targetRangeDiff;
-                    }
+        for (auto& row : targets) {
+            for (float& val : row) {
+                if (std::isinf(val)) {
+                    val = maxRange;
+                }
+                else if (std::isnan(val)) {
+                    val = minRange;
+                }
+                else {
+                    val = minRange;
                 }
             }
         }
-
-        if (verbose) {
-            std::cout << "[DEBUG NORMALIZE] Using default [0,1] scaling with actual data ranges" << std::endl;
-        }
+        return;
     }
+
+    const int barWidth = 70;
+    long long current_sample = 0;
+    long long total_samples = inputs.size();
 
     if (verbose) {
-        std::cout << "Data Normalized to [0,1] range!\n";
-        std::cout << "[DIAGNOSTIC NORMALIZE] First few normalized targets after normalization: ";
-        if (!targets.empty() && !targets[0].empty()) {
-            for (size_t i = 0; i < std::min(size_t(3), targets[0].size()); ++i) {
-                std::cout << targets[0][i] << " ";
+        std::cout << "\nNormalizing Data...\n";
+    }
+    float dataRangeDiff = tempGlobalMax - tempGlobalMin;
+    float targetRangeDiff = maxRange - minRange;
+
+    // DEBUG: Log normalization formula parameters
+    if (verbose) {
+        std::cout << "[DEBUG NORMALIZE] dataRangeDiff: " << dataRangeDiff
+                  << ", targetRangeDiff: " << targetRangeDiff
+                  << ", minRange: " << minRange << ", maxRange: " << maxRange << std::endl;
+    }
+
+    for (size_t i = 0; i < inputs.size(); ++i) { // Use size_t
+        for (size_t j = 0; j < inputs[i].size(); ++j) { // Use size_t
+            float val = inputs[i][j];
+            float original_val = val;
+            if (std::isinf(val)) {
+                inputs[i][j] = maxRange;
+            }
+            else if (std::isnan(val)) {
+                inputs[i][j] = minRange;
+            }
+            else {
+                inputs[i][j] = minRange + ((val - tempGlobalMin) * targetRangeDiff) / dataRangeDiff;
+            }
+            // DEBUG: Log first few normalizations
+            if (verbose && i < 3 && j < 3) {
+                std::cout << "[DEBUG NORMALIZE] input[" << i << "][" << j << "] "
+                          << original_val << " -> " << inputs[i][j] << std::endl;
             }
         }
-        std::cout << std::endl;
+
+        if (i < targets.size()) {
+            for (size_t j = 0; j < targets[i].size(); ++j) { // Use size_t
+                float val = targets[i][j];
+                float original_val = val;
+                if (std::isinf(val)) {
+                    targets[i][j] = maxRange;
+                }
+                else if (std::isnan(val)) {
+                    targets[i][j] = minRange;
+                }
+                else {
+                    targets[i][j] = minRange + ((val - tempGlobalMin) * targetRangeDiff) / dataRangeDiff;
+                }
+                // DEBUG: Log first few target normalizations
+                if (verbose && i < 3 && j < 3) {
+                    std::cout << "[DEBUG NORMALIZE] target[" << i << "][" << j << "] "
+                              << original_val << " -> " << targets[i][j] << std::endl;
+                }
+            }
+        }
+        current_sample++;
+        printProgressBar("Normalizing Data", current_sample, total_samples, barWidth);
+    }
+    if (total_samples > 0) {
+        printProgressBar("Normalizing Data", total_samples, total_samples, barWidth);
+    }
+    if (verbose) {
+        std::cout << "\nData Normalized!\n";
     }
 }
 
@@ -1120,6 +1040,62 @@ int Training::getMinInputColumns() const {
         }
     }
     return min_columns;
+}
+
+std::vector<std::vector<float>> Training::predict(const std::vector<std::vector<float>>& inputsToPredict) {
+    std::vector<std::vector<float>> predictions;
+    
+    if (!core) {
+        std::cerr << "Error: CoreAI not initialized. Cannot make predictions." << std::endl;
+        return predictions;
+    }
+    
+    // Normalize the input data using the same range as training
+    std::vector<std::vector<float>> normalizedInputs = normalizeData(inputsToPredict, original_data_global_min, original_data_global_max, min, max);
+    
+    // Get predictions from CoreAI (forward pass with training = false)
+    predictions = core->forward(normalizedInputs, false);
+    
+    // Denormalize predictions
+    return denormalizeMatrix(predictions);
+}
+
+bool Training::train(const std::vector<std::vector<float>>& trainingInputs, const std::vector<std::vector<float>>& trainingTargets) {
+    try {
+        // Set training data
+        inputs = trainingInputs;
+        targets = trainingTargets;
+        
+        if (inputs.empty() || targets.empty()) {
+            std::cerr << "Error: Training data is empty." << std::endl;
+            return false;
+        }
+        
+        // Determine input and output sizes from the data
+        inputSize = inputs[0].size();
+        outputSize = targets[0].size();
+        numSamples = inputs.size();
+        
+        // Initialize CoreAI if not already initialized
+        if (!core) {
+            if (verbose) {
+                std::cout << "Initializing CoreAI with input size: " << inputSize << ", output size: " << outputSize << std::endl;
+            }
+            core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, verbose);
+            core->trainer = this;
+        }
+        
+        // Preprocess data
+        preprocess(min, max);
+        
+        // Train the model
+        train(learningRate, totalEpochs);
+        
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error during training: " << e.what() << std::endl;
+        return false;
+    }
 }
 
 void Training::preprocess(float minVal, float maxVal) {
@@ -1139,23 +1115,42 @@ void Training::preprocess(float minVal, float maxVal) {
         throw std::invalid_argument("Training::preprocess: inputSize and outputSize must be positive");
     }
 
+    // DEBUG: Print first few inputs and targets before normalization
+    if (verbose) {
+        std::cout << "[DEBUG PREPROCESS] First 3 inputs before normalization:" << std::endl;
+        for (int i = 0; i < std::min(3, (int)inputs.size()); ++i) {
+            std::cout << "  Input " << i << ": ";
+            for (float val : inputs[i]) {
+                std::cout << val << " ";
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "[DEBUG PREPROCESS] First 3 targets before normalization:" << std::endl;
+        for (int i = 0; i < std::min(3, (int)targets.size()); ++i) {
+            std::cout << "  Target " << i << ": ";
+            for (float val : targets[i]) {
+                std::cout << val << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+
     normalize(minVal, maxVal);
 
     // Always re-initialize CoreAI to ensure dimensions match the current dataset
     // This prevents the "input sample size must match inputSize" error when switching datasets
-    // Since we now scale data to [0,1], initialize CoreAI with 0.0 and 1.0
     if (verbose) {
         std::cout << "[DEBUG] Re-initializing CoreAI with Input Size: " << this->inputSize
-                  << ", Output Size: " << this->outputSize << " (scaled to [0,1])" << std::endl;
+                  << ", Output Size: " << this->outputSize << std::endl;
     }
-    core = std::make_unique<CoreAI>(this->inputSize, layers, neurons, this->outputSize, 0.0f, 1.0f, verbose);
+    core = std::make_unique<CoreAI>(static_cast<int>(this->inputSize), layers, neurons, static_cast<int>(this->outputSize), minVal, maxVal, verbose);
     core->trainer = this; // Set the trainer pointer in CoreAI
 
     core->setInput(inputs);
     core->setTarget(targets);
 }
 
-void Training::train(double learningRate, int epochs, int batchSize) {
+void Training::train(double learningRate, int epochs) {
     if (!core) {
         std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
         return;
@@ -1173,13 +1168,7 @@ void Training::train(double learningRate, int epochs, int batchSize) {
     }
 
     if (verbose) {
-        std::cout << "\nStarting memory-intensive training for " << epochs << " epochs...\n";
-        if (memoryIntensiveBufferingEnabled) {
-            std::cout << "[MEMORY TRAINING] Memory-intensive buffering is enabled\n";
-        }
-        if (memoryMonitoringEnabled) {
-            std::cout << "[MEMORY TRAINING] Memory monitoring is enabled\n";
-        }
+        std::cout << "\nStarting training for " << epochs << " epochs...\n";
     }
     const int barWidth = 70;
 
@@ -1192,63 +1181,14 @@ void Training::train(double learningRate, int epochs, int batchSize) {
     int epochs_since_best = 0;
     int minimum_epochs = std::max(50, epochs / 2); // Must train for at least 50 epochs or 50% of total
 
-    // Memory-intensive training: Use all available data (original + augmented copies)
-    std::vector<std::vector<std::vector<float>>> allInputs = {inputs};
-    std::vector<std::vector<std::vector<float>>> allTargets = {targets};
-
-    // Add augmented copies if available
-    allInputs.insert(allInputs.end(), augmentedInputsCopies.begin(), augmentedInputsCopies.end());
-    allTargets.insert(allTargets.end(), augmentedTargetsCopies.begin(), augmentedTargetsCopies.end());
-
-    if (verbose && allInputs.size() > 1) {
-        std::cout << "[MEMORY TRAINING] Using " << allInputs.size() << " datasets (1 original + "
-                  << augmentedInputsCopies.size() << " augmented copies)\n";
-    }
-
     for (int i = 0; i < epochs; ++i) {
         printProgressBar("Training Progress", i + 1, epochs, barWidth);
+        core->forward(inputs);
+        core->train(inputs, targets, learningRate, numSamples);
 
-        // Memory-intensive training: Train on all datasets
-        for (size_t datasetIdx = 0; datasetIdx < allInputs.size(); ++datasetIdx) {
-            const auto& currentInputs = allInputs[datasetIdx];
-            const auto& currentTargets = allTargets[datasetIdx];
-
-            if (memoryIntensiveBufferingEnabled) {
-                // Use buffering system: Create and buffer batches
-                size_t numBatches = (currentInputs.size() + batchSize - 1) / batchSize; // Ceiling division
-
-                for (size_t batchIdx = 0; batchIdx < numBatches; ++batchIdx) {
-                    size_t startIdx = batchIdx * batchSize;
-                    size_t endIdx = std::min(startIdx + batchSize, currentInputs.size());
-
-                    std::vector<std::vector<float>> batchInputs(currentInputs.begin() + startIdx, currentInputs.begin() + endIdx);
-                    std::vector<std::vector<float>> batchTargets(currentTargets.begin() + startIdx, currentTargets.begin() + endIdx);
-
-                    // Add batch to buffer (memory-intensive)
-                    addBatchToBuffer(batchInputs, batchTargets);
-
-                    // Process batch immediately for training
-                    core->forward(batchInputs);
-                    int batchSampleCount = static_cast<int>(batchInputs.size());
-                    core->train(batchInputs, batchTargets, learningRate, batchSampleCount, batchSize);
-                }
-            } else {
-                // Standard training without buffering
-                core->forward(currentInputs);
-                int datasetSampleCount = static_cast<int>(currentInputs.size());
-                core->train(currentInputs, currentTargets, learningRate, datasetSampleCount, batchSize);
-            }
-        }
-
-        // Calculate current loss for convergence monitoring (use original data for consistency)
+        // Calculate current loss for convergence monitoring
         float current_loss = calculateMSE();
-
-        // Store historical data point (memory-intensive)
-        if (memoryMonitoringEnabled) {
-            std::string metadata = "Epoch " + std::to_string(i + 1) + " training";
-            storeHistoricalDataPoint(inputs, targets, current_loss, i + 1, metadata);
-        }
-
+        
         // DEBUG: Check for exactly 0.0 loss (likely numerical issue)
         if (current_loss == 0.0f && verbose) {
             std::cout << "\n[WARNING] Loss is exactly 0.0 at epoch " << (i + 1) << std::endl;
@@ -1257,7 +1197,7 @@ void Training::train(double learningRate, int epochs, int batchSize) {
             std::cout << "    - Predictions collapsed to constant value" << std::endl;
             std::cout << "    - Check Core.cpp transform functions for NaN/Inf" << std::endl;
         }
-
+        
         // Track best loss
         if (current_loss < best_loss) {
             best_loss = current_loss;
@@ -1265,22 +1205,7 @@ void Training::train(double learningRate, int epochs, int batchSize) {
         } else {
             epochs_since_best++;
         }
-
-        // Memory monitoring: Log memory usage periodically
-        if (memoryMonitoringEnabled && (i + 1) % 50 == 0) {
-            logMemoryUsage();
-        }
-
-        // Checkpointing: Save checkpoint at regular intervals
-        if (checkpointingEnabled && (i + 1) % checkpointConfig.checkpointFrequencyEpochs == 0) {
-            saveCheckpoint(i + 1, current_loss);
-        }
-
-        // Checkpointing: Save best model if enabled
-        if (checkpointingEnabled) {
-            saveBestModel(current_loss);
-        }
-
+        
         // Verbose logging every 10 epochs
         if (verbose && i % 10 == 0) {
             std::cout << "\nEpoch " << (i + 1) << "/" << epochs
@@ -1311,22 +1236,12 @@ void Training::train(double learningRate, int epochs, int batchSize) {
         }
         previous_loss = current_loss;
     }
-
-    // Final memory usage report
-    if (memoryMonitoringEnabled) {
-        std::cout << "\n[MULTI DATASET TRAINING] Final memory usage report:\n";
-        logMemoryUsage();
-    }
-
     // Only print 100% if we actually finished all epochs
     // if (epochs > 0) {
     //    printProgressBar("Training Progress", epochs, epochs, barWidth);
     // }
     if (verbose) {
-        std::cout << "\nMemory-Intensive Training Complete!\n";
-        if (allInputs.size() > 1) {
-            std::cout << "Trained on " << allInputs.size() << " datasets total\n";
-        }
+        std::cout << "\nTraining Complete!\n";
     }
 }
 
@@ -1375,19 +1290,6 @@ bool Training::startTraining(double learningRate, int epochs) {
             int epochs_since_best = 0;
             int minimum_epochs = std::max(50, epochs / 2); // Must train for at least 50 epochs or 50% of total
 
-            // Memory-intensive training: Use all available data (original + augmented copies)
-            std::vector<std::vector<std::vector<float>>> allInputs = {inputs};
-            std::vector<std::vector<std::vector<float>>> allTargets = {targets};
-
-            // Add augmented copies if available
-            allInputs.insert(allInputs.end(), augmentedInputsCopies.begin(), augmentedInputsCopies.end());
-            allTargets.insert(allTargets.end(), augmentedTargetsCopies.begin(), augmentedTargetsCopies.end());
-
-            if (verbose && allInputs.size() > 1) {
-                std::cout << "[MEMORY TRAINING] Async training using " << allInputs.size() << " datasets (1 original + "
-                          << augmentedInputsCopies.size() << " augmented copies)\n";
-            }
-
             for (int i = 0; i < epochs; ++i) {
                 if (trainingStopRequested.load()) {
                     trainingStatus = "stopped";
@@ -1397,48 +1299,12 @@ bool Training::startTraining(double learningRate, int epochs) {
                 currentEpoch = i + 1;
                 // Update progress bar with current epoch
                 printProgressBar("Training Progress", i + 1, epochs, barWidth);
+                core->forward(inputs);
+                core->train(inputs, targets, learningRate, numSamples);
 
-                // Memory-intensive training: Train on all datasets
-                for (size_t datasetIdx = 0; datasetIdx < allInputs.size(); ++datasetIdx) {
-                    const auto& currentInputs = allInputs[datasetIdx];
-                    const auto& currentTargets = allTargets[datasetIdx];
-
-                    if (memoryIntensiveBufferingEnabled) {
-                        // Use buffering system: Create and buffer batches
-                        size_t numBatches = (currentInputs.size() + batchSize - 1) / batchSize; // Ceiling division
-
-                        for (size_t batchIdx = 0; batchIdx < numBatches; ++batchIdx) {
-                            size_t startIdx = batchIdx * batchSize;
-                            size_t endIdx = std::min(startIdx + batchSize, currentInputs.size());
-
-                            std::vector<std::vector<float>> batchInputs(currentInputs.begin() + startIdx, currentInputs.begin() + endIdx);
-                            std::vector<std::vector<float>> batchTargets(currentTargets.begin() + startIdx, currentTargets.begin() + endIdx);
-
-                            // Add batch to buffer (memory-intensive)
-                            addBatchToBuffer(batchInputs, batchTargets);
-
-                            // Process batch immediately for training
-                            core->forward(batchInputs);
-                            int batchSampleCount = static_cast<int>(batchInputs.size());
-                            core->train(batchInputs, batchTargets, learningRate, batchSampleCount, batchSize);
-                        }
-                    } else {
-                        // Standard training without buffering
-                        core->forward(currentInputs);
-                        int datasetSampleCount = static_cast<int>(currentInputs.size());
-                        core->train(currentInputs, currentTargets, learningRate, datasetSampleCount, batchSize);
-                    }
-                }
-
-                // Calculate current loss (use original data for consistency)
+                // Calculate current loss
                 currentLoss = calculateMSE();
-
-                // Store historical data point (memory-intensive)
-                if (memoryMonitoringEnabled) {
-                    std::string metadata = "Async epoch " + std::to_string(i + 1) + " training";
-                    storeHistoricalDataPoint(inputs, targets, currentLoss, i + 1, metadata);
-                }
-
+                
                 // DEBUG: Check for exactly 0.0 loss (likely numerical issue)
                 if (currentLoss == 0.0f && verbose) {
                     std::cout << "\n[WARNING] Loss is exactly 0.0 at epoch " << (i + 1) << std::endl;
@@ -1447,28 +1313,13 @@ bool Training::startTraining(double learningRate, int epochs) {
                     std::cout << "    - Predictions collapsed to constant value" << std::endl;
                     std::cout << "    - Check Core.cpp transform functions for NaN/Inf" << std::endl;
                 }
-
+                
                 // Track best loss
                 if (currentLoss < best_loss) {
                     best_loss = currentLoss;
                     epochs_since_best = 0;
                 } else {
                     epochs_since_best++;
-                }
-
-                // Memory monitoring: Log memory usage periodically
-                if (memoryMonitoringEnabled && (i + 1) % 50 == 0) {
-                    logMemoryUsage();
-                }
-
-                // Checkpointing: Save checkpoint at regular intervals
-                if (checkpointingEnabled && (i + 1) % checkpointConfig.checkpointFrequencyEpochs == 0) {
-                    saveCheckpoint(i + 1, currentLoss);
-                }
-
-                // Checkpointing: Save best model if enabled
-                if (checkpointingEnabled) {
-                    saveBestModel(currentLoss);
                 }
 
                 // Broadcast progress via WebSocket
@@ -1483,7 +1334,7 @@ bool Training::startTraining(double learningRate, int epochs) {
                     };
                     webSocketServer->broadcastToGroup("training", progressUpdate.dump());
                 }
-
+                
                 // Verbose logging every 10 epochs
                 if (verbose && i % 10 == 0) {
                     std::cout << "\nEpoch " << (i + 1) << "/" << epochs
@@ -1526,12 +1377,6 @@ bool Training::startTraining(double learningRate, int epochs) {
                     // Early stopping - show progress at the epoch where it stopped
                     printProgressBar("Training Progress", currentEpoch, totalEpochs, barWidth);
                 }
-            }
-
-            // Final memory usage report for async training
-            if (memoryMonitoringEnabled) {
-                std::cout << "\n[ASYNC MEMORY TRAINING] Final memory usage report:\n";
-                logMemoryUsage();
             }
 
             trainingActive = false;
@@ -1625,52 +1470,23 @@ float Training::calculateRMSE() {
 
     auto predictions = core->getResults();
 
-    // Denormalize targets using the original target global min/max stored in Training class
+    // Denormalize targets using the original data's global min/max stored in Training class
     std::vector<std::vector<float>> denormalizedTargets = targets; // Create a copy to denormalize
     float target_range_min_val = this->min; // The 'min' value from `--min` argument
     float target_range_max_val = this->max; // The 'max' value from `--max` argument
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_target_range_diff = original_target_global_max - original_target_global_min;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
 
-    // DIAGNOSTIC: Log normalization parameters for RMSE calculation
-    if (verbose) {
-        std::cout << "[DIAGNOSTIC RMSE] Denormalization parameters:" << std::endl;
-        std::cout << "  target_range_min_val (this->min): " << target_range_min_val << std::endl;
-        std::cout << "  target_range_max_val (this->max): " << target_range_max_val << std::endl;
-        std::cout << "  target_range_diff: " << target_range_diff << std::endl;
-        std::cout << "  original_target_global_min: " << original_target_global_min << std::endl;
-        std::cout << "  original_target_global_max: " << original_target_global_max << std::endl;
-        std::cout << "  original_target_range_diff: " << original_target_range_diff << std::endl;
-        std::cout << "[DIAGNOSTIC RMSE] First few normalized targets before denormalization: ";
-        if (!targets.empty() && !targets[0].empty()) {
-            for (size_t i = 0; i < std::min(size_t(3), targets[0].size()); ++i) {
-                std::cout << targets[0][i] << " ";
-            }
-        }
-        std::cout << std::endl;
-    }
-
-    // Denormalize target values assuming they are normalized to [0,1] range
+    // Denormalize target values from the [min, max] range back to the original global min/max
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = val * original_target_range_diff + original_target_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
             }
             else {
-                val = original_target_global_min; // If range is zero, map to original min
+                val = original_data_global_min; // If ranges are zero, map to original min
             }
         }
-    }
-
-    // DIAGNOSTIC: Log first few denormalized targets
-    if (verbose) {
-        std::cout << "[DIAGNOSTIC RMSE] First few denormalized targets: ";
-        if (!denormalizedTargets.empty() && !denormalizedTargets[0].empty()) {
-            for (size_t i = 0; i < std::min(size_t(3), denormalizedTargets[0].size()); ++i) {
-                std::cout << denormalizedTargets[0][i] << " ";
-            }
-        }
-        std::cout << std::endl;
     }
 
     float mse = 0.0f;
@@ -1707,82 +1523,22 @@ float Training::calculateMSE() {
     core->denormalizeOutput();
     auto predictions = core->getResults();
 
-    // DIAGNOSTIC: Log normalization parameters
-    if (verbose) {
-        std::cout << "[DIAGNOSTIC MSE] Normalization parameters:" << std::endl;
-        std::cout << "  this->min: " << this->min << ", this->max: " << this->max << std::endl;
-        std::cout << "  original_data_global_min: " << original_data_global_min << ", original_data_global_max: " << original_data_global_max << std::endl;
-        std::cout << "  original_input_global_min: " << original_input_global_min << ", original_input_global_max: " << original_input_global_max << std::endl;
-        std::cout << "  original_target_global_min: " << original_target_global_min << ", original_target_global_max: " << original_target_global_max << std::endl;
-        std::cout << "  Using original_target_global_min/max for denormalization (fixed!)" << std::endl;
-    }
-
-    // Denormalize targets using the original target's global min/max stored in Training class
+    // Denormalize targets using the original data's global min/max stored in Training class
     std::vector<std::vector<float>> denormalizedTargets = targets;
     float target_range_min_val = this->min;
     float target_range_max_val = this->max;
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_target_range_diff = original_target_global_max - original_target_global_min;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
 
-    // DIAGNOSTIC: Log first few normalized targets before denormalization
-    if (verbose && !targets.empty() && !targets[0].empty()) {
-        std::cout << "[DIAGNOSTIC MSE] First normalized target values: ";
-        for (size_t i = 0; i < std::min(size_t(3), targets[0].size()); ++i) {
-            std::cout << targets[0][i] << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    // Denormalize target values from the [min, max] range back to the original target global min/max
+    // Denormalize target values from the [min, max] range back to the original global min/max
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_target_range_diff + original_target_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
             }
             else {
-                val = original_target_global_min;
+                val = original_data_global_min;
             }
-        }
-    }
-
-    // DIAGNOSTIC: Log first few denormalized targets
-    if (verbose && !denormalizedTargets.empty() && !denormalizedTargets[0].empty()) {
-        std::cout << "[DIAGNOSTIC MSE] First denormalized target values: ";
-        for (size_t i = 0; i < std::min(size_t(3), denormalizedTargets[0].size()); ++i) {
-            std::cout << denormalizedTargets[0][i] << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    // DIAGNOSTIC: Log first few predictions
-    if (verbose && !predictions.empty() && !predictions[0].empty()) {
-        std::cout << "[DIAGNOSTIC MSE] First prediction values: ";
-        for (size_t i = 0; i < std::min(size_t(3), predictions[0].size()); ++i) {
-            std::cout << predictions[0][i] << " ";
-        }
-        std::cout << std::endl;
-
-        // Check if all predictions are the same (constant)
-        bool allSame = true;
-        float firstVal = predictions[0][0];
-        for (size_t i = 0; i < predictions.size(); ++i) {
-            for (size_t j = 0; j < predictions[i].size(); ++j) {
-                if (std::abs(predictions[i][j] - firstVal) > 1e-6f) {
-                    allSame = false;
-                    break;
-                }
-            }
-            if (!allSame) break;
-        }
-        if (allSame) {
-            std::cout << "[DIAGNOSTIC MSE] WARNING: All predictions are constant! Value: " << firstVal << std::endl;
-            std::cout << "[DIAGNOSTIC MSE] This indicates the model is not learning. Possible causes:" << std::endl;
-            std::cout << "[DIAGNOSTIC MSE]   - Weights are not being updated during training" << std::endl;
-            std::cout << "[DIAGNOSTIC MSE]   - Gradients are zero or not flowing" << std::endl;
-            std::cout << "[DIAGNOSTIC MSE]   - Denormalization is incorrect" << std::endl;
-            std::cout << "[DIAGNOSTIC MSE]   - Complex transformations are still enabled" << std::endl;
-        } else {
-            std::cout << "[DIAGNOSTIC MSE] Predictions vary - good!" << std::endl;
         }
     }
 
@@ -1820,21 +1576,21 @@ float Training::calculateAccuracy(float threshold) {
     core->denormalizeOutput();
     auto predictions = core->getResults();
 
-    // Denormalize targets using the original target global min/max stored in Training class
+    // Denormalize targets using the original data's global min/max stored in Training class
     std::vector<std::vector<float>> denormalizedTargets = targets;
     float target_range_min_val = this->min;
     float target_range_max_val = this->max;
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_target_range_diff = original_target_global_max - original_target_global_min;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
 
-    // Denormalize target values assuming they are normalized to [0,1] range
+    // Denormalize target values from the [min, max] range back to the original global min/max
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = val * original_target_range_diff + original_target_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
             }
             else {
-                val = original_target_global_min;
+                val = original_data_global_min;
             }
         }
     }
@@ -2193,16 +1949,16 @@ std::vector<std::vector<float>> Training::denormalizeMatrix(const std::vector<st
     float target_range_min = this->min;
     float target_range_max = this->max;
     float target_range_diff = target_range_max - target_range_min;
-    float original_target_range_diff = original_target_global_max - original_target_global_min;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
 
     for (const auto& row : normalized_data) {
         std::vector<float> denormalized_row;
         for (float val : row) {
-            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
-                denormalized_row.push_back(val * original_target_range_diff + original_target_global_min);
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                denormalized_row.push_back(((val - target_range_min) / target_range_diff) * original_data_range_diff + original_data_global_min);
             }
             else {
-                denormalized_row.push_back(original_target_global_min);
+                denormalized_row.push_back(original_data_global_min);
             }
         }
         denormalized_copy.push_back(denormalized_row);
@@ -2230,30 +1986,28 @@ bool Training::saveResultsToCSV(const std::string& filename, const std::string& 
     float target_range_min_val = this->min;
     float target_range_max_val = this->max;
     float target_range_diff = target_range_max_val - target_range_min_val;
-    float original_target_range_diff = original_target_global_max - original_target_global_min;
+    float original_data_range_diff = original_data_global_max - original_data_global_min;
 
-    // Denormalize inputs using input-specific min/max
+    // Denormalize inputs if they were normalized and you want them in original scale in output
     std::vector<std::vector<float>> denormalizedInputs = inputs;
-    float original_input_range_diff = original_input_global_max - original_input_global_min;
     for (auto& row : denormalizedInputs) {
         for (float& val : row) {
-            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_input_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - target_range_min_val) / target_range_diff) * original_input_range_diff + original_input_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
             }
             else {
-                val = original_input_global_min;
+                val = original_data_global_min;
             }
         }
     }
 
-    // Denormalize targets assuming they are normalized to [0,1] range
     for (auto& row : denormalizedTargets) {
         for (float& val : row) {
-            if (std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = val * original_target_range_diff + original_target_global_min;
+            if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
             }
             else {
-                val = original_target_global_min;
+                val = original_data_global_min;
             }
         }
     }
@@ -4815,6 +4569,71 @@ bool Training::saveModelStateJSON(int datasetId, const nlohmann::json& modelStat
 }
 #endif
 
+// Load data from memory vectors
+bool Training::loadCSVFromData(const std::vector<std::vector<float>>& data, const std::vector<std::vector<float>>& targets, const std::string& datasetName) {
+    if (data.empty()) {
+        std::cerr << "Error: No data to load" << std::endl;
+        return false;
+    }
+
+    // Set input and output sizes
+    inputSize = static_cast<int>(data[0].size());
+    outputSize = static_cast<int>(targets[0].size());
+    numSamples = static_cast<int>(data.size());
+
+    // Copy data
+    inputs = data;
+    this->targets = targets;
+
+    // Save dataset name
+    currentDatasetName = datasetName;
+
+    return true;
+}
+
+// Problem complexity detection
+Training::ComplexityAnalysis Training::detectProblemComplexity() {
+    ComplexityAnalysis analysis;
+    
+    // Default values
+    analysis.complexity = ProblemComplexity::MODERATE;
+    analysis.complexity_score = 0.5f;
+    analysis.requires_3d_transforms = false;
+    analysis.recommended_layers = 3;
+    analysis.recommended_neurons = 10;
+    analysis.recommended_learning_rate = 0.01;
+    analysis.recommended_epochs = 100;
+
+    if (numSamples > 0 && inputSize > 0) {
+        // Simple complexity detection based on dataset characteristics
+        if (inputSize <= 2 && numSamples <= 100) {
+            analysis.complexity = ProblemComplexity::SIMPLE;
+            analysis.complexity_score = 0.2f;
+            analysis.recommended_layers = 2;
+            analysis.recommended_neurons = 5;
+            analysis.recommended_learning_rate = 0.1;
+            analysis.recommended_epochs = 50;
+        } else if (inputSize >= 9 && numSamples >= 500) {
+            analysis.complexity = ProblemComplexity::COMPLEX;
+            analysis.complexity_score = 0.8f;
+            analysis.requires_3d_transforms = true;
+            analysis.recommended_layers = 4;
+            analysis.recommended_neurons = 20;
+            analysis.recommended_learning_rate = 0.001;
+            analysis.recommended_epochs = 200;
+        }
+    }
+
+    return analysis;
+}
+
+// Auto-tuning implementation
+void Training::applyAutoTuning(const ComplexityAnalysis& analysis) {
+    layers = analysis.recommended_layers;
+    neurons = analysis.recommended_neurons;
+    learningRate = analysis.recommended_learning_rate;
+}
+
 #ifdef USE_MYSQL
 bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& datasetName) {
     if (isOfflineMode || !dbManager) {
@@ -4858,15 +4677,15 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
             float target_range_min_val = this->min;
             float target_range_max_val = this->max;
             float target_range_diff = target_range_max_val - target_range_min_val;
-            float original_target_range_diff = original_target_global_max - original_target_global_min;
+            float original_data_range_diff = original_data_global_max - original_data_global_min;
 
             for (auto& row : denormalizedTargets) {
                 for (float& val : row) {
-                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_target_range_diff) > std::numeric_limits<float>::epsilon()) {
-                        val = ((val - target_range_min_val) / target_range_diff) * original_target_range_diff + original_target_global_min;
+                    if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                        val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
                     }
                     else {
-                        val = original_target_global_min;
+                        val = original_data_global_min;
                     }
                 }
             }
@@ -4874,13 +4693,12 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
             for (size_t i = 0; i < std::min(predictions.size(), denormalizedTargets.size()); ++i) {
                 if (i < inputs.size()) {
                     std::vector<float> denormalizedInputs = inputs[i];
-                    float original_input_range_diff = original_input_global_max - original_input_global_min;
                     for (float& val : denormalizedInputs) {
-                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_input_range_diff) > std::numeric_limits<float>::epsilon()) {
-                            val = ((val - target_range_min_val) / target_range_diff) * original_input_range_diff + original_input_global_min;
+                        if (std::abs(target_range_diff) > std::numeric_limits<float>::epsilon() && std::abs(original_data_range_diff) > std::numeric_limits<float>::epsilon()) {
+                            val = ((val - target_range_min_val) / target_range_diff) * original_data_range_diff + original_data_global_min;
                         }
                         else {
-                            val = original_input_global_min;
+                            val = original_data_global_min;
                         }
                     }
 
@@ -4900,2339 +4718,5 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
     }
 }
 #endif
-
-// Data augmentation methods implementation
-
-void Training::initializeDataAugmentation(const DataAugmentation::AugmentationConfig& config) {
-    if (dataAugmentation) {
-        dataAugmentation->setConfig(config);
-    }
-}
-
-void Training::enableRotation(bool enable) {
-    if (dataAugmentation) {
-        dataAugmentation->enableRotation(enable);
-    }
-}
-
-void Training::enableScaling(bool enable) {
-    if (dataAugmentation) {
-        dataAugmentation->enableScaling(enable);
-    }
-}
-
-void Training::enableNoise(bool enable) {
-    if (dataAugmentation) {
-        dataAugmentation->enableNoise(enable);
-    }
-}
-
-void Training::enableSymmetry(bool enable) {
-    if (dataAugmentation) {
-        dataAugmentation->enableSymmetry(enable);
-    }
-}
-
-void Training::setRotationMaxAngle(float angle) {
-    if (dataAugmentation) {
-        dataAugmentation->setRotationMaxAngle(angle);
-    }
-}
-
-void Training::setScalingRange(float minScale, float maxScale) {
-    if (dataAugmentation) {
-        dataAugmentation->setScalingRange(minScale, maxScale);
-    }
-}
-
-void Training::setNoiseStdDev(float stdDev) {
-    if (dataAugmentation) {
-        dataAugmentation->setNoiseStdDev(stdDev);
-    }
-}
-
-void Training::setSymmetryProbability(float probability) {
-    if (dataAugmentation) {
-        dataAugmentation->setSymmetryProbability(probability);
-    }
-}
-
-const DataAugmentation::AugmentationConfig& Training::getAugmentationConfig() const {
-    static DataAugmentation::AugmentationConfig defaultConfig;
-    if (dataAugmentation) {
-        return dataAugmentation->getConfig();
-    }
-    return defaultConfig;
-}
-
-void Training::applyDataAugmentation() {
-    if (!dataAugmentation || inputs.empty()) {
-        return;
-    }
-
-    if (verbose) {
-        std::cout << "Applying data augmentation to " << inputs.size() << " samples..." << std::endl;
-    }
-
-    // Apply augmentation to each sample
-    for (size_t i = 0; i < inputs.size(); ++i) {
-        // Assume 3D coordinates are triplets (x, y, z)
-        // Process each triplet in the input vector
-        for (size_t j = 0; j < inputs[i].size(); j += 3) {
-            if (j + 2 < inputs[i].size()) {
-                std::vector<float> point = {inputs[i][j], inputs[i][j + 1], inputs[i][j + 2]};
-                std::vector<float> augmentedPoint = dataAugmentation->augmentCoordinates(point);
-    
-                    inputs[i][j] = augmentedPoint[0];
-                    inputs[i][j + 1] = augmentedPoint[1];
-                    inputs[i][j + 2] = augmentedPoint[2];
-                }
-            }
-        }
-    
-        if (verbose) {
-            std::cout << "Data augmentation completed." << std::endl;
-        }
-    }
-        std::cout << "[ADAPTIVE OPTIMIZATION] Initialized with default adaptive settings" << std::endl;
-    }
-}
-
-// Convergence criteria and early stopping implementation
-void Training::setConvergenceCriteria(float lossThreshold, int patienceEpochs, float minImprovement) {
-    convergenceLossThreshold = lossThreshold;
-    convergencePatienceEpochs = patienceEpochs;
-    convergenceMinImprovement = minImprovement;
-    earlyStoppingEnabled = true;
-
-    if (verbose) {
-        std::cout << "[CONVERGENCE] Set criteria: loss_threshold=" << lossThreshold
-                  << ", patience=" << patienceEpochs << ", min_improvement=" << minImprovement << std::endl;
-    }
-}
-
-void Training::enableEarlyStopping(bool enable) {
-    earlyStoppingEnabled = enable;
-
-    if (verbose) {
-        std::cout << "[EARLY STOPPING] " << (enable ? "Enabled" : "Disabled") << std::endl;
-    }
-}
-
-bool Training::checkConvergence(float currentLoss, int currentEpoch) {
-    if (!earlyStoppingEnabled) {
-        return false;
-    }
-
-    // Update best loss tracking
-    if (currentLoss < bestConvergenceLoss) {
-        bestConvergenceLoss = currentLoss;
-        epochsSinceBestConvergenceLoss = 0;
-    } else {
-        epochsSinceBestConvergenceLoss++;
-    }
-
-    // Check convergence criteria
-    bool converged = false;
-
-    // Criterion 1: Loss below threshold
-    if (currentLoss < convergenceLossThreshold) {
-        converged = true;
-        if (verbose) {
-            std::cout << "[CONVERGENCE] Loss " << currentLoss << " below threshold " << convergenceLossThreshold << std::endl;
-        }
-    }
-
-    // Criterion 2: No improvement for patience epochs
-    if (epochsSinceBestConvergenceLoss >= convergencePatienceEpochs) {
-        converged = true;
-        if (verbose) {
-            std::cout << "[CONVERGENCE] No improvement for " << convergencePatienceEpochs << " epochs" << std::endl;
-        }
-    }
-
-    // Criterion 3: Minimum improvement not met
-    if (currentEpoch > 10) { // Only check after initial epochs
-        float recentImprovement = calculateRecentImprovement();
-        if (recentImprovement < convergenceMinImprovement) {
-            converged = true;
-            if (verbose) {
-                std::cout << "[CONVERGENCE] Recent improvement " << recentImprovement
-                          << " below minimum " << convergenceMinImprovement << std::endl;
-            }
-        }
-    }
-
-    return converged;
-}
-
-float Training::calculateRecentImprovement() {
-    if (lossHistory.size() < 5) {
-        return 0.0f; // Not enough history
-    }
-
-    // Calculate improvement over last 5 epochs
-    float recentLoss = lossHistory.back();
-    float olderLoss = lossHistory[lossHistory.size() - 5];
-    return olderLoss - recentLoss; // Positive means improvement
-}
-
-void Training::resetConvergenceTracking() {
-    bestConvergenceLoss = std::numeric_limits<float>::max();
-    epochsSinceBestConvergenceLoss = 0;
-    lossHistory.clear();
-}
-
-// Gradient clipping and numerical stability implementation
-void Training::enableGradientClipping(float maxGradientNorm) {
-    gradientClippingEnabled = true;
-    maxGradientNormThreshold = maxGradientNorm;
-
-    if (verbose) {
-        std::cout << "[GRADIENT CLIPPING] Enabled with max norm: " << maxGradientNorm << std::endl;
-    }
-}
-
-void Training::applyGradientClipping() {
-    if (!gradientClippingEnabled || !core) {
-        return;
-    }
-
-    // Get gradients from core and clip them
-    // This would need to be implemented in CoreAI class
-    // For now, we'll implement basic gradient clipping logic
-
-    if (verbose) {
-        std::cout << "[GRADIENT CLIPPING] Applied gradient clipping" << std::endl;
-    }
-}
-
-void Training::enableNumericalStabilityChecks(bool enable) {
-    numericalStabilityEnabled = enable;
-
-    if (verbose) {
-        std::cout << "[NUMERICAL STABILITY] " << (enable ? "Enabled" : "Disabled") << std::endl;
-    }
-}
-
-bool Training::checkNumericalStability() {
-    if (!numericalStabilityEnabled || !core) {
-        return true; // Assume stable if not checking
-    }
-
-    // Check for NaN or Inf in weights and outputs
-    // This would need access to core's internal state
-    // For now, return true
-
-    return true;
-}
-
-// Learning rate decay strategies implementation
-void Training::setLearningRateDecay(LearningRateDecayType decayType, float decayRate, int decaySteps) {
-    lrDecayType = decayType;
-    lrDecayRate = decayRate;
-    lrDecaySteps = decaySteps;
-
-    if (verbose) {
-        std::cout << "[LR DECAY] Set decay type: " << static_cast<int>(decayType)
-                  << ", rate: " << decayRate << ", steps: " << decaySteps << std::endl;
-    }
-}
-
-float Training::calculateDecayedLearningRate(int currentEpoch, float baseLearningRate) {
-    float decayedLr = baseLearningRate;
-
-    switch (lrDecayType) {
-        case LearningRateDecayType::EXPONENTIAL:
-            decayedLr = baseLearningRate * std::pow(lrDecayRate, currentEpoch / lrDecaySteps);
-            break;
-        case LearningRateDecayType::STEP:
-            decayedLr = baseLearningRate * std::pow(lrDecayRate, currentEpoch / lrDecaySteps);
-            break;
-        case LearningRateDecayType::COSINE:
-            decayedLr = baseLearningRate * 0.5f * (1.0f + std::cos(M_PI * currentEpoch / lrDecaySteps));
-            break;
-        case LearningRateDecayType::LINEAR:
-            decayedLr = baseLearningRate * (1.0f - static_cast<float>(currentEpoch) / lrDecaySteps);
-            break;
-        case LearningRateDecayType::NONE:
-        default:
-            decayedLr = baseLearningRate;
-            break;
-    }
-
-    return std::max(decayedLr, 1e-7f); // Minimum learning rate
-}
-
-// Optimizer configurations implementation
-void Training::configureOptimizer(const std::string& optimizerType, const std::map<std::string, float>& params) {
-    currentOptimizerType = optimizerType;
-    optimizerParams = params;
-
-    if (verbose) {
-        std::cout << "[OPTIMIZER] Configured " << optimizerType << " with " << params.size() << " parameters" << std::endl;
-    }
-}
-
-void Training::updateOptimizerSettings() {
-    if (!core) {
-        return;
-    }
-
-    // Apply optimizer settings to core
-    // This would need to be implemented in CoreAI class
-    // For now, just update learning rate
-
-    if (optimizerParams.count("learning_rate")) {
-        learningRate = optimizerParams["learning_rate"];
-    }
-
-    if (verbose) {
-        std::cout << "[OPTIMIZER] Updated settings for " << currentOptimizerType << std::endl;
-    }
-}
-
-// Epoch management and training termination implementation
-void Training::setEpochManagement(int minEpochs, int maxEpochs, int optimalEpochs) {
-    minTrainingEpochs = minEpochs;
-    maxTrainingEpochs = maxEpochs;
-    this->optimalEpochs = optimalEpochs;
-
-    if (verbose) {
-        std::cout << "[EPOCH MANAGEMENT] Set min=" << minEpochs << ", max=" << maxEpochs
-                  << ", optimal=" << optimalEpochs << std::endl;
-    }
-}
-
-bool Training::shouldContinueTraining(int currentEpoch, float currentLoss) {
-    // Check minimum epochs
-    if (currentEpoch < minTrainingEpochs) {
-        return true;
-    }
-
-    // Check maximum epochs
-    if (currentEpoch >= maxTrainingEpochs) {
-        if (verbose) {
-            std::cout << "[EPOCH MANAGEMENT] Reached maximum epochs: " << maxTrainingEpochs << std::endl;
-        }
-        return false;
-    }
-
-    // Check convergence
-    if (checkConvergence(currentLoss, currentEpoch)) {
-        if (verbose) {
-            std::cout << "[EPOCH MANAGEMENT] Convergence criteria met at epoch " << currentEpoch << std::endl;
-        }
-        return false;
-    }
-
-    return true;
-}
-
-void Training::optimizeTrainingTermination() {
-    // Adjust termination criteria based on training progress
-    if (lossHistory.size() > 10) {
-        float recentVariance = calculateLossVariance(10);
-        if (recentVariance < 1e-6f) { // Very low variance indicates convergence
-            convergenceMinImprovement *= 0.1f; // Make convergence criteria stricter
-        }
-    }
-}
-
-float Training::calculateLossVariance(int windowSize) {
-    if (lossHistory.size() < windowSize) {
-        return 0.0f;
-    }
-
-    float mean = 0.0f;
-    for (size_t i = lossHistory.size() - windowSize; i < lossHistory.size(); ++i) {
-        mean += lossHistory[i];
-    }
-    mean /= windowSize;
-
-    float variance = 0.0f;
-    for (size_t i = lossHistory.size() - windowSize; i < lossHistory.size(); ++i) {
-        float diff = lossHistory[i] - mean;
-        variance += diff * diff;
-    }
-    variance /= windowSize;
-
-    return variance;
-}
-
-// Hyperparameter auto-tuning integration implementation
-void Training::initializeAutoTuning(const std::vector<std::string>& tunableParams) {
-    tunableParameters = tunableParams;
-    autoTuningEnabled = true;
-
-    if (verbose) {
-        std::cout << "[AUTO-TUNING] Initialized with " << tunableParams.size() << " tunable parameters" << std::endl;
-    }
-}
-
-void Training::performHyperparameterSearch(int numTrials, const std::string& searchStrategy) {
-    if (!autoTuningEnabled) {
-        return;
-    }
-
-    if (verbose) {
-        std::cout << "[AUTO-TUNING] Starting hyperparameter search with " << numTrials
-                  << " trials using " << searchStrategy << " strategy" << std::endl;
-    }
-
-    // This would implement grid search, random search, or Bayesian optimization
-    // For now, just log the intent
-
-    if (verbose) {
-        std::cout << "[AUTO-TUNING] Hyperparameter search completed" << std::endl;
-    }
-}
-
-void Training::applyBestHyperparameters() {
-    if (bestHyperparameters.empty()) {
-        return;
-    }
-
-    // Apply the best found hyperparameters
-    for (const auto& param : bestHyperparameters) {
-        if (param.first == "learning_rate") {
-            learningRate = param.second;
-        } else if (param.first == "batch_size") {
-            batchSize = static_cast<int>(param.second);
-        } else if (param.first == "layers") {
-            layers = static_cast<int>(param.second);
-        } else if (param.first == "neurons") {
-            neurons = static_cast<int>(param.second);
-        }
-    }
-
-    if (verbose) {
-        std::cout << "[AUTO-TUNING] Applied best hyperparameters" << std::endl;
-    }
-}
-
-void Training::updateLossHistory(float loss) {
-    lossHistory.push_back(loss);
-
-    // Keep only recent history to prevent memory issues
-    if (lossHistory.size() > 1000) {
-        lossHistory.erase(lossHistory.begin());
-    }
-}
-
-                inputs[i][j] = augmentedPoint[0];
-                inputs[i][j + 1] = augmentedPoint[1];
-                inputs[i][j + 2] = augmentedPoint[2];
-            }
-        }
-    }
-
-    if (verbose) {
-        std::cout << "Data augmentation completed." << std::endl;
-    }
-}
-// Problem complexity detection and auto-tuning methods
-Training::ComplexityAnalysis Training::detectProblemComplexity() {
-    ComplexityAnalysis analysis;
-    analysis.complexity_score = 0.0f;
-    analysis.requires_3d_transforms = false;
-    analysis.recommended_layers = 3;
-    analysis.recommended_neurons = 10;
-    analysis.recommended_learning_rate = 0.01;
-    analysis.recommended_epochs = 10;
-
-    if (inputs.empty() || targets.empty()) {
-        analysis.complexity = ProblemComplexity::MODERATE;
-        analysis.reasoning = "No data loaded - using default moderate complexity";
-        return analysis;
-    }
-
-    // Special case: Simple 1D regression with small dataset
-    if (inputSize == 1 && outputSize == 1 && numSamples < 100) {
-        analysis.complexity = ProblemComplexity::SIMPLE;
-        analysis.reasoning = "Simple 1D regression with small dataset";
-        analysis.requires_3d_transforms = false;
-        analysis.recommended_layers = 2;
-        analysis.recommended_neurons = 5;
-        analysis.recommended_learning_rate = 0.1;
-        analysis.recommended_epochs = 20;
-        return analysis;
-    }
-
-    // Factor 1: Input dimensionality
-    float dimensionality_factor = 0.0f;
-    if (inputSize <= 2) {
-        dimensionality_factor = 0.0f; // Very simple
-    } else if (inputSize <= 5) {
-        dimensionality_factor = 0.3f; // Moderate
-    } else if (inputSize <= 10) {
-        dimensionality_factor = 0.6f; // Complex
-    } else {
-        dimensionality_factor = 1.0f; // Very complex
-    }
-
-    // Factor 2: Data size
-    float data_size_factor = 0.0f;
-    if (numSamples < 100) {
-        data_size_factor = 0.0f; // Small dataset
-    } else if (numSamples < 1000) {
-        data_size_factor = 0.2f; // Medium dataset
-    } else if (numSamples < 10000) {
-        data_size_factor = 0.5f; // Large dataset
-    } else {
-        data_size_factor = 0.8f; // Very large dataset
-    }
-
-    // Factor 3: Target variance (normalized)
-    float target_variance = 0.0f;
-    if (!targets.empty() && !targets[0].empty()) {
-        float target_mean = 0.0f;
-        for (const auto& sample : targets) {
-            for (float val : sample) {
-                target_mean += val;
-            }
-        }
-        target_mean /= (targets.size() * targets[0].size());
-
-        float variance_sum = 0.0f;
-        for (const auto& sample : targets) {
-            for (float val : sample) {
-                float diff = val - target_mean;
-                variance_sum += diff * diff;
-            }
-        }
-        target_variance = variance_sum / (targets.size() * targets[0].size());
-    }
-    float variance_factor = std::min(1.0f, target_variance * 10.0f); // Scale variance to 0-1
-
-    // Factor 4: Feature correlation analysis (simplified)
-    float correlation_factor = 0.0f;
-    if (inputSize > 1 && numSamples > 10) {
-        // Calculate average correlation between features
-        float total_correlation = 0.0f;
-        int correlation_count = 0;
-
-        for (size_t i = 0; i < inputSize; ++i) {
-            for (size_t j = i + 1; j < inputSize; ++j) {
-                // Simple correlation calculation
-                float mean_i = 0.0f, mean_j = 0.0f;
-                for (const auto& sample : inputs) {
-                    mean_i += sample[i];
-                    mean_j += sample[j];
-                }
-                mean_i /= numSamples;
-                mean_j /= numSamples;
-
-                float covariance = 0.0f, var_i = 0.0f, var_j = 0.0f;
-                for (const auto& sample : inputs) {
-                    float diff_i = sample[i] - mean_i;
-                    float diff_j = sample[j] - mean_j;
-                    covariance += diff_i * diff_j;
-                    var_i += diff_i * diff_i;
-                    var_j += diff_j * diff_j;
-                }
-
-                if (var_i > 0 && var_j > 0) {
-                    float correlation = covariance / std::sqrt(var_i * var_j);
-                    total_correlation += std::abs(correlation);
-                    correlation_count++;
-                }
-            }
-        }
-
-        if (correlation_count > 0) {
-            float avg_correlation = total_correlation / correlation_count;
-            correlation_factor = avg_correlation; // High correlation suggests simpler relationships
-        }
-    }
-
-    // Factor 5: Check if data appears to be 3D spatial (multiples of 3)
-    bool appears_3d_spatial = (inputSize % 3 == 0) && (inputSize >= 3);
-    float spatial_factor = appears_3d_spatial ? 0.7f : 0.0f;
-
-    // Combine factors with weights
-    analysis.complexity_score = (
-        dimensionality_factor * 0.25f +
-        data_size_factor * 0.15f +
-        variance_factor * 0.20f +
-        (1.0f - correlation_factor) * 0.25f + // Inverse: low correlation = more complex
-        spatial_factor * 0.15f
-    );
-
-    // Determine complexity level
-    if (analysis.complexity_score < 0.5f) {
-        analysis.complexity = ProblemComplexity::SIMPLE;
-        analysis.reasoning = "Simple problem detected: low dimensionality, small dataset, or high feature correlation";
-        analysis.requires_3d_transforms = false;
-        analysis.recommended_layers = 2;
-        analysis.recommended_neurons = 5;
-        analysis.recommended_learning_rate = 0.1;
-        analysis.recommended_epochs = 20;
-    } else if (analysis.complexity_score < 0.7f) {
-        analysis.complexity = ProblemComplexity::MODERATE;
-        analysis.reasoning = "Moderate complexity: balanced characteristics";
-        analysis.requires_3d_transforms = appears_3d_spatial && inputSize > 6;
-        analysis.recommended_layers = 3;
-        analysis.recommended_neurons = 10;
-        analysis.recommended_learning_rate = 0.01;
-        analysis.recommended_epochs = 50;
-    } else {
-        analysis.complexity = ProblemComplexity::COMPLEX;
-        analysis.reasoning = "Complex problem detected: high dimensionality, large dataset, or spatial 3D data";
-        analysis.requires_3d_transforms = true;
-        analysis.recommended_layers = 4;
-        analysis.recommended_neurons = 20;
-        analysis.recommended_learning_rate = 0.001;
-        analysis.recommended_epochs = 100;
-    }
-
-    if (verbose) {
-        std::cout << "[COMPLEXITY ANALYSIS] Score: " << analysis.complexity_score
-                  << ", Level: " << (analysis.complexity == ProblemComplexity::SIMPLE ? "SIMPLE" :
-                                   analysis.complexity == ProblemComplexity::MODERATE ? "MODERATE" : "COMPLEX")
-                  << ", 3D Transforms: " << (analysis.requires_3d_transforms ? "YES" : "NO") << std::endl;
-        std::cout << "[COMPLEXITY ANALYSIS] Reasoning: " << analysis.reasoning << std::endl;
-        std::cout << "[COMPLEXITY ANALYSIS] Recommendations: layers=" << analysis.recommended_layers
-                  << ", neurons=" << analysis.recommended_neurons
-                  << ", lr=" << analysis.recommended_learning_rate
-                  << ", epochs=" << analysis.recommended_epochs << std::endl;
-    }
-
-    return analysis;
-}
-
-void Training::applyAutoTuning(ComplexityAnalysis& analysis) {
-    // Apply recommended hyperparameters
-    layers = analysis.recommended_layers;
-    neurons = analysis.recommended_neurons;
-    learningRate = analysis.recommended_learning_rate;
-
-    // Configure 3D transforms based on complexity
-    configure3DTransforms(analysis.requires_3d_transforms);
-
-    if (verbose) {
-        std::cout << "[AUTO-TUNING] Applied recommendations: layers=" << layers
-                  << ", neurons=" << neurons << ", learning_rate=" << learningRate << std::endl;
-    }
-}
-
-void Training::configure3DTransforms(bool enable_complex_transforms) {
-    if (!core) {
-        if (verbose) {
-            std::cout << "[CONFIGURE 3D] No core instance available for transform configuration" << std::endl;
-        }
-        return;
-    }
-
-    if (enable_complex_transforms) {
-        // Enable complex 3D transforms for complex problems
-        core->set3DTransformConfig(true, true, true, true, true, true, true, true);
-
-        // Set reasonable weights
-        core->set3DTransformWeights(0.1f, 0.1f, 0.05f, 0.1f, 0.1f, 0.1f, 0.05f);
-    } else {
-        // Disable complex transforms for simple problems
-        core->set3DTransformConfig(false, false, false, false, false, false, false, false);
-
-        // Zero out weights
-        core->set3DTransformWeights(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    }
-
-    if (verbose) {
-        std::cout << "[CONFIGURE 3D] " << (enable_complex_transforms ? "Enabled" : "Disabled")
-                  << " complex 3D transforms" << std::endl;
-    }
-}
-
-// Hyperparameter tuning integration methods
-void Training::setHyperparameters(const std::map<std::string, float>& float_params,
-                                 const std::map<std::string, int>& int_params,
-                                 const std::map<std::string, std::string>& categorical_params) {
-    // Apply float parameters
-    if (float_params.count("learning_rate")) {
-        learningRate = float_params.at("learning_rate");
-    }
-    if (float_params.count("l2_lambda")) {
-        if (core) core->setRegularizationParams(float_params.at("l2_lambda"));
-    }
-    if (float_params.count("dropout_rate")) {
-        if (core) core->setRegularizationParams(-1.0f, float_params.at("dropout_rate"));
-    }
-
-    // Apply int parameters
-    if (int_params.count("layers")) {
-        layers = int_params.at("layers");
-    }
-    if (int_params.count("neurons")) {
-        neurons = int_params.at("neurons");
-    }
-
-    // Apply categorical parameters
-    if (categorical_params.count("optimizer")) {
-        // Note: This would need to be implemented in CoreAI to change optimizer type
-        // For now, just store the type
-    }
-    if (categorical_params.count("activation")) {
-        // Note: This would need to be implemented in CoreAI to change activation type
-        // For now, just store the type
-    }
-}
-
-void Training::setLearningRateForTuning(double lr) {
-    learningRate = lr;
-}
-
-void Training::setNetworkArchitectureForTuning(int layers_param, int neurons_param) {
-    layers = layers_param;
-    neurons = neurons_param;
-    // Reinitialize core with new architecture
-    if (verbose) {
-        std::cout << "[DEBUG] Re-initializing CoreAI for hyperparameter tuning with layers="
-                  << layers << ", neurons=" << neurons << std::endl;
-    }
-    core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, verbose);
-    core->trainer = this;
-}
-
-void Training::setOptimizerForTuning(const std::string& optimizer_type) {
-    // This would need to be implemented in CoreAI to support different optimizers
-    // For now, just log the change
-    if (verbose) {
-        std::cout << "[DEBUG] Setting optimizer to: " << optimizer_type << std::endl;
-    }
-}
-
-void Training::setActivationForTuning(const std::string& activation_type) {
-    // This would need to be implemented in CoreAI to support different activations
-    // For now, just log the change
-    if (verbose) {
-        std::cout << "[DEBUG] Setting activation to: " << activation_type << std::endl;
-    }
-}
-
-void Training::setRegularizationForTuning(float l2_lambda, float dropout_rate) {
-    if (core) {
-        core->setRegularizationParams(l2_lambda, dropout_rate);
-    }
-}
-
-float Training::evaluateForTuning(int max_epochs) {
-    if (!core || inputs.empty() || targets.empty()) {
-        return std::numeric_limits<float>::max();
-    }
-
-    // Quick training for evaluation
-    train(learningRate, std::min(max_epochs, 10)); // Limit to 10 epochs max for tuning
-
-    // Return the final loss as the score (lower is better)
-    return calculateMSE();
-
-}
-
-// Checkpointing implementation
-void Training::configureCheckpointing(const CheckpointConfig& config) {
-    checkpointConfig = config;
-    checkpointingEnabled = true;
-    initializeCheckpointing();
-}
-
-void Training::enableCheckpointing(bool enable) {
-    checkpointingEnabled = enable;
-    if (enable) {
-        initializeCheckpointing();
-    }
-}
-
-void Training::initializeCheckpointing() {
-    if (!checkpointingEnabled) return;
-
-    // Create checkpoint directory if it doesn't exist
-    try {
-        std::filesystem::create_directories(checkpointConfig.checkpointDirectory);
-        if (verbose) {
-            std::cout << "Checkpoint directory initialized: " << checkpointConfig.checkpointDirectory << std::endl;
-        }
-    } catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Error creating checkpoint directory: " << e.what() << std::endl;
-        checkpointingEnabled = false;
-        return;
-    }
-
-    // Initialize state
-    bestValidationLoss = std::numeric_limits<float>::max();
-    epochsSinceBestModel = 0;
-    lastCheckpointEpoch = 0;
-    checkpointFiles.clear();
-}
-
-bool Training::saveCheckpoint(int epoch, float loss) {
-    if (!checkpointingEnabled || !core) {
-        return false;
-    }
-
-    try {
-        // Create checkpoint filename
-        std::string filename = getCheckpointFilename(epoch);
-        std::string filepath = checkpointConfig.checkpointDirectory + "/" + filename;
-
-        // Create checkpoint data
-        nlohmann::json checkpointData;
-        checkpointData["epoch"] = epoch;
-        checkpointData["loss"] = loss;
-        checkpointData["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
-        checkpointData["inputSize"] = inputSize;
-        checkpointData["outputSize"] = outputSize;
-        checkpointData["layers"] = layers;
-        checkpointData["neurons"] = neurons;
-        checkpointData["learningRate"] = learningRate;
-        checkpointData["min"] = min;
-        checkpointData["max"] = max;
-
-        // Save model weights
-        checkpointData["weights"] = {
-            {"input_hidden", core->getWeightsHiddenInput()},
-            {"hidden_output", core->getWeightsOutputHidden()}
-        };
-
-        // Save training metadata if enabled
-        if (checkpointConfig.saveTrainingMetadata) {
-            checkpointData["training_metadata"] = {
-                {"current_epoch", currentEpoch},
-                {"total_epochs", totalEpochs},
-                {"current_loss", currentLoss},
-                {"best_loss", bestValidationLoss},
-                {"epochs_since_best", epochsSinceBestModel}
-            };
-        }
-
-        // Save to file
-        std::ofstream file(filepath);
-        if (!file.is_open()) {
-            std::cerr << "Error opening checkpoint file for writing: " << filepath << std::endl;
-            return false;
-        }
-        file << checkpointData.dump(4);
-        file.close();
-
-        // Track checkpoint files for cleanup
-        checkpointFiles.push_back(filename);
-
-        // Clean up old checkpoints if we have too many
-        if (checkpointFiles.size() > static_cast<size_t>(checkpointConfig.maxCheckpointsToKeep)) {
-            std::string oldestFile = checkpointFiles.front();
-            checkpointFiles.erase(checkpointFiles.begin());
-
-            std::string oldestPath = checkpointConfig.checkpointDirectory + "/" + oldestFile;
-            try {
-                std::filesystem::remove(oldestPath);
-                if (verbose) {
-                    std::cout << "Removed old checkpoint: " << oldestFile << std::endl;
-                }
-            } catch (const std::filesystem::filesystem_error& e) {
-                std::cerr << "Warning: Could not remove old checkpoint file: " << e.what() << std::endl;
-            }
-        }
-
-        lastCheckpointEpoch = epoch;
-
-        if (verbose) {
-            std::cout << "Checkpoint saved: " << filename << " (epoch " << epoch << ", loss: " << loss << ")" << std::endl;
-        }
-
-        // Send WebSocket update if available
-        if (webSocketServer) {
-            nlohmann::json wsUpdate = {
-                {"type", "checkpoint_saved"},
-                {"epoch", epoch},
-                {"loss", loss},
-                {"filename", filename},
-                {"timestamp", getTimestampString()}
-            };
-            webSocketServer->broadcastToGroup("training", wsUpdate.dump());
-        }
-
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error saving checkpoint: " << e.what() << std::endl;
-        return false;
-    }
-}
-
-bool Training::saveBestModel(float currentLoss) {
-    if (!checkpointingEnabled || !checkpointConfig.bestModelTrackingEnabled || !core) {
-        return false;
-    }
-
-    // Check if this is the best model
-    bool isBestModel = false;
-    if (currentLoss < bestValidationLoss - checkpointConfig.bestModelMinImprovement) {
-        isBestModel = true;
-        bestValidationLoss = currentLoss;
-        epochsSinceBestModel = 0;
-    } else {
-        epochsSinceBestModel++;
-    }
-
-    // Save best model if it's the best or if patience is exceeded
-    if (isBestModel || epochsSinceBestModel >= checkpointConfig.bestModelPatienceEpochs) {
-        try {
-            std::string filename = getBestModelFilename();
-            std::string filepath = checkpointConfig.checkpointDirectory + "/" + filename;
-
-            // Create best model data
-            nlohmann::json bestModelData;
-            bestModelData["epoch"] = currentEpoch;
-            bestModelData["loss"] = currentLoss;
-            bestModelData["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
-            bestModelData["inputSize"] = inputSize;
-            bestModelData["outputSize"] = outputSize;
-            bestModelData["layers"] = layers;
-            bestModelData["neurons"] = neurons;
-            bestModelData["learningRate"] = learningRate;
-            bestModelData["min"] = min;
-            bestModelData["max"] = max;
-
-            // Save model weights
-            bestModelData["weights"] = {
-                {"input_hidden", core->getWeightsHiddenInput()},
-                {"hidden_output", core->getWeightsOutputHidden()}
-            };
-
-            // Save training metadata
-            bestModelData["training_metadata"] = {
-                {"current_epoch", currentEpoch},
-                {"total_epochs", totalEpochs},
-                {"current_loss", currentLoss},
-                {"best_loss", bestValidationLoss},
-                {"epochs_since_best", epochsSinceBestModel}
-            };
-
-            // Save to file
-            std::ofstream file(filepath);
-            if (!file.is_open()) {
-                std::cerr << "Error opening best model file for writing: " << filepath << std::endl;
-                return false;
-            }
-            file << bestModelData.dump(4);
-            file.close();
-
-            if (verbose) {
-                std::cout << "Best model saved: " << filename << " (loss: " << currentLoss << ")" << std::endl;
-            }
-
-            // Send WebSocket update if available
-            if (webSocketServer) {
-                nlohmann::json wsUpdate = {
-                    {"type", "best_model_saved"},
-                    {"loss", currentLoss},
-                    {"filename", filename},
-                    {"timestamp", getTimestampString()}
-                };
-                webSocketServer->broadcastToGroup("training", wsUpdate.dump());
-            }
-
-            return true;
-        } catch (const std::exception& e) {
-            std::cerr << "Error saving best model: " << e.what() << std::endl;
-            return false;
-        }
-    }
-
-    return false;
-}
-
-bool Training::loadCheckpoint(const std::string& checkpointPath) {
-    try {
-        std::ifstream file(checkpointPath);
-        if (!file.is_open()) {
-            std::cerr << "Error opening checkpoint file for reading: " << checkpointPath << std::endl;
-            return false;
-        }
-
-        nlohmann::json checkpointData;
-        file >> checkpointData;
-        file.close();
-
-        // Extract model parameters
-        int loadedInputSize = checkpointData.value("inputSize", 0);
-        int loadedOutputSize = checkpointData.value("outputSize", 0);
-        int loadedLayers = checkpointData.value("layers", 0);
-        int loadedNeurons = checkpointData.value("neurons", 0);
-        double loadedLearningRate = checkpointData.value("learningRate", 0.01);
-        float loadedMin = checkpointData.value("min", 0.0f);
-        float loadedMax = checkpointData.value("max", 1.0f);
-
-        // Reinitialize core with loaded parameters
-        core = std::make_unique<CoreAI>(loadedInputSize, loadedLayers, loadedNeurons, loadedOutputSize, loadedMin, loadedMax, verbose);
-        core->trainer = this;
-
-        // Load weights
-        if (checkpointData.contains("weights")) {
-            auto weights = checkpointData["weights"];
-            if (weights.contains("input_hidden")) {
-                core->setWeightsHiddenInput(weights["input_hidden"]);
-            }
-            if (weights.contains("hidden_output")) {
-                core->setWeightsOutputHidden(weights["hidden_output"]);
-            }
-        }
-
-        // Update training state
-        currentEpoch = checkpointData.value("epoch", 0);
-        currentLoss = checkpointData.value("loss", 0.0f);
-        learningRate = loadedLearningRate;
-        inputSize = loadedInputSize;
-        outputSize = loadedOutputSize;
-        layers = loadedLayers;
-        neurons = loadedNeurons;
-        min = loadedMin;
-        max = loadedMax;
-
-        if (verbose) {
-            std::cout << "Checkpoint loaded from: " << checkpointPath << " (epoch " << currentEpoch << ")" << std::endl;
-        }
-
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading checkpoint: " << e.what() << std::endl;
-        return false;
-    }
-}
-
-std::string Training::getCheckpointFilename(int epoch) const {
-    std::stringstream ss;
-    ss << checkpointConfig.checkpointPrefix << "_epoch_" << epoch << ".json";
-    return ss.str();
-}
-
-std::string Training::getBestModelFilename() const {
-    std::stringstream ss;
-    ss << checkpointConfig.bestModelPrefix << ".json";
-    return ss.str();
-}
-std::string Training::getTimestampString() const {
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << std::put_time(std::gmtime(&time_t), "%Y-%m-%d %H:%M:%S");
-    return ss.str();
-}
-
-// Memory-intensive data augmentation methods implementation
-
-void Training::createMultipleAugmentedCopies(int numCopies) {
-    if (inputs.empty() || targets.empty()) {
-        if (verbose) {
-            std::cout << "[MEMORY AUGMENTATION] No data available for augmentation" << std::endl;
-        }
-        return;
-    }
-
-    if (!dataAugmentation) {
-        if (verbose) {
-            std::cout << "[MEMORY AUGMENTATION] Data augmentation not initialized" << std::endl;
-        }
-        return;
-    }
-
-    // Clear existing augmented copies
-    clearAugmentedCopies();
-
-    if (verbose) {
-        std::cout << "[MEMORY AUGMENTATION] Creating " << numCopies << " augmented copies of " << inputs.size() << " samples..." << std::endl;
-    }
-
-    // Create multiple augmented copies
-    for (int copy = 0; copy < numCopies; ++copy) {
-        std::vector<std::vector<float>> augmentedInputs = inputs;  // Start with original data
-        std::vector<std::vector<float>> augmentedTargets = targets; // Targets remain the same
-
-        // Apply augmentation to each sample in this copy
-        for (size_t i = 0; i < augmentedInputs.size(); ++i) {
-            // Assume 3D coordinates are triplets (x, y, z)
-            for (size_t j = 0; j < augmentedInputs[i].size(); j += 3) {
-                if (j + 2 < augmentedInputs[i].size()) {
-                    std::vector<float> point = {augmentedInputs[i][j], augmentedInputs[i][j + 1], augmentedInputs[i][j + 2]};
-                    std::vector<float> augmentedPoint = dataAugmentation->augmentCoordinates(point);
-                    augmentedInputs[i][j] = augmentedPoint[0];
-                    augmentedInputs[i][j + 1] = augmentedPoint[1];
-                    augmentedInputs[i][j + 2] = augmentedPoint[2];
-                }
-            }
-        }
-
-        // Store this augmented copy
-        augmentedInputsCopies.push_back(augmentedInputs);
-        augmentedTargetsCopies.push_back(augmentedTargets);
-
-        if (verbose && (copy + 1) % 10 == 0) {
-            std::cout << "[MEMORY AUGMENTATION] Created copy " << (copy + 1) << "/" << numCopies << std::endl;
-        }
-    }
-
-    if (verbose) {
-        size_t totalAugmentedSamples = augmentedInputsCopies.size() * inputs.size();
-        std::cout << "[MEMORY AUGMENTATION] Successfully created " << numCopies << " augmented copies ("
-                  << totalAugmentedSamples << " total augmented samples)" << std::endl;
-    }
-}
-
-void Training::clearAugmentedCopies() {
-    augmentedInputsCopies.clear();
-    augmentedTargetsCopies.clear();
-
-    if (verbose) {
-        std::cout << "[MEMORY AUGMENTATION] Cleared all augmented copies" << std::endl;
-    }
-}
-
-size_t Training::getAugmentedDataSize() const {
-    size_t totalSize = 0;
-    for (const auto& copy : augmentedInputsCopies) {
-        for (const auto& sample : copy) {
-            totalSize += sample.size() * sizeof(float);
-        }
-    }
-    for (const auto& copy : augmentedTargetsCopies) {
-        for (const auto& sample : copy) {
-            totalSize += sample.size() * sizeof(float);
-        }
-    }
-    return totalSize;
-}
-
-// Data buffering system implementation
-
-void Training::initializeDataBuffering(size_t maxBuffers, size_t batchSize) {
-    this->maxBatchBuffers = maxBuffers;
-    this->bufferBatchSize = batchSize;
-
-    // Clear existing buffers
-    std::lock_guard<std::mutex> lock(bufferMutex);
-    batchBuffers.clear();
-
-    if (verbose) {
-        std::cout << "[DATA BUFFERING] Initialized buffering system with max " << maxBuffers
-                  << " buffers of size " << batchSize << std::endl;
-    }
-}
-
-void Training::addBatchToBuffer(const std::vector<std::vector<float>>& batchInputs,
-                               const std::vector<std::vector<float>>& batchTargets) {
-    if (!memoryIntensiveBufferingEnabled) {
-        return; // Skip if not enabled
-    }
-
-    std::lock_guard<std::mutex> lock(bufferMutex);
-
-    // Create new batch buffer
-    BatchBuffer buffer;
-    buffer.inputs = batchInputs;
-    buffer.targets = batchTargets;
-    buffer.batchIndex = batchBuffers.size();
-    buffer.isProcessed = false;
-    buffer.createdTime = std::chrono::steady_clock::now();
-
-    batchBuffers.push_back(buffer);
-
-    // Remove old buffers if we exceed the limit
-    while (batchBuffers.size() > maxBatchBuffers) {
-        batchBuffers.pop_front();
-    }
-
-    if (verbose && batchBuffers.size() % 10 == 0) {
-        std::cout << "[DATA BUFFERING] Buffered " << batchBuffers.size() << " batches in memory" << std::endl;
-    }
-}
-
-bool Training::getNextBatchFromBuffer(std::vector<std::vector<float>>& batchInputs,
-                                    std::vector<std::vector<float>>& batchTargets) {
-    if (!memoryIntensiveBufferingEnabled) {
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lock(bufferMutex);
-
-    // Find an unprocessed batch
-    for (auto& buffer : batchBuffers) {
-        if (!buffer.isProcessed) {
-            batchInputs = buffer.inputs;
-            batchTargets = buffer.targets;
-            buffer.isProcessed = true;
-            return true;
-        }
-    }
-
-    return false; // No unprocessed batches available
-}
-
-void Training::clearOldBuffers(std::chrono::seconds maxAge) {
-    std::lock_guard<std::mutex> lock(bufferMutex);
-
-    auto now = std::chrono::steady_clock::now();
-    auto it = batchBuffers.begin();
-
-    while (it != batchBuffers.end()) {
-        auto age = std::chrono::duration_cast<std::chrono::seconds>(now - it->createdTime);
-        if (age > maxAge) {
-            it = batchBuffers.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    if (verbose) {
-        std::cout << "[DATA BUFFERING] Cleared old buffers, " << batchBuffers.size() << " buffers remaining" << std::endl;
-    }
-}
-
-size_t Training::getBufferMemoryUsage() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(bufferMutex));
-    size_t totalSize = 0;
-
-    for (const auto& buffer : batchBuffers) {
-        for (const auto& sample : buffer.inputs) {
-            totalSize += sample.size() * sizeof(float);
-        }
-        for (const auto& sample : buffer.targets) {
-            totalSize += sample.size() * sizeof(float);
-        }
-        // Add overhead for the buffer structure
-        totalSize += sizeof(BatchBuffer);
-    }
-
-    return totalSize;
-}
-
-void Training::enableMemoryIntensiveBuffering(bool enable) {
-    memoryIntensiveBufferingEnabled = enable;
-
-    if (verbose) {
-        std::cout << "[DATA BUFFERING] Memory-intensive buffering " << (enable ? "enabled" : "disabled") << std::endl;
-    }
-}
-
-// Historical data storage implementation
-
-void Training::initializeHistoricalStorage(size_t maxHistorySize) {
-    this->maxHistoricalSize = maxHistorySize;
-    historicalData.clear();
-
-    if (verbose) {
-        std::cout << "[HISTORICAL STORAGE] Initialized with max " << maxHistorySize << " data points" << std::endl;
-    }
-}
-
-void Training::storeHistoricalDataPoint(const std::vector<std::vector<float>>& inputs,
-                                       const std::vector<std::vector<float>>& targets,
-                                       float loss, int epoch, const std::string& metadata) {
-    if (!memoryMonitoringEnabled) {
-        return; // Skip if not enabled
-    }
-
-    HistoricalDataPoint point;
-    point.inputs = inputs;
-    point.targets = targets;
-    point.loss = loss;
-    point.epoch = epoch;
-    point.timestamp = std::chrono::steady_clock::now();
-    point.metadata = metadata;
-
-    historicalData.push_back(point);
-
-    // Remove old data if we exceed the limit
-    while (historicalData.size() > maxHistoricalSize) {
-        historicalData.erase(historicalData.begin());
-    }
-
-    if (verbose && historicalData.size() % 100 == 0) {
-        std::cout << "[HISTORICAL STORAGE] Stored " << historicalData.size() << " historical data points" << std::endl;
-    }
-}
-
-const std::vector<Training::HistoricalDataPoint>& Training::getHistoricalData() const {
-    return historicalData;
-}
-
-void Training::clearHistoricalData() {
-    historicalData.clear();
-
-    if (verbose) {
-        std::cout << "[HISTORICAL STORAGE] Cleared all historical data" << std::endl;
-    }
-}
-
-size_t Training::getHistoricalMemoryUsage() const {
-    size_t totalSize = 0;
-
-    for (const auto& point : historicalData) {
-        for (const auto& sample : point.inputs) {
-            totalSize += sample.size() * sizeof(float);
-        }
-        for (const auto& sample : point.targets) {
-            totalSize += sample.size() * sizeof(float);
-        }
-        // Add overhead for the structure
-        totalSize += sizeof(HistoricalDataPoint);
-    }
-
-    return totalSize;
-}
-
-std::vector<Training::HistoricalDataPoint> Training::getHistoricalDataInRange(int startEpoch, int endEpoch) const {
-    std::vector<HistoricalDataPoint> result;
-
-    for (const auto& point : historicalData) {
-        if (point.epoch >= startEpoch && point.epoch <= endEpoch) {
-            result.push_back(point);
-        }
-    }
-
-    return result;
-}
-
-// Memory usage monitoring implementation
-
-Training::MemoryStats Training::getMemoryStats() const {
-    MemoryStats stats;
-
-    // Calculate base data size (original inputs and targets)
-    stats.baseDataSize = 0;
-    for (const auto& sample : inputs) {
-        stats.baseDataSize += sample.size() * sizeof(float);
-    }
-    for (const auto& sample : targets) {
-        stats.baseDataSize += sample.size() * sizeof(float);
-    }
-
-    // Augmented data size
-    stats.augmentedDataSize = getAugmentedDataSize();
-
-    // Buffer size
-    stats.bufferSize = getBufferMemoryUsage();
-
-    // Historical data size
-    stats.historicalSize = getHistoricalMemoryUsage();
-
-    // Total size
-    stats.totalSize = stats.baseDataSize + stats.augmentedDataSize + stats.bufferSize + stats.historicalSize;
-
-    // Convert to MB
-    stats.memoryUsageMB = static_cast<double>(stats.totalSize) / (1024.0 * 1024.0);
-
-    return stats;
-}
-
-void Training::logMemoryUsage() const {
-    if (!memoryMonitoringEnabled) {
-        return;
-    }
-
-    auto stats = getMemoryStats();
-
-    std::cout << "\n=== MEMORY USAGE REPORT ===" << std::endl;
-    std::cout << "Base Data Size: " << stats.baseDataSize << " bytes (" << (stats.baseDataSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
-    std::cout << "Augmented Data Size: " << stats.augmentedDataSize << " bytes (" << (stats.augmentedDataSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
-    std::cout << "Buffer Size: " << stats.bufferSize << " bytes (" << (stats.bufferSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
-    std::cout << "Historical Data Size: " << stats.historicalSize << " bytes (" << (stats.historicalSize / (1024.0 * 1024.0)) << " MB)" << std::endl;
-    std::cout << "Total Memory Usage: " << stats.totalSize << " bytes (" << stats.memoryUsageMB << " MB)" << std::endl;
-
-    if (!augmentedInputsCopies.empty()) {
-        std::cout << "Augmented Copies: " << augmentedInputsCopies.size() << " copies of " << inputs.size() << " samples each" << std::endl;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(bufferMutex));
-        std::cout << "Buffered Batches: " << batchBuffers.size() << std::endl;
-    }
-
-    std::cout << "Historical Data Points: " << historicalData.size() << std::endl;
-    std::cout << "===========================\n" << std::endl;
-}
-
-void Training::enableMemoryMonitoring(bool enable) {
-    memoryMonitoringEnabled = enable;
-
-    if (verbose) {
-        std::cout << "[MEMORY MONITORING] " << (enable ? "Enabled" : "Disabled") << std::endl;
-    }
-}
-
-
-void Training::enableMemoryMonitoring(bool enable) {
-    memoryMonitoringEnabled = enable;
-
-    if (verbose) {
-        std::cout << "[MEMORY MONITORING] " << (enable ? "Enabled" : "Disabled") << std::endl;
-    }
-}
-
-// Adaptive hyperparameter optimization methods implementation
-
-void Training::optimizeHyperparameters() {
-    if (inputs.empty()) {
-        initializeAdaptiveDefaults();
-        return;
-    }
-
-    int datasetSize = inputs.size();
-    adaptiveBatchSize = calculateOptimalBatchSize(datasetSize);
-    adaptiveLearningRateValue = calculateOptimalLearningRate(inputs[0].size(), targets[0].size(), datasetSize);
-    optimalOptimizer = selectOptimalOptimizer(datasetSize, inputs[0].size());
-    optimalEpochs = estimateOptimalEpochs(datasetSize, detectProblemComplexity().complexity_score);
-    applyOptimizedSettings();
-
-    if (verbose) {
-        std::cout << "[ADAPTIVE OPTIMIZATION] Hyperparameters optimized:" << std::endl;
-        std::cout << "  Batch Size: " << adaptiveBatchSize << std::endl;
-        std::cout << "  Learning Rate: " << adaptiveLearningRateValue << std::endl;
-        std::cout << "  Optimizer: " << optimalOptimizer << std::endl;
-        std::cout << "  Epochs: " << optimalEpochs << std::endl;
-    }
-}
-
-int Training::calculateOptimalBatchSize(int datasetSize) {
-    // Adaptive batch size based on dataset size and complexity
-    if (datasetSize < 100) {
-        return 16; // Small datasets benefit from smaller batches
-    } else if (datasetSize < 1000) {
-        return 32; // Medium datasets use standard batch size
-    } else if (datasetSize < 10000) {
-        return 64; // Large datasets can handle bigger batches
-    } else {
-        return 128; // Very large datasets use large batches for efficiency
-    }
-}
-
-double Training::calculateOptimalLearningRate(int inputSize, int outputSize, int datasetSize) {
-    // Adaptive learning rate based on problem characteristics
-    double baseLearningRate = 0.01;
-
-    // Adjust for input dimensionality
-    if (inputSize > 100) {
-        baseLearningRate *= 0.5; // Higher dimensional inputs need smaller learning rates
-    } else if (inputSize < 10) {
-        baseLearningRate *= 2.0; // Lower dimensional inputs can use higher learning rates
-    }
-
-    // Adjust for dataset size
-    if (datasetSize < 100) {
-        baseLearningRate *= 2.0; // Small datasets can use higher learning rates
-    } else if (datasetSize > 10000) {
-        baseLearningRate *= 0.5; // Large datasets need smaller learning rates
-    }
-
-    // Adjust for output complexity
-    if (outputSize > 10) {
-        baseLearningRate *= 0.7; // Complex outputs need smaller learning rates
-    }
-
-    // Ensure learning rate stays within reasonable bounds
-    return std::max(0.0001, std::min(0.1, baseLearningRate));
-}
-
-std::string Training::selectOptimalOptimizer(int datasetSize, int inputSize) {
-    // Adaptive optimizer selection based on problem characteristics
-
-    // For small datasets, Adam is generally better
-    if (datasetSize < 500) {
-        return "adam";
-    }
-
-    // For large datasets with high dimensionality, RMSprop can be more stable
-    if (datasetSize > 5000 && inputSize > 50) {
-        return "rmsprop";
-    }
-
-    // For medium datasets, Adam with weight decay works well
-    return "adam";
-}
-
-int Training::estimateOptimalEpochs(int datasetSize, float complexityScore) {
-    // Adaptive epoch estimation based on dataset size and complexity
-
-    int baseEpochs = 100;
-
-    // Adjust for dataset size
-    if (datasetSize < 100) {
-        baseEpochs = 50; // Small datasets converge faster
-    } else if (datasetSize > 10000) {
-        baseEpochs = 200; // Large datasets need more epochs
-    }
-
-    // Adjust for complexity
-    if (complexityScore > 0.7) {
-        baseEpochs = static_cast<int>(baseEpochs * 1.5); // Complex problems need more epochs
-    } else if (complexityScore < 0.3) {
-        baseEpochs = static_cast<int>(baseEpochs * 0.7); // Simple problems converge faster
-    }
-
-    return std::max(10, baseEpochs); // Minimum 10 epochs
-}
-
-void Training::applyOptimizedSettings() {
-    // Apply the optimized hyperparameters to the current training configuration
-    batchSize = adaptiveBatchSize;
-    learningRate = adaptiveLearningRateValue;
-    totalEpochs = optimalEpochs;
-
-    // Apply optimizer settings if CoreAI supports it
-    if (core) {
-        // Note: This would need to be implemented in CoreAI to support different optimizers
-        // For now, we just set the learning rate
-        // core->setOptimizer(optimalOptimizer);
-    }
-
-    if (verbose) {
-        std::cout << "[ADAPTIVE OPTIMIZATION] Applied optimized settings to training configuration" << std::endl;
-    }
-}
-
-void Training::initializeAdaptiveDefaults() {
-    // Initialize with conservative default values when no data is available
-    adaptiveBatchSize = 32;
-    adaptiveLearningRate = 0.01;
-    optimalOptimizer = "adam";
-    optimalEpochs = 100;
-
-    if (verbose) {
-        std::cout << "[ADAPTIVE OPTIMIZATION] Initialized with default adaptive settings" << std::endl;
-    }
-}
-
-// Convergence and adaptive training methods implementation
-
-bool Training::checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    // Check if loss has improved sufficiently
-    if (metrics.currentLoss < criteria.minLossImprovement) {
-        return true; // Converged due to very low loss
-    }
-
-    // Check for loss plateau (no significant improvement)
-    if (criteria.useLossPlateauDetection && metrics.epochsWithoutImprovement >= criteria.plateauPatience) {
-        return true; // Converged due to plateau
-    }
-
-    // Check if learning rate is too low
-    if (metrics.currentLearningRate < criteria.minLearningRate) {
-        return true; // Converged due to low learning rate
-    }
-
-    // Check maximum epochs
-    if (metrics.currentEpoch >= criteria.maxEpochs) {
-        return true; // Converged due to max epochs
-    }
-
-    return false; // Continue training
-}
-
-double Training::adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    double newLR = currentLR;
-
-    // Reduce learning rate if no improvement for several epochs
-    if (metrics.epochsWithoutImprovement >= criteria.patienceEpochs / 2) {
-        newLR *= 0.9; // Reduce by 10%
-    }
-
-    // More aggressive reduction if plateau detected
-    if (criteria.useLossPlateauDetection && metrics.epochsWithoutImprovement >= criteria.plateauPatience) {
-        newLR *= 0.5; // Reduce by 50%
-    }
-
-    // Ensure minimum learning rate
-    newLR = std::max(newLR, criteria.minLearningRate);
-
-    return newLR;
-}
-
-void Training::initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs) {
-    metrics.currentLoss = 0.0;
-    metrics.bestLoss = std::numeric_limits<double>::max();
-    metrics.previousLoss = std::numeric_limits<double>::max();
-    metrics.epochsWithoutImprovement = 0;
-    metrics.currentEpoch = 0;
-    metrics.totalEpochs = maxEpochs;
-    metrics.currentLearningRate = initialLR;
-    metrics.converged = false;
-    metrics.earlyStopped = false;
-    metrics.lossHistory.clear();
-    metrics.startTime = std::chrono::steady_clock::now();
-}
-
-void Training::updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch) {
-    metrics.currentLoss = currentLoss;
-    metrics.currentEpoch = epoch;
-    metrics.lossHistory.push_back(currentLoss);
-
-    // Update best loss
-    if (currentLoss < metrics.bestLoss) {
-        metrics.bestLoss = currentLoss;
-        metrics.epochsWithoutImprovement = 0;
-    } else {
-        metrics.epochsWithoutImprovement++;
-    }
-
-    // Keep only recent history
-    if (metrics.lossHistory.size() > 1000) {
-        metrics.lossHistory.erase(metrics.lossHistory.begin());
-    }
-}
-
-bool Training::shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    // Check early stopping
-    if (criteria.useEarlyStopping && metrics.epochsWithoutImprovement >= criteria.patienceEpochs) {
-        metrics.earlyStopped = true;
-        return true;
-    }
-
-    // Check convergence
-    if (checkConvergence(metrics, criteria)) {
-        metrics.converged = true;
-        return true;
-    }
-
-    return false;
-}
-
-void Training::logTrainingProgress(const TrainingMetrics& metrics, bool verbose) {
-    if (!verbose) return;
-
-    auto elapsed = std::chrono::steady_clock::now() - metrics.startTime;
-    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-
-    std::cout << "Epoch " << metrics.currentEpoch << "/" << metrics.totalEpochs
-              << " - Loss: " << metrics.currentLoss
-              << " - Best: " << metrics.bestLoss
-              << " - LR: " << metrics.currentLearningRate
-              << " - Elapsed: " << elapsed_seconds << "s";
-
-    if (metrics.epochsWithoutImprovement > 0) {
-        std::cout << " - No improvement: " << metrics.epochsWithoutImprovement << " epochs";
-    }
-
-    std::cout << std::endl;
-}
-
-// Enhanced trainAdaptive method using the new convergence system
-void Training::trainAdaptive(double initialLearningRate, int maxEpochs, int batchSize,
-                           double minLearningRate, int patience, double minImprovement) {
-    if (!core) {
-        std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
-        return;
-    }
-
-    if (inputs.empty() || targets.empty()) {
-        throw std::invalid_argument("Training::trainAdaptive: No training data available");
-    }
-
-    // Initialize convergence criteria
-    ConvergenceCriteria criteria;
-    criteria.minLossImprovement = minImprovement;
-    criteria.patienceEpochs = patience;
-    criteria.minLearningRate = minLearningRate;
-    criteria.maxEpochs = maxEpochs;
-    criteria.useEarlyStopping = true;
-    criteria.useLossPlateauDetection = true;
-    criteria.plateauPatience = patience / 2;
-
-    // Initialize training metrics
-    TrainingMetrics metrics;
-    initializeTrainingMetrics(metrics, initialLearningRate, maxEpochs);
-
-    if (verbose) {
-        std::cout << "\nStarting adaptive training with convergence monitoring...\n";
-        std::cout << "Initial LR: " << initialLearningRate << ", Max epochs: " << maxEpochs
-                  << ", Patience: " << patience << ", Min improvement: " << minImprovement << "\n";
-    }
-
-    const int barWidth = 70;
-
-    for (int epoch = 1; epoch <= maxEpochs; ++epoch) {
-        printProgressBar("Adaptive Training", epoch, maxEpochs, barWidth);
-
-        // Forward pass
-        core->forward(inputs);
-
-        // Train with current learning rate
-        int sampleCount = static_cast<int>(inputs.size());
-        core->train(inputs, targets, metrics.currentLearningRate, sampleCount, batchSize);
-
-        // Calculate loss
-        double currentLoss = calculateMSE();
-        updateTrainingMetrics(metrics, currentLoss, epoch);
-
-        // Adaptive learning rate adjustment
-        metrics.currentLearningRate = adaptiveLearningRate(metrics.currentLearningRate, metrics, criteria);
-
-        // Log progress
-        logTrainingProgress(metrics, verbose);
-
-        // Check stopping conditions
-        if (shouldStopTraining(metrics, criteria)) {
-            if (verbose) {
-                std::cout << "\nTraining stopped at epoch " << epoch;
-                if (metrics.earlyStopped) {
-                    std::cout << " (early stopping)";
-                } else if (metrics.converged) {
-                    std::cout << " (convergence reached)";
-                }
-                std::cout << "\nFinal loss: " << metrics.currentLoss << "\n";
-            }
-            break;
-        }
-    }
-
-    // Update final metrics
-    metrics.endTime = std::chrono::steady_clock::now();
-
-    if (verbose) {
-        auto total_time = std::chrono::duration_cast<std::chrono::seconds>(metrics.endTime - metrics.startTime);
-        std::cout << "\nAdaptive training completed in " << total_time.count() << " seconds\n";
-        std::cout << "Final loss: " << metrics.currentLoss << ", Best loss: " << metrics.bestLoss << "\n";
-    }
-}
-
-// Enhanced batch size optimization methods
-int Training::getOptimalBatchSize(int datasetSize, size_t availableMemoryMB) {
-    // Base calculation on dataset size and available memory
-    int baseBatchSize = 32; // Default
-
-    // Adjust for dataset size
-    if (datasetSize < 1000) {
-        baseBatchSize = 16; // Smaller batches for small datasets
-    } else if (datasetSize < 10000) {
-        baseBatchSize = 32; // Standard batch size
-    } else if (datasetSize < 100000) {
-        baseBatchSize = 64; // Medium batches
-    } else {
-        baseBatchSize = 128; // Large batches for big datasets
-    }
-
-    // Adjust for available memory (rough estimation)
-    size_t estimatedMemoryPerSample = inputSize * outputSize * sizeof(float) * 4; // Rough estimate
-    size_t maxBatchByMemory = availableMemoryMB * 1024 * 1024 / estimatedMemoryPerSample / 10; // Conservative
-
-    return std::min(baseBatchSize, static_cast<int>(maxBatchByMemory));
-}
-
-int Training::getAdaptiveBatchSize(int currentEpoch, int totalEpochs, int baseBatchSize) {
-    // Adaptive batch size based on training progress
-    float progress = static_cast<float>(currentEpoch) / totalEpochs;
-
-    // Start with smaller batches, increase as training progresses
-    if (progress < 0.3f) {
-        return std::max(8, baseBatchSize / 4); // Smaller batches early for stability
-    } else if (progress < 0.7f) {
-        return baseBatchSize; // Standard batch size in middle
-    } else {
-        return std::min(baseBatchSize * 2, 256); // Larger batches later for speed
-    }
-}
-
-void Training::setBatchSizeStrategy(const std::string& strategy) {
-    batchSizeStrategy = strategy;
-
-    if (verbose) {
-        std::cout << "[BATCH SIZE] Strategy set to: " << strategy << std::endl;
-    }
-}
-
-// Enhanced cross-validation with adaptive features
-Training::CrossValidationResults Training::performKFoldCrossValidation(int k, double learningRate, int epochs) {
-    CrossValidationResults results;
-    results.foldRMSEs.reserve(k);
-    results.foldMSEs.reserve(k);
-    results.foldAccuracies.reserve(k);
-
-    if (inputs.empty() || targets.empty()) {
-        std::cerr << "Error: No data available for cross-validation" << std::endl;
-        return results;
-    }
-
-    int foldSize = inputs.size() / k;
-    if (foldSize == 0) {
-        std::cerr << "Error: Dataset too small for " << k << "-fold cross-validation" << std::endl;
-        return results;
-    }
-
-    for (int fold = 0; fold < k; ++fold) {
-        // Create training and validation sets
-        std::vector<std::vector<float>> trainInputs, trainTargets, valInputs, valTargets;
-
-        for (int i = 0; i < inputs.size(); ++i) {
-            if (i >= fold * foldSize && i < (fold + 1) * foldSize) {
-                // Validation set
-                valInputs.push_back(inputs[i]);
-                valTargets.push_back(targets[i]);
-            } else {
-                // Training set
-                trainInputs.push_back(inputs[i]);
-                trainTargets.push_back(targets[i]);
-            }
-        }
-
-        // Train on this fold
-        std::vector<std::vector<float>> tempInputs = inputs;
-        std::vector<std::vector<float>> tempTargets = targets;
-
-        inputs = trainInputs;
-        targets = trainTargets;
-
-        // Reinitialize core for this fold
-        core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, verbose);
-        core->trainer = this;
-
-        // Train
-        train(learningRate, epochs);
-
-        // Evaluate on validation set
-        inputs = valInputs;
-        targets = valTargets;
-
-        float foldMSE = calculateMSE();
-        float foldRMSE = std::sqrt(foldMSE);
-        float foldAccuracy = calculateAccuracy();
-
-        results.foldMSEs.push_back(foldMSE);
-        results.foldRMSEs.push_back(foldRMSE);
-        results.foldAccuracies.push_back(foldAccuracy);
-
-        // Restore original data
-        inputs = tempInputs;
-        targets = tempTargets;
-    }
-
-    // Calculate averages
-    results.avgMSE = 0.0f;
-    results.avgRMSE = 0.0f;
-    results.avgAccuracy = 0.0f;
-
-    for (int i = 0; i < k; ++i) {
-        results.avgMSE += results.foldMSEs[i];
-        results.avgRMSE += results.foldRMSEs[i];
-        results.avgAccuracy += results.foldAccuracies[i];
-    }
-
-    results.avgMSE /= k;
-    results.avgRMSE /= k;
-    results.avgAccuracy /= k;
-
-    if (verbose) {
-        std::cout << "\nCross-validation results (" << k << "-fold):\n";
-        std::cout << "Average MSE: " << results.avgMSE << "\n";
-        std::cout << "Average RMSE: " << results.avgRMSE << "\n";
-        std::cout << "Average Accuracy: " << results.avgAccuracy << "\n";
-    }
-
-    return results;
-}
-
-} // End of Training class implementation
-    if (verbose) {
-        std::cout << "[ADAPTIVE OPTIMIZATION] Initialized with default adaptive settings" << std::endl;
-    }
-}
-
-// Batch size optimization methods implementation
-int Training::getOptimalBatchSize(int datasetSize, size_t availableMemoryMB) {
-    // Adaptive batch size based on dataset size and available memory
-    if (datasetSize < 100) {
-        return 8; // Very small datasets
-    } else if (datasetSize < 1000) {
-        return 16; // Small datasets
-    } else if (datasetSize < 10000) {
-        return 32; // Medium datasets
-    } else if (datasetSize < 100000) {
-        return 64; // Large datasets
-    } else {
-        // Very large datasets - consider memory constraints
-        size_t memoryBasedBatch = availableMemoryMB / 10; // Rough estimate
-        return std::min(128, static_cast<int>(memoryBasedBatch));
-    }
-}
-
-int Training::getAdaptiveBatchSize(int currentEpoch, int totalEpochs, int baseBatchSize) {
-    // Adaptive batch size that changes during training
-    float progress = static_cast<float>(currentEpoch) / totalEpochs;
-
-    // Start with smaller batches, increase as training progresses
-    if (progress < 0.3f) {
-        return std::max(4, baseBatchSize / 4); // Smaller batches for initial exploration
-    } else if (progress < 0.7f) {
-        return baseBatchSize; // Standard batch size for main training
-    } else {
-        return std::min(baseBatchSize * 2, 256); // Larger batches for fine-tuning
-    }
-}
-
-void Training::setBatchSizeStrategy(const std::string& strategy) {
-    batchSizeStrategy = strategy;
-
-    if (verbose) {
-        std::cout << "[BATCH SIZE] Set strategy to: " << strategy << std::endl;
-    }
-}
-
-// Enhanced training with adaptive hyperparameters
-void Training::trainAdaptive(double initialLearningRate, int maxEpochs, int batchSize,
-                           double minLearningRate, int patience, double minImprovement) {
-    if (!core) {
-        std::cerr << "Error: CoreAI not initialized. Cannot train model." << std::endl;
-        return;
-    }
-
-    if (inputs.empty() || targets.empty()) {
-        throw std::invalid_argument("Training::trainAdaptive: No training data available");
-    }
-
-    if (verbose) {
-        std::cout << "\nStarting adaptive training for " << maxEpochs << " epochs...\n";
-        std::cout << "Initial LR: " << initialLearningRate << ", Min LR: " << minLearningRate
-                  << ", Patience: " << patience << ", Min Improvement: " << minImprovement << std::endl;
-    }
-
-    const int barWidth = 70;
-
-    // Adaptive training state
-    double currentLearningRate = initialLearningRate;
-    float bestLoss = std::numeric_limits<float>::max();
-    int epochsWithoutImprovement = 0;
-    int currentEpoch = 0;
-
-    // Enable adaptive features
-    setConvergenceCriteria(1e-4, patience, minImprovement);
-    enableEarlyStopping(true);
-    setLearningRateDecay(LearningRateDecayType::EXPONENTIAL, 0.95, 10);
-
-    for (int epoch = 0; epoch < maxEpochs; ++epoch) {
-        currentEpoch = epoch + 1;
-        printProgressBar("Adaptive Training", currentEpoch, maxEpochs, barWidth);
-
-        // Apply learning rate decay
-        currentLearningRate = calculateDecayedLearningRate(epoch, initialLearningRate);
-        currentLearningRate = std::max(currentLearningRate, minLearningRate);
-
-        // Adaptive batch size
-        int adaptiveBatchSize = getAdaptiveBatchSize(epoch, maxEpochs, batchSize);
-
-        // Train for one epoch
-        core->forward(inputs);
-        core->train(inputs, targets, currentLearningRate, numSamples, adaptiveBatchSize);
-
-        // Calculate loss and check convergence
-        float currentLoss = calculateMSE();
-
-        // Update best loss tracking
-        if (currentLoss < bestLoss) {
-            bestLoss = currentLoss;
-            epochsWithoutImprovement = 0;
-        } else {
-            epochsWithoutImprovement++;
-        }
-
-        // Check convergence criteria
-        if (checkConvergence(currentLoss, currentEpoch)) {
-            if (verbose) {
-                std::cout << "\n[ADAPTIVE TRAINING] Convergence achieved at epoch " << currentEpoch << std::endl;
-            }
-            break;
-        }
-
-        // Early stopping check
-        if (epochsWithoutImprovement >= patience) {
-            if (verbose) {
-                std::cout << "\n[ADAPTIVE TRAINING] Early stopping at epoch " << currentEpoch
-                          << " (no improvement for " << patience << " epochs)" << std::endl;
-            }
-            break;
-        }
-
-        // Verbose logging
-        if (verbose && epoch % 10 == 0) {
-            std::cout << "\nEpoch " << currentEpoch << "/" << maxEpochs
-                      << " - Loss: " << currentLoss << " (Best: " << bestLoss << ")"
-                      << " - LR: " << currentLearningRate << " - Batch: " << adaptiveBatchSize << std::endl;
-        }
-    }
-
-    if (verbose) {
-        std::cout << "\nAdaptive training completed. Final loss: " << calculateMSE() << std::endl;
-    }
-}
-
-float Training::calculateAccuracy(float threshold) {
-    if (!core || inputs.empty() || targets.empty()) {
-        std::cerr << "Error: CoreAI not initialized or data not loaded for accuracy calculation." << std::endl;
-        return -1.0f;
-    }
-
-    core->forward(inputs);
-    auto predictions = core->getResults();
-
-    if (predictions.size() != targets.size()) {
-        std::cerr << "Error: Prediction and target sizes don't match." << std::endl;
-        return -1.0f;
-    }
-
-    int correct = 0;
-    int total = 0;
-
-    for (size_t i = 0; i < predictions.size(); ++i) {
-        for (size_t j = 0; j < predictions[i].size() && j < targets[i].size(); ++j) {
-            float pred = predictions[i][j];
-            float target = targets[i][j];
-
-            // For regression tasks, consider it correct if within threshold
-            if (std::abs(pred - target) <= threshold) {
-                correct++;
-            }
-            total++;
-        }
-    }
-
-    return total > 0 ? static_cast<float>(correct) / total : 0.0f;
-}
-
-// K-fold cross-validation method
-Training::CrossValidationResults Training::performKFoldCrossValidation(int k, double learningRate, int epochs) {
-    CrossValidationResults results;
-    results.avgRMSE = 0.0f;
-    results.avgMSE = 0.0f;
-    results.avgAccuracy = 0.0f;
-
-    if (inputs.empty() || targets.empty() || k <= 1) {
-        std::cerr << "Error: Insufficient data or invalid k value for cross-validation." << std::endl;
-        return results;
-    }
-
-    int foldSize = numSamples / k;
-    if (foldSize < 1) {
-        std::cerr << "Error: Dataset too small for " << k << "-fold cross-validation." << std::endl;
-        return results;
-    }
-
-    if (verbose) {
-        std::cout << "\nPerforming " << k << "-fold cross-validation..." << std::endl;
-    }
-
-    for (int fold = 0; fold < k; ++fold) {
-        if (verbose) {
-            std::cout << "Fold " << (fold + 1) << "/" << k << std::endl;
-        }
-
-        // Create training and validation sets
-        std::vector<std::vector<float>> trainInputs, trainTargets, valInputs, valTargets;
-
-        for (int i = 0; i < numSamples; ++i) {
-            if (i >= fold * foldSize && i < (fold + 1) * foldSize) {
-                // Validation set
-                valInputs.push_back(inputs[i]);
-                valTargets.push_back(targets[i]);
-            } else {
-                // Training set
-                trainInputs.push_back(inputs[i]);
-                trainTargets.push_back(targets[i]);
-            }
-        }
-
-        // Create temporary training instance for this fold
-        Training foldTrainer(isOfflineMode, false, webSocketServer);
-        foldTrainer.inputSize = inputSize;
-        foldTrainer.outputSize = outputSize;
-        foldTrainer.layers = layers;
-        foldTrainer.neurons = neurons;
-        foldTrainer.inputs = trainInputs;
-        foldTrainer.targets = trainTargets;
-        foldTrainer.numSamples = trainInputs.size();
-
-        // Initialize core for this fold
-        foldTrainer.core = std::make_unique<CoreAI>(inputSize, layers, neurons, outputSize, min, max, false);
-
-        // Train on this fold
-        foldTrainer.train(learningRate, epochs);
-
-        // Evaluate on validation set
-        foldTrainer.inputs = valInputs;
-        foldTrainer.targets = valTargets;
-        foldTrainer.numSamples = valInputs.size();
-
-        float foldMSE = foldTrainer.calculateMSE();
-        float foldRMSE = foldTrainer.calculateRMSE();
-        float foldAccuracy = foldTrainer.calculateAccuracy(0.1f);
-
-        results.foldMSEs.push_back(foldMSE);
-        results.foldRMSEs.push_back(foldRMSE);
-        results.foldAccuracies.push_back(foldAccuracy);
-
-        results.avgMSE += foldMSE;
-        results.avgRMSE += foldRMSE;
-        results.avgAccuracy += foldAccuracy;
-
-        if (verbose) {
-            std::cout << "  MSE: " << foldMSE << ", RMSE: " << foldRMSE << ", Accuracy: " << foldAccuracy << std::endl;
-        }
-    }
-
-    // Calculate averages
-    results.avgMSE /= k;
-    results.avgRMSE /= k;
-    results.avgAccuracy /= k;
-
-    if (verbose) {
-        std::cout << "\nCross-validation results:" << std::endl;
-        std::cout << "Average MSE: " << results.avgMSE << std::endl;
-        std::cout << "Average RMSE: " << results.avgRMSE << std::endl;
-        std::cout << "Average Accuracy: " << results.avgAccuracy << std::endl;
-    }
-
-    return results;
-}
-
-// Convergence and adaptive training methods
-bool Training::checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    // Check loss threshold
-    if (metrics.currentLoss < criteria.minLossImprovement) {
-        return true;
-    }
-
-    // Check minimum learning rate
-    if (metrics.currentLearningRate < criteria.minLearningRate) {
-        return true;
-    }
-
-    // Check maximum epochs
-    if (metrics.currentEpoch >= criteria.maxEpochs) {
-        return true;
-    }
-
-    // Check loss plateau detection
-    if (criteria.useLossPlateauDetection && metrics.lossHistory.size() >= criteria.plateauPatience) {
-        float recentLoss = metrics.lossHistory.back();
-        bool plateau = true;
-
-        for (size_t i = metrics.lossHistory.size() - criteria.plateauPatience; i < metrics.lossHistory.size(); ++i) {
-            if (std::abs(metrics.lossHistory[i] - recentLoss) > criteria.minLossImprovement) {
-                plateau = false;
-                break;
-            }
-        }
-
-        if (plateau) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-double Training::adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    // Adaptive learning rate based on training progress
-
-    // Reduce learning rate if loss is increasing
-    if (metrics.lossHistory.size() >= 2) {
-        float prevLoss = metrics.lossHistory[metrics.lossHistory.size() - 2];
-        float currLoss = metrics.lossHistory.back();
-
-        if (currLoss > prevLoss) {
-            return currentLR * 0.9; // Reduce by 10%
-        }
-    }
-
-    // Reduce learning rate if no improvement for several epochs
-    if (metrics.epochsWithoutImprovement > criteria.patienceEpochs / 2) {
-        return currentLR * 0.95; // Gradual reduction
-    }
-
-    // Ensure minimum learning rate
-    return std::max(currentLR, criteria.minLearningRate);
-}
-
-void Training::initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs) {
-    metrics.currentLoss = 0.0;
-    metrics.bestLoss = std::numeric_limits<double>::max();
-    metrics.previousLoss = std::numeric_limits<double>::max();
-    metrics.epochsWithoutImprovement = 0;
-    metrics.currentEpoch = 0;
-    metrics.totalEpochs = maxEpochs;
-    metrics.currentLearningRate = initialLR;
-    metrics.converged = false;
-    metrics.earlyStopped = false;
-    metrics.lossHistory.clear();
-    metrics.startTime = std::chrono::steady_clock::now();
-}
-
-void Training::updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch) {
-    metrics.previousLoss = metrics.currentLoss;
-    metrics.currentLoss = currentLoss;
-    metrics.currentEpoch = epoch;
-
-    // Update best loss
-    if (currentLoss < metrics.bestLoss) {
-        metrics.bestLoss = currentLoss;
-        metrics.epochsWithoutImprovement = 0;
-    } else {
-        metrics.epochsWithoutImprovement++;
-    }
-
-    // Add to loss history
-    metrics.lossHistory.push_back(currentLoss);
-
-    // Keep only recent history
-    if (metrics.lossHistory.size() > 100) {
-        metrics.lossHistory.erase(metrics.lossHistory.begin());
-    }
-}
-
-bool Training::shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    // Check early stopping
-    if (criteria.useEarlyStopping && metrics.epochsWithoutImprovement >= criteria.patienceEpochs) {
-        metrics.earlyStopped = true;
-        return true;
-    }
-
-    // Check convergence
-    if (checkConvergence(metrics, criteria)) {
-        metrics.converged = true;
-        return true;
-    }
-
-    return false;
-}
-
-void Training::logTrainingProgress(const TrainingMetrics& metrics, bool verbose) {
-    if (!verbose) return;
-
-    auto elapsed = std::chrono::steady_clock::now() - metrics.startTime;
-    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-
-    std::cout << "Epoch " << metrics.currentEpoch << "/" << metrics.totalEpochs
-              << " - Loss: " << metrics.currentLoss
-              << " (Best: " << metrics.bestLoss << ")"
-              << " - LR: " << metrics.currentLearningRate
-              << " - Elapsed: " << elapsed_seconds << "s";
-
-    if (metrics.earlyStopped) {
-        std::cout << " [EARLY STOPPED]";
-    } else if (metrics.converged) {
-        std::cout << " [CONVERGED]";
-    }
-
-    std::cout << std::endl;
-}
-
-} // End of namespace or class, if applicable
-// Convergence and adaptive training methods implementation
-
-bool Training::checkConvergence(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    // Check if loss has improved sufficiently
-    if (metrics.currentLoss < criteria.minLossImprovement) {
-        return true; // Converged due to very low loss
-    }
-
-    // Check for early stopping based on patience
-    if (criteria.useEarlyStopping && metrics.epochsWithoutImprovement >= criteria.patienceEpochs) {
-        return true; // Early stopping triggered
-    }
-
-    // Check maximum epochs
-    if (metrics.currentEpoch >= criteria.maxEpochs) {
-        return true; // Maximum epochs reached
-    }
-
-    // Check minimum learning rate
-    if (metrics.currentLearningRate < criteria.minLearningRate) {
-        return true; // Learning rate too low
-    }
-
-    return false; // Continue training
-}
-
-double Training::adaptiveLearningRate(double currentLR, const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    double newLR = currentLR;
-
-    // Reduce learning rate if no improvement for several epochs
-    if (metrics.epochsWithoutImprovement >= criteria.plateauPatience) {
-        newLR *= 0.5; // Reduce by half
-        if (verbose) {
-            std::cout << "[ADAPTIVE LR] Reducing learning rate to " << newLR
-                      << " due to plateau (no improvement for " << criteria.plateauPatience << " epochs)" << std::endl;
-        }
-    }
-
-    // Ensure minimum learning rate
-    newLR = std::max(newLR, criteria.minLearningRate);
-
-    return newLR;
-}
-
-void Training::initializeTrainingMetrics(TrainingMetrics& metrics, double initialLR, int maxEpochs) {
-    metrics.currentLoss = std::numeric_limits<double>::max();
-    metrics.bestLoss = std::numeric_limits<double>::max();
-    metrics.previousLoss = std::numeric_limits<double>::max();
-    metrics.epochsWithoutImprovement = 0;
-    metrics.currentEpoch = 0;
-    metrics.totalEpochs = maxEpochs;
-    metrics.currentLearningRate = initialLR;
-    metrics.converged = false;
-    metrics.earlyStopped = false;
-    metrics.lossHistory.clear();
-    metrics.startTime = std::chrono::steady_clock::now();
-}
-
-void Training::updateTrainingMetrics(TrainingMetrics& metrics, double currentLoss, int epoch) {
-    metrics.previousLoss = metrics.currentLoss;
-    metrics.currentLoss = currentLoss;
-    metrics.currentEpoch = epoch;
-
-    // Update loss history
-    metrics.lossHistory.push_back(currentLoss);
-
-    // Keep only recent history
-    if (metrics.lossHistory.size() > 100) {
-        metrics.lossHistory.erase(metrics.lossHistory.begin());
-    }
-
-    // Update best loss and improvement tracking
-    if (currentLoss < metrics.bestLoss) {
-        metrics.bestLoss = currentLoss;
-        metrics.epochsWithoutImprovement = 0;
-    } else {
-        metrics.epochsWithoutImprovement++;
-    }
-
-    // Update end time
-    metrics.endTime = std::chrono::steady_clock::now();
-}
-
-bool Training::shouldStopTraining(const TrainingMetrics& metrics, const ConvergenceCriteria& criteria) {
-    return checkConvergence(metrics, criteria);
-}
-
-void Training::logTrainingProgress(const TrainingMetrics& metrics, bool verbose) {
-    if (!verbose) return;
-
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-        metrics.endTime - metrics.startTime).count();
-
-    std::cout << "\n[TRAINING PROGRESS] Epoch " << metrics.currentEpoch << "/" << metrics.totalEpochs
-              << " - Loss: " << std::fixed << std::setprecision(6) << metrics.currentLoss
-              << " - Best: " << std::fixed << std::setprecision(6) << metrics.bestLoss
-              << " - LR: " << std::fixed << std::setprecision(6) << metrics.currentLearningRate
-              << " - Time: " << elapsed << "s"
-              << " - Epochs w/o improvement: " << metrics.epochsWithoutImprovement
-              << std::endl;
-
-    // Log loss trend
-    if (metrics.lossHistory.size() >= 2) {
-        double recentChange = metrics.lossHistory.back() - metrics.lossHistory[metrics.lossHistory.size() - 2];
-        std::cout << "[LOSS TREND] Recent change: " << std::fixed << std::setprecision(8) << recentChange;
-        if (recentChange < 0) {
-            std::cout << " (improving)";
-        } else {
-            std::cout << " (worsening)";
-        }
-        std::cout << std::endl;
-    }
-}
 
 

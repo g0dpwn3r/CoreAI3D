@@ -151,8 +151,11 @@ private:
     float yTransform2_derivative_m(float y, float e, float n, float m);
     float zTransform2_derivative_m(float z, float e, float n, float m);
     void computeMinMax(const std::vector<std::vector<float>>& data, float& min_val, float& max_val);
-
+    void initializeWeightsAdaptive(int from_size, int to_size, std::vector<std::vector<float>>& weights, ActivationType activation_type);
+    void setWeightInitialization(WeightInitialization type, float scale, unsigned int seed); 
+    
 public:
+    CoreAI(); // Default constructor
     CoreAI(int inputSize_, int layers_, int neurons_, int outputSize_,
         float min_, float max_, bool verbose_ = false);
 
@@ -288,7 +291,7 @@ public:
     void setWeightsHiddenInput(const std::vector<std::vector<float> >& data);
     void setWeightsOutputHidden(const std::vector<std::vector<float> >& data);
     void initializeMatrix(std::vector<std::vector<float>>& matrix, int rows, int cols);
-    void initializeVector(std::vector<float>& vec, int size);
+    void initializeVector(std::vector<float>& vec, int size);;
     template<typename Func>
     void fillMatrixWithTransform(std::vector<std::vector<float>>& matrix, Func transform);
     template<typename Func>
@@ -354,6 +357,10 @@ public:
     void enableResidualConnections(bool enable, const std::vector<std::vector<int>>& connections = {});
     void configureAttention(bool enable, float temperature = 1.0f, float weight = 1.0f);
     void setLayerNeurons(int layer_index, int neurons);
+    void initializeMultiLayerWeights();
+    void initializeAttentionWeights();
+    void setLayerActivation(int layer_index, ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f, int calculus_N = 10, float calculus_SM = 1.0f, float calculus_a = 1.0f);
+    void setAllLayerActivations(ActivationType type, float alpha = 1.0f, float beta = 0.1f, float spatial_weight = 1.0f, int calculus_N = 10, float calculus_SM = 1.0f, float calculus_a = 1.0f);
 
     // 3D transform configuration methods (for auto-tuning)
     void set3DTransformConfig(bool enable_polynomial, bool enable_trigonometric, bool enable_log_exp,

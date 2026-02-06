@@ -426,7 +426,3 @@ TEST_F(ComparisonTests, StatisticalSignificanceTest) {
     std::remove("statistical_significance.csv");
 }
 
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}

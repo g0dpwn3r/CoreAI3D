@@ -473,3 +473,4 @@ docker-compose.override.yml
 #
 # Review and adjust patterns as needed for your workflow.
 # Use 'git add -f <file>' to force add files that match ignore patterns.
+custom-ports/mysql-connector-cpp/vcpkg_installedcustom-ports/mysql-connector-cpp/vcpkg_installed/
