@@ -219,12 +219,12 @@ option(USE_MYSQL "Enable MySQL support" ON)
 
 if(USE_MYSQL)
     message(STATUS "Attempting to manually find MySQL Connector/C++...")
-    message(STATUS "Searching in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}")
+    message(STATUS "Searching in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}")
 
     # 1. Find Header
     find_path(MYSQL_INCLUDE_DIR 
         NAMES mysqlx/xdevapi.h 
-        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/include"
+        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include"
         NO_DEFAULT_PATH
     )
 
@@ -239,14 +239,14 @@ if(USE_MYSQL)
     # Note: We look for 'mysqlcppconn8x' because that is what is on disk.
     find_library(MYSQLX_LIB 
         NAMES mysqlcppconn8x mysqlcppconnx mysqlcppconnx-static
-        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}"
+        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}"
         NO_DEFAULT_PATH
     )
 
     # 4. Find JDBC Library (libmysqlcppconn8.a)
     find_library(MYSQL_LIB 
         NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn-static
-        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}"
+        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}"
         NO_DEFAULT_PATH
     )
 
@@ -284,7 +284,7 @@ if(USE_MYSQL)
         target_link_libraries(CoreAI3DLib PUBLIC ZLIB::ZLIB)
         
     else()
-        message(FATAL_ERROR "Could NOT find MySQL libraries.\n  Expected to find: libmysqlcppconn8x.a or libmysqlcppconnx.a\n  Checked: ${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-linux/${MYSQL_LIB_PATH_SUFFIX}")
+        message(FATAL_ERROR "Could NOT find MySQL libraries.\n  Expected to find: libmysqlcppconn8x.a or libmysqlcppconnx.a\n  Checked: ${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}")
     endif()
 else()
     message(STATUS "MySQL support disabled")
