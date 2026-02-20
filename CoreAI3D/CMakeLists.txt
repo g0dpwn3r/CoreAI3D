@@ -220,13 +220,12 @@ option(USE_MYSQL "Enable MySQL support" ON)
 if(USE_MYSQL)
     message(STATUS "Finding MySQL Connector/C++ via vcpkg...")
     
-    # Let vcpkg's toolchain find the package automatically
-    find_package(mysql-connector-cpp CONFIG REQUIRED)
+    # Use the 'unofficial-' prefix required by vcpkg's custom wrapper
+    find_package(unofficial-mysql-connector-cpp CONFIG REQUIRED)
     
-    # Link the X DevAPI and JDBC targets provided by the package
+    # Link the target provided by the wrapper
     target_link_libraries(CoreAI3DLib PUBLIC 
-        mysql-connector-cpp::xdevapi
-        mysql-connector-cpp::jdbc
+        unofficial::mysql-connector-cpp::connector
     )
 
     target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
@@ -241,24 +240,6 @@ if(USE_MYSQL)
 else()
     message(STATUS "MySQL support disabled")
 endif()
-# If we copied local google/googleapis into the build tree, include them too
-if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
-    target_include_directories(CoreAI3DLib PUBLIC
-        ${CMAKE_CURRENT_BINARY_DIR}/google
-        ${CMAKE_CURRENT_BINARY_DIR}/googleapis
-    )
-else()
-    # Otherwise include protobuf include dir detected earlier (from system)
-    if(PROTOBUF_INCLUDE_DIR)
-        target_include_directories(CoreAI3DLib PUBLIC ${PROTOBUF_INCLUDE_DIR})
-    endif()
-endif()
-
-# Also add the generic protobuf include if we have it
-if(PROTOBUF_INCLUDE_DIR)
-    target_include_directories(CoreAI3DLib PUBLIC ${PROTOBUF_INCLUDE_DIR})
-endif()
-
 # Add include directories for system packages
 if(ABSL_FOUND)
     target_include_directories(CoreAI3DLib PUBLIC ${ABSL_INCLUDE_DIRS})
