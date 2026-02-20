@@ -218,74 +218,26 @@ target_precompile_headers(CoreAI3DLib
 option(USE_MYSQL "Enable MySQL support" ON)
 
 if(USE_MYSQL)
-    message(STATUS "Attempting to manually find MySQL Connector/C++...")
-    message(STATUS "Searching in: ${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}")
-
-    # 1. Find Header
-    find_path(MYSQL_INCLUDE_DIR 
-        NAMES mysqlx/xdevapi.h 
-        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include"
-        NO_DEFAULT_PATH
+    message(STATUS "Finding MySQL Connector/C++ via vcpkg...")
+    
+    # Let vcpkg's toolchain find the package automatically
+    find_package(mysql-connector-cpp CONFIG REQUIRED)
+    
+    # Link the X DevAPI and JDBC targets provided by the package
+    target_link_libraries(CoreAI3DLib PUBLIC 
+        mysql-connector-cpp::xdevapi
+        mysql-connector-cpp::jdbc
     )
 
-    # 2. Set Library Suffix (Debug vs Release)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(MYSQL_LIB_PATH_SUFFIX "debug/lib")
-    else()
-        set(MYSQL_LIB_PATH_SUFFIX "lib")
-    endif()
-
-    # 3. Find X DevAPI Library (libmysqlcppconn8x.a)
-    # Note: We look for 'mysqlcppconn8x' because that is what is on disk.
-    find_library(MYSQLX_LIB 
-        NAMES mysqlcppconn8x mysqlcppconnx mysqlcppconnx-static
-        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}"
-        NO_DEFAULT_PATH
-    )
-
-    # 4. Find JDBC Library (libmysqlcppconn8.a)
-    find_library(MYSQL_LIB 
-        NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn-static
-        PATHS "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}"
-        NO_DEFAULT_PATH
-    )
-
-    if(MYSQL_INCLUDE_DIR AND MYSQLX_LIB)
-        message(STATUS "Found MySQL Header: ${MYSQL_INCLUDE_DIR}")
-        message(STATUS "Found MySQL X Lib: ${MYSQLX_LIB}")
-        
-        # Link X DevAPI
-        add_library(mysql-connector-cpp::xconnector UNKNOWN IMPORTED)
-        set_target_properties(mysql-connector-cpp::xconnector PROPERTIES
-            IMPORTED_LOCATION "${MYSQLX_LIB}"
-            INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_INCLUDE_DIR}"
-        )
-        target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::xconnector)
-
-        # Link JDBC (Optional but recommended)
-        if(MYSQL_LIB)
-            message(STATUS "Found MySQL JDBC Lib: ${MYSQL_LIB}")
-            add_library(mysql-connector-cpp::connector UNKNOWN IMPORTED)
-            set_target_properties(mysql-connector-cpp::connector PROPERTIES
-                IMPORTED_LOCATION "${MYSQL_LIB}"
-                INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_INCLUDE_DIR}"
-            )
-            target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::connector)
-        endif()
-
-        target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
-        
-        # Required dependencies for static linking
-        find_package(OpenSSL REQUIRED)
-        target_link_libraries(CoreAI3DLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
-        
-        # Manually link ZLIB/ZSTD/LZ4 if they exist (Critical for static MySQL)
-        find_package(ZLIB REQUIRED)
-        target_link_libraries(CoreAI3DLib PUBLIC ZLIB::ZLIB)
-        
-    else()
-        message(FATAL_ERROR "Could NOT find MySQL libraries.\n  Expected to find: libmysqlcppconn8x.a or libmysqlcppconnx.a\n  Checked: ${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/${MYSQL_LIB_PATH_SUFFIX}")
-    endif()
+    target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
+    
+    # Required dependencies for static linking
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(CoreAI3DLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    
+    # Manually link ZLIB if needed
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(CoreAI3DLib PUBLIC ZLIB::ZLIB)
 else()
     message(STATUS "MySQL support disabled")
 endif()
