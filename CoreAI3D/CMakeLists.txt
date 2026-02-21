@@ -220,12 +220,13 @@ option(USE_MYSQL "Enable MySQL support" ON)
 if(USE_MYSQL)
     message(STATUS "Finding MySQL Connector/C++ via vcpkg...")
     
-    # Use the 'unofficial-' prefix required by vcpkg's custom wrapper
-    find_package(unofficial-mysql-connector-cpp CONFIG REQUIRED)
+    # Use the modern package name for MySQL Connector 8.x / 9.x
+    find_package(mysql-concpp CONFIG REQUIRED)
     
-    # Link the target provided by the wrapper
+    # Link the X DevAPI target (mysqlcppconnx). 
+    # If you also need the JDBC API, you can add mysqlcppconn8
     target_link_libraries(CoreAI3DLib PUBLIC 
-        unofficial::mysql-connector-cpp::connector
+        mysqlcppconnx
     )
 
     target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
