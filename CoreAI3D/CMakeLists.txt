@@ -218,30 +218,61 @@ target_precompile_headers(CoreAI3DLib
 option(USE_MYSQL "Enable MySQL support" ON)
 
 if(USE_MYSQL)
-    message(STATUS "Finding MySQL Connector/C++ via vcpkg...")
-    
-    # Use the modern package name for MySQL Connector 8.x / 9.x
-    find_package(mysql-concpp CONFIG REQUIRED)
-    
-    # Link the X DevAPI target (mysqlcppconnx). 
-    # If you also need the JDBC API, you can add mysqlcppconn8
-    target_link_libraries(CoreAI3DLib PUBLIC 
-        mysqlcppconnx
+    message(STATUS "Configuring MySQL Connector/C++ via vcpkg manual mapping...")
+
+    # 1. Find the headers inside the vcpkg include directory
+    find_path(MYSQL_CONCPP_INCLUDE_DIR
+        NAMES mysqlx/xdevapi.h
+        PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include"
+        NO_DEFAULT_PATH
     )
 
-    target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
-    
-    # Required dependencies for static linking
-    find_package(OpenSSL REQUIRED)
-    target_link_libraries(CoreAI3DLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
-    
-    # Manually link ZLIB if needed
-    find_package(ZLIB REQUIRED)
-    target_link_libraries(CoreAI3DLib PUBLIC ZLIB::ZLIB)
+    # 2. Find the Release library
+    find_library(MYSQL_CONCPP_LIBRARY_RELEASE
+        NAMES mysqlcppconnx mysqlcppconn8x mysqlcppconnx-static
+        PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
+        NO_DEFAULT_PATH
+    )
+
+    # 3. Find the Debug library
+    find_library(MYSQL_CONCPP_LIBRARY_DEBUG
+        NAMES mysqlcppconnx mysqlcppconn8x mysqlcppconnx-static
+        PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib"
+        NO_DEFAULT_PATH
+    )
+
+    # 4. Bind them together into a single target
+    if(MYSQL_CONCPP_INCLUDE_DIR AND MYSQL_CONCPP_LIBRARY_RELEASE AND MYSQL_CONCPP_LIBRARY_DEBUG)
+        message(STATUS "Found MySQL Connector/C++ Include: ${MYSQL_CONCPP_INCLUDE_DIR}")
+        message(STATUS "Found MySQL Connector/C++ Release Lib: ${MYSQL_CONCPP_LIBRARY_RELEASE}")
+        message(STATUS "Found MySQL Connector/C++ Debug Lib: ${MYSQL_CONCPP_LIBRARY_DEBUG}")
+
+        # Create an imported target that automatically switches based on build type
+        add_library(mysql::concpp UNKNOWN IMPORTED)
+        set_target_properties(mysql::concpp PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${MYSQL_CONCPP_INCLUDE_DIR}"
+            IMPORTED_LOCATION_RELEASE "${MYSQL_CONCPP_LIBRARY_RELEASE}"
+            IMPORTED_LOCATION_DEBUG "${MYSQL_CONCPP_LIBRARY_DEBUG}"
+            # Fallback location just in case
+            IMPORTED_LOCATION "${MYSQL_CONCPP_LIBRARY_RELEASE}" 
+        )
+
+        # Link the custom target to your main library
+        target_link_libraries(CoreAI3DLib PUBLIC mysql::concpp)
+        target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
+
+        # Required dependencies for static linking
+        find_package(OpenSSL REQUIRED)
+        target_link_libraries(CoreAI3DLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+
+        find_package(ZLIB REQUIRED)
+        target_link_libraries(CoreAI3DLib PUBLIC ZLIB::ZLIB)
+    else()
+        message(FATAL_ERROR "Could NOT find MySQL Connector/C++ headers or libs in the vcpkg installed directory.")
+    endif()
 else()
     message(STATUS "MySQL support disabled")
 endif()
-# Add include directories for system packages
 if(ABSL_FOUND)
     target_include_directories(CoreAI3DLib PUBLIC ${ABSL_INCLUDE_DIRS})
 endif()
