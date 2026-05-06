@@ -81,6 +81,7 @@ RUN apt-get update && apt-get install -y \
     libcap-dev \
     libcap2-bin \
     libmount-dev \
+    libfixez    \C 8u 7ytrfdsz  b
     libblkid-dev \
     libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
