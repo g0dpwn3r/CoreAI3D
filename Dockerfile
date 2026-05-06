@@ -12,8 +12,11 @@ ENV VCPKG_MAX_CONCURRENCY=2
 # MASSIVE DEPENDENCY INSTALLATION
 # We group these by category so you can see what is covered.
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# MASSIVE DEPENDENCY INSTALLATION (Updated)
+# -----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-    # --- Core Build Tools ---
+    # --- Core Build Tools & Post-Processing ---
     build-essential \
     cmake \
     ninja-build \
@@ -35,6 +38,9 @@ RUN apt-get update && apt-get install -y \
     nasm \
     yasm \
     gperf \
+    m4 \
+    gettext \
+    patchelf \
     # --- Python & System Utilities ---
     python3 \
     python3-dev \
@@ -50,7 +56,7 @@ RUN apt-get update && apt-get install -y \
     libncurses-dev \
     libtinfo-dev \
     libtirpc-dev \
-    # --- X11 / GUI / Windowing (Required by Cairo, OpenCV, FFmpeg) ---
+    # --- X11 / GUI / Windowing ---
     libx11-dev \
     libxft-dev \
     libxext-dev \
@@ -66,14 +72,16 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
-    # --- Audio & Media (Required by PortAudio, OpenAL, FFmpeg) ---
+    # --- Audio & Media ---
     libasound2-dev \
     libpulse-dev \
     libudev-dev \
-    # --- SystemD & DBus (Required by libsystemd, at-spi2) ---
+    # --- SystemD & DBus ---
     libdbus-1-dev \
     libcap-dev \
+    libcap2-bin \
     libmount-dev \
+    libblkid-dev \
     libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
