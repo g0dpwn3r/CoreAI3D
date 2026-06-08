@@ -6,11 +6,19 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
 # Restrict vcpkg concurrency to prevent Out-Of-Memory (OOM) kills on heavy compiles
-ENV VCPKG_MAX_CONCURRENCY=2
 
+ENV VCPKG_MAX_CONCURRENCY=1
+# Force vcpkg to retry downloads more aggressively and wait longer for GitHub
+ENV VCPKG_KEEP_GOING=1 \
+    VCPKG_MAX_CONCURRENCY=1 \
+    CURL_MAX_RETRIES=10 \
+    CURL_RETRY_DELAY=5
 # -----------------------------------------------------------------------------
 # MASSIVE DEPENDENCY INSTALLATION
 # We group these by category so you can see what is covered.
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# MASSIVE DEPENDENCY INSTALLATION (Updated)
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
 # MASSIVE DEPENDENCY INSTALLATION (Updated)
@@ -81,7 +89,6 @@ RUN apt-get update && apt-get install -y \
     libcap-dev \
     libcap2-bin \
     libmount-dev \
-    libfixez    \C 8u 7ytrfdsz  b
     libblkid-dev \
     libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -101,6 +108,13 @@ RUN cd CoreAI3D && git lfs pull
 # Bootstrap Vcpkg
 RUN cd vcpkg && ./bootstrap-vcpkg.sh && ./vcpkg integrate install
 
+# Install system-level build dependencies required by libsystemd in vcpkg
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    gperf \
+    python3-jinja2 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 # ---------------------------------------------------------------------
 # FORCE RELEASE-ONLY BUILD
 # ---------------------------------------------------------------------
@@ -111,8 +125,10 @@ RUN echo "set(VCPKG_TARGET_ARCHITECTURE x64)" > /app/vcpkg/triplets/x64-linux-re
     echo "set(VCPKG_BUILD_TYPE release)" >> /app/vcpkg/triplets/x64-linux-release.cmake
 
 # Configure CMake
+# Configure CMake and force log dump on vcpkg # Configure CMake and isolate the exact error on failure
+# Configure CMake and output the main manifest log on failure
 RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
-    cmake .. \
+    (cmake .. \
     -G "Ninja" \
     -DCMAKE_MAKE_PROGRAM=/usr/bin/ninja \
     -DCMAKE_C_COMPILER=/usr/bin/gcc \
@@ -120,8 +136,10 @@ RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
-    -DVCPKG_TARGET_TRIPLET=x64-linux-release
-
+    -DVCPKG_TARGET_TRIPLET=x64-linux-release || \
+    (echo -e "\n\n=== VCPKG MAIN ERROR LOG ===" && \
+    cat /app/CoreAI3D/build/vcpkg-manifest-install.log && \
+    exit 1))
 # Build
 RUN cd CoreAI3D/build && ninja
 

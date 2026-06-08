@@ -108,13 +108,22 @@ RUN python -m pip install --break-system-packages \
     playwright \
     supervisor
 
-# Install Node.js packages for web automation
-RUN npm install -g \
+# 1. Install the system Chromium package and its dependencies
+RUN apt-get update && apt-get install -y \
+    chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Instruct Puppeteer to skip the download and use the system Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# 3. Install Node.js packages for web automation
+# (Adding --unsafe-perm ensures root doesn't drop privileges during global installs)
+RUN npm install -g --unsafe-perm \
     puppeteer \
     cheerio \
     axios \
     ws
-
 # Supervisor setup
 RUN mkdir -p /etc/supervisor/conf.d
 COPY docker/sandbox/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
