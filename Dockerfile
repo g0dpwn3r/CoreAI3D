@@ -4,6 +4,8 @@ FROM ubuntu:latest
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+ENV CXXFLAGS="-Wno-error=override-init"
+ENV CFLAGS="-Wno-error=override-init"
 
 # Restrict vcpkg concurrency to prevent Out-Of-Memory (OOM) kills on heavy compiles
 
@@ -127,6 +129,9 @@ RUN echo "set(VCPKG_TARGET_ARCHITECTURE x64)" > /app/vcpkg/triplets/x64-linux-re
 # Configure CMake
 # Configure CMake and force log dump on vcpkg # Configure CMake and isolate the exact error on failure
 # Configure CMake and output the main manifest log on failure
+# Configure CMake and output the exact utfcpp logs on failure
+# Configure CMake and output the main manifest log on failure
+# Configure CMake and output the exact libsystemd error
 RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
     (cmake .. \
     -G "Ninja" \
@@ -137,8 +142,8 @@ RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
     -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
     -DVCPKG_TARGET_TRIPLET=x64-linux-release || \
-    (echo -e "\n\n=== VCPKG MAIN ERROR LOG ===" && \
-    cat /app/CoreAI3D/build/vcpkg-manifest-install.log && \
+    (echo -e "\n\n=== LIBSYSTEMD RAW ERROR LOG ===" && \
+    tail -n 200 /app/vcpkg/buildtrees/libsystemd/package-x64-linux-release-rel-out.log && \
     exit 1))
 # Build
 RUN cd CoreAI3D/build && ninja

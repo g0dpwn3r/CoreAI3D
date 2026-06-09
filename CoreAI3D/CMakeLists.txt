@@ -214,6 +214,10 @@ target_precompile_headers(CoreAI3DLib
         ${CMAKE_CURRENT_SOURCE_DIR}/include/CoreAI3D_pch.hpp
 )
 
+find_path(MYSQL_INCLUDE_DIR 
+    NAMES mysqlx/xdevapi.h 
+    PATHS "${CMAKE_TOOLCHAIN_FILE}/../../installed/${VCPKG_TARGET_TRIPLET}/include"
+)
 # Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
 option(USE_MYSQL "Enable MySQL support" ON)
 
