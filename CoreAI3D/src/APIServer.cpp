@@ -152,10 +152,15 @@ bool APIServer::initialize(const std::string& configPath,
                 database = std::make_unique<Database>(this->dbHost, this->dbPort, this->dbUser,
                                                      this->dbPassword, this->dbSchema, this->dbSSLMode, this->createTables);
                 std::cout << "Database connection initialized" << std::endl;
+                
+                // Initialize auth manager after database
+                authManager = std::make_unique<AuthTables>(database.get());
+                std::cout << "AuthTables initialized for JWT/bcrypt authentication" << std::endl;
             } catch (const std::exception& e) {
                 std::cerr << "Warning: Failed to initialize database connection: " << e.what() << std::endl;
                 std::cerr << "Continuing in offline mode" << std::endl;
                 database.reset();
+                authManager.reset();
             }
         }
 
@@ -467,6 +472,10 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             health["server"] = serverName;
             health["is_running"] = isRunning.load();
             return health;
+        }
+        else if (module == "auth") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to auth module, action=" << action << std::endl;
+            return handleAuthAPI(action, requestData, method);
         }
         else if (module == "generate_key") {
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to generate_key module" << std::endl;
@@ -4192,4 +4201,195 @@ json APIServer::handleDatasetAPI(const std::string& action, const json& paramete
     catch (const std::exception& e) {
         return createErrorResponse("Dataset API error: " + std::string(e.what()), 500);
     }
+}
+
+// Authentication API handler
+json APIServer::handleAuthAPI(const std::string& action, const json& parameters, const std::string& method) {
+    try {
+        if (method == "POST" && action == "login") {
+            std::string username = parameters.value("username", "");
+            std::string password = parameters.value("password", "");
+            
+            if (username.empty() || password.empty()) {
+                return createErrorResponse("Username and password are required", 400);
+            }
+            
+            return login(username, password);
+        }
+        else if (method == "POST" && action == "register") {
+            std::string username = parameters.value("username", "");
+            std::string password = parameters.value("password", "");
+            std::string email = parameters.value("email", "");
+            
+            if (username.empty() || password.empty()) {
+                return createErrorResponse("Username and password are required", 400);
+            }
+            
+            if (!authManager) {
+                return createErrorResponse("Auth system not initialized", 500);
+            }
+            
+            bool created = authManager->createUser(username, password, email);
+            if (!created) {
+                return createErrorResponse("Failed to create user (username may already exist)", 400);
+            }
+            
+            return createSuccessResponse("User registered successfully", 
+                {{"username", username}, {"email", email}});
+        }
+        else if (method == "POST" && action == "logout") {
+            std::string sessionId = parameters.value("session_id", "");
+            
+            if (sessionId.empty()) {
+                return createErrorResponse("Session ID is required", 400);
+            }
+            
+            if (authManager) {
+                authManager->invalidateSession(sessionId);
+            }
+            destroySession(sessionId);
+            
+            return createSuccessResponse("Logged out successfully");
+        }
+        else if (method == "POST" && action == "refresh") {
+            std::string refreshToken = parameters.value("refresh_token", "");
+            
+            if (refreshToken.empty()) {
+                return createErrorResponse("Refresh token is required", 400);
+            }
+            
+            int64_t userId;
+            std::string username;
+            if (authManager && authManager->validateJWT(refreshToken, userId, username)) {
+                std::string newJwt = authManager->generateJWT(userId, username);
+                std::string newSessionId = authManager->createSession(userId);
+                return createSuccessResponse("Token refreshed", 
+                    {{"jwt_token", newJwt}, {"session_id", newSessionId}});
+            }
+            
+            return createErrorResponse("Invalid or expired refresh token", 401);
+        }
+        else if (method == "GET" && action == "validate") {
+            std::string jwtToken = parameters.value("token", "");
+            
+            if (jwtToken.empty()) {
+                return createErrorResponse("Token is required", 400);
+            }
+            
+            int64_t userId;
+            std::string username;
+            if (authManager && authManager->validateJWT(jwtToken, userId, username)) {
+                return createSuccessResponse("Token is valid", 
+                    {{"user_id", userId}, {"username", username}});
+            }
+            
+            return createErrorResponse("Invalid or expired token", 401);
+        }
+        else if (method == "POST" && action == "apikey") {
+            std::string userIdStr = parameters.value("user_id", "");
+            std::string description = parameters.value("description", "");
+            std::string existingApiKey = parameters.value("api_key", "");
+            std::string sessionId = parameters.value("session_id", "");
+            
+            if (sessionId.empty()) {
+                return createErrorResponse("Session ID is required", 400);
+            }
+            
+            int64_t uid = userIdStr.empty() ? 0 : std::stoll(userIdStr);
+            
+            std::string apiKey = authManager ? authManager->generateAPIKey() : generateAPIKey();
+            std::string finalApiKey = existingApiKey.empty() ? apiKey : existingApiKey;
+            
+            json response = {
+                {"api_key", finalApiKey},
+                {"description", description},
+                {"created", true},
+                {"timestamp", getTimestampString()}
+            };
+            
+            if (authManager && uid > 0) {
+                authManager->saveAPIKey(finalApiKey, uid, description);
+            }
+            
+            return response;
+        }
+        else {
+            return createErrorResponse("Unknown auth action: " + action + " with method " + method, 400);
+        }
+    }
+    catch (const std::invalid_argument& e) {
+        return createErrorResponse("Invalid request: " + std::string(e.what()), 400);
+    }
+    catch (const std::exception& e) {
+        return createErrorResponse("Auth API error: " + std::string(e.what()), 500);
+    }
+}
+
+// User login with JWT generation
+json APIServer::login(const std::string& username, const std::string& password) {
+    try {
+        if (!authManager) {
+            return createErrorResponse("Auth system not initialized - check database connection", 500);
+        }
+        
+        auto userOpt = authManager->getUserByUsername(username);
+        if (!userOpt.has_value()) {
+            return createErrorResponse("Invalid username or password", 401);
+        }
+        
+        auto user = userOpt.value();
+        
+        if (!authManager->verifyPassword(password, user.passwordHash, user.salt)) {
+            return createErrorResponse("Invalid username or password", 401);
+        }
+        
+        std::string jwtToken = authManager->generateJWT(user.id, user.username);
+        std::string sessionId = authManager->createSession(user.id);
+        if (sessionId.empty()) {
+            return createErrorResponse("Failed to create user session", 500);
+        }
+        
+        createSession(username + ":" + std::to_string(user.id));
+        
+        json response = {
+            {"status", "success"},
+            {"message", "Authentication successful"},
+            {"jwt_token", jwtToken},
+            {"session_id", sessionId},
+            {"user", {
+                {"id", user.id},
+                {"username", user.username},
+                {"email", user.email}
+            }},
+            {"expires_in", 900},
+            {"timestamp", getTimestampString()}
+        };
+        
+        return response;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Login error: " << e.what() << std::endl;
+        return createErrorResponse("Authentication failed: " + std::string(e.what()), 500);
+    }
+}
+
+// JWT validation for protected endpoints
+bool APIServer::validateJWTToken(const std::string& authHeader, int64_t& outUserId, std::string& outUsername) {
+    if (authHeader.empty()) {
+        return false;
+    }
+    
+    if (authHeader.substr(0, 7) != "Bearer ") {
+        return false;
+    }
+    
+    std::string token = authHeader.substr(7);
+    
+    if (!authManager) {
+        outUserId = 0;
+        outUsername = "offline";
+        return true;
+    }
+    
+    return authManager->validateJWT(token, outUserId, outUsername);
 }

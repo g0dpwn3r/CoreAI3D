@@ -345,6 +345,42 @@ void Database::createTables() {
                        "FOREIGN KEY (session_id) REFERENCES " + dbSchema + ".chat_sessions(id) ON DELETE CASCADE"
                        ")").execute();
 
+        // Create users table for authentication
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".users ("
+                       "id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+                       "username VARCHAR(255) UNIQUE NOT NULL,"
+                       "password_hash VARCHAR(255) NOT NULL,"
+                       "salt VARCHAR(64) NOT NULL,"
+                       "email VARCHAR(255),"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                       "INDEX idx_username (username)"
+                       ")").execute();
+
+        // Create sessions table for user sessions with JWT tokens
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".sessions ("
+                       "id VARCHAR(128) PRIMARY KEY,"
+                       "user_id BIGINT NOT NULL,"
+                       "jwt_token TEXT NOT NULL,"
+                       "expires_at TIMESTAMP NOT NULL,"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "INDEX idx_user_expires (user_id, expires_at),"
+                       "INDEX idx_expires (expires_at),"
+                       "FOREIGN KEY (user_id) REFERENCES " + dbSchema + ".users(id) ON DELETE CASCADE"
+                       ")").execute();
+
+        // Create api_keys table for API key management
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".api_keys ("
+                       "key VARCHAR(64) PRIMARY KEY,"
+                       "user_id BIGINT NOT NULL,"
+                       "description TEXT,"
+                       "is_active BOOLEAN DEFAULT TRUE,"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+                       "INDEX idx_user_active (user_id, is_active),"
+                       "FOREIGN KEY (user_id) REFERENCES " + dbSchema + ".users(id) ON DELETE CASCADE"
+                       ")").execute();
+
         std::cout << "Created main database tables in schema " << dbSchema << std::endl;
         createPredictionResultsTable();
     } catch (const std::exception& ex) {

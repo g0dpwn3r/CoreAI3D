@@ -11,6 +11,7 @@
 #include "Train.hpp"
 #include "Predict.hpp"
 #include "Database.hpp"
+#include "AuthTables.hpp"
 #include "HyperparameterTuner.hpp"
 #include <boost/beast.hpp>
 #include <boost/asio.hpp>
@@ -32,11 +33,13 @@ class APIServer {
 private:
     std::unique_ptr<ModuleOrchestrator> orchestrator;
     std::unique_ptr<Training> trainingModule;
-    // std::unique_ptr<HyperparameterTuner> hyperparameterTuner;
     std::unique_ptr<Predict> predictModule;
     std::string serverName;
     bool isInitialized;
     std::atomic<bool> isRunning;
+    std::unique_ptr<AuthTables> authManager;
+
+    std::string jwtSecret;
 
     // Server configuration
     std::string host;
@@ -91,11 +94,17 @@ protected:
     virtual json handleSystemDebug(const json& parameters);
     virtual json handleDatasetAPI(const std::string& action, const json& parameters, const std::string& method);
 
+    // Authentication API handler
+    virtual json handleAuthAPI(const std::string& action, const json& parameters, const std::string& method);
+
     // HTTP request handling
     virtual void handleRequest(http::request<http::string_body>&& req, tcp::socket socket);
     virtual json parseRequestBody(const std::string& body);
     virtual std::string createResponse(const json& responseData, unsigned int statusCode = 200);
     virtual void sendErrorResponse(tcp::socket& socket, const std::string& error, unsigned int statusCode = 400);
+
+    // JWT validation for protected endpoints
+    virtual bool validateJWTToken(const std::string& authHeader, int64_t& outUserId, std::string& outUsername);
 
 public:
     void handleRequestInternal(http::request<http::string_body>&& req, tcp::socket socket);
@@ -111,6 +120,7 @@ public:
     virtual bool authenticateRequest(const std::string& sessionId, const json& request);
     virtual std::string generateAPIKey();
     virtual bool validateAPIKey(const std::string& apiKey);
+    virtual json login(const std::string& username, const std::string& password);
 
 public:
     // Constructor

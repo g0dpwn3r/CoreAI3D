@@ -132,8 +132,9 @@ RUN echo "set(VCPKG_TARGET_ARCHITECTURE x64)" > /app/vcpkg/triplets/x64-linux-re
 # Configure CMake and output the exact utfcpp logs on failure
 # Configure CMake and output the main manifest log on failure
 # Configure CMake and output the exact libsystemd error
+# Configure CMake
 RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
-    (cmake .. \
+    cmake .. \
     -G "Ninja" \
     -DCMAKE_MAKE_PROGRAM=/usr/bin/ninja \
     -DCMAKE_C_COMPILER=/usr/bin/gcc \
@@ -141,10 +142,7 @@ RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake \
     -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
-    -DVCPKG_TARGET_TRIPLET=x64-linux-release || \
-    (echo -e "\n\n=== LIBSYSTEMD RAW ERROR LOG ===" && \
-    tail -n 200 /app/vcpkg/buildtrees/libsystemd/package-x64-linux-release-rel-out.log && \
-    exit 1))
+    -DVCPKG_TARGET_TRIPLET=x64-linux-release
 # Build
 RUN cd CoreAI3D/build && ninja
 

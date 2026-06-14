@@ -178,8 +178,12 @@ private:
     // NEW: Helper to create the prediction results table
     void createPredictionResultsTable();
 
-    // Connection management methods
+    // Connection management methods - made public for AuthTables access
+public:
     bool isConnectionHealthy();
     void reconnect();
     void ensureConnection();
+
+    // Friend class for AuthTables to access private members
+    friend class AuthTables;
 };
