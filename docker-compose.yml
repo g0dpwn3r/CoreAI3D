@@ -25,38 +25,16 @@ services:
       DB_PASSWORD: pmAkRV4lAAKsOfdWCUxP
       DB_SCHEMA: CoreAI3D
     ports:
-      - "8080:8080" # API Server
-      - "8081:8081" # WebSocket Server
+      - "1906:8080" # API Server
+      - "1907:8081" # WebSocket Server
     volumes:
       - ./linux_gui/training_data:/training_data
+      - ./emb.txt:/training_data/emb.txt:ro
     command:
-      - "/app/build/CoreAI3D"
-      - "--input-file"
-      - "gold.csv"
-      - "-d"
-      - ","
-      - "-iz"
-      - "2"
-      - "-s"
-      - "5"
-      - "-e"
-      - "5"
-      - "-l"
-      - "5"
-      - "-n"
-      - "25"
-      - "--min"
-      - "0"
-      - "--max"
-      - "1000000"
-      - "-oz"
-      - "1"
-      - "-lr"
-      - "0.001"
-      - "--contains-header"
-      - "--start-predict"
-      - "--dataset-name"
-      - "gold-test-1A"
+      - "/app/CoreAI3D/build/CoreAI3D"
+      - "--api-port"
+      - "8080"
+      - "--enable-websocket"
       - "--db-host"
       - "mysql"
       - "--db-port"
@@ -67,14 +45,8 @@ services:
       - "pmAkRV4lAAKsOfdWCUxP"
       - "--db-schema"
       - "CoreAI3D"
-      - "-di"
-      - "1"
-      - "-o"
-      - "gold-output.csv"
-      - "--language"
-      - "en"
       - "--embedding-file"
-      - "emb.txt"
+      - "/training_data/emb.txt"
 
   # Linux Sandbox Environments
   ubuntu-sandbox:

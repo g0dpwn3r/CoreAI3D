@@ -133,6 +133,8 @@ RUN echo "set(VCPKG_TARGET_ARCHITECTURE x64)" > /app/vcpkg/triplets/x64-linux-re
 # Configure CMake and output the main manifest log on failure
 # Configure CMake and output the exact libsystemd error
 # Configure CMake
+COPY vcpkg.json ./
+
 RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
     cmake .. \
     -G "Ninja" \
