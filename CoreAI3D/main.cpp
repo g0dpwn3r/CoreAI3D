@@ -592,7 +592,8 @@ int main(int argc, char* argv[]) {
                 layers_val, neurons_val, minRange_val, maxRange_val,
                 0, 1, numSamples_val, learningRate_val, epochs_val,  // inputSize=0 (dynamic), outputSize=1
                 embeddingFile, language, datasetName, containsHeader, containsTextFlag, delimiter_char,
-                isOfflineMode, dbHost, dbPort_val, dbUser, dbPassword, dbSchema
+                isOfflineMode, dbHost, dbPort_val, dbUser, dbPassword, dbSchema,
+                calculusActivation
             );
 
             if (!success) {

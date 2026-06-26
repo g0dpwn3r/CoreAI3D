@@ -1,0 +1,8 @@
+find_library(LZ4_LIBRARY NAMES lz4 PATHS /usr/lib/x86_64-linux-gnu)
+find_path(LZ4_INCLUDE_DIR NAMES lz4.h PATHS /usr/include)
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(lz4 DEFAULT_MSG LZ4_LIBRARY LZ4_INCLUDE_DIR)
+if(lz4_FOUND)
+    set(lz4_LIBRARIES ${LZ4_LIBRARY})
+    set(lz4_INCLUDE_DIRS ${LZ4_INCLUDE_DIR})
+endif()

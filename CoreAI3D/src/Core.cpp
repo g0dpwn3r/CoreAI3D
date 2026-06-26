@@ -702,6 +702,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
         for (int j = 0; j < this->neurons; ++j)
         {
             float sum = 0.0f;
+            float last_distance = 0.0f;
             for (size_t k = 0; k < this->input[i].size(); ++k)
             {
                 if (safe2DIndex(this->weigth_input_hidden, j, k))
@@ -755,7 +756,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
                     }
 
                     // Compute spatial features
-                    float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
+                    last_distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
                     // Apply advanced 3D transformations
                     float transformed = 0.0f;
@@ -771,7 +772,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
                     }
 
                     // Distance weighting
-                    transformed += distance * 0.1f;
+                    transformed += last_distance * 0.1f;
 
                     // Polynomial transforms
                     if (enable_polynomial) {
@@ -801,7 +802,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
                         if (coord_type == 0) {
                             transformed += log_exp_weight * std::log(1.0f + std::abs(x));
                         } else if (coord_type == 1) {
-                            transformed += log_exp_weight * std::exp(-distance);
+                            transformed += log_exp_weight * std::exp(-last_distance);
                         } else {
                             transformed += log_exp_weight * std::log(1.0f + std::abs(z));
                         }
@@ -818,7 +819,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
 
                     // Angular features (spherical coordinates θ, φ)
                     if (enable_angular) {
-                        float r = distance;
+                        float r = last_distance;
                         float theta = (r > this->epsilon) ? std::acos(std::max(-1.0f, std::min(1.0f, z / r))) : 0.0f;
                         float phi = std::atan2(y, x);
                         transformed += angular_weight * theta;
@@ -848,7 +849,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
                     sum += transformed;
                 }
             }
-            hiddenLayer[j] = this->sigmoid(sum);
+            hiddenLayer[j] = this->activate(sum, layer_activation_configs[1], last_distance);
         }
         raw_hidden_activations.push_back(hiddenLayer);
     }
@@ -935,7 +936,7 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
                     sum += hiddenLayer[k] * this->weigth_output_hidden[j][k];
                 }
             }
-            outputLayer[j] = this->sigmoid(sum);
+            outputLayer[j] = this->activate(sum, layer_activation_configs.back(), 0.0f);
         }
 
         // DEBUG: Log output layer activation for first sample
@@ -1335,7 +1336,7 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
 
                         // Angular features: d/dw(theta) and d/dw(phi)
                         if (enable_angular) {
-                            float r = distance;
+                        float r = distance;
                             if (r > this->epsilon) {
                                 float theta = std::acos(std::max(-1.0f, std::min(1.0f, z / r)));
                                 // derivative of theta w.r.t coordinates is complex, approximate with finite difference

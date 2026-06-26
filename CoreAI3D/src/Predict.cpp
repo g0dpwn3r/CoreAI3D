@@ -17,31 +17,32 @@ Predict::~Predict() {
 }
 
 bool Predict::runPrediction(const std::string& inputFile,
-                           const std::string& outputCsvFile,
-                           const std::string& targetFile,
-                           const std::string& loadModelId,
-                           int datasetId,
-                           int layers,
-                           int neurons,
-                           float minRange,
-                           float maxRange,
-                           int inputSize,
-                           int outputSize,
-                           int numSamples,
-                           double learningRate,
-                           int epochs,
-                           const std::string& embeddingFile,
-                           const std::string& language,
-                           const std::string& datasetName,
-                           bool hasHeader,
-                           bool containsText,
-                           char delimiter,
-                           bool isOfflineMode,
-                           const std::string& dbHost,
-                           int dbPort,
-                           const std::string& dbUser,
-                           const std::string& dbPassword,
-                           const std::string& dbSchema) {
+                            const std::string& outputCsvFile,
+                            const std::string& targetFile,
+                            const std::string& loadModelId,
+                            int datasetId,
+                            int layers,
+                            int neurons,
+                            float minRange,
+                            float maxRange,
+                            int inputSize,
+                            int outputSize,
+                            int numSamples,
+                            double learningRate,
+                            int epochs,
+                            const std::string& embeddingFile,
+                            const std::string& language,
+                            const std::string& datasetName,
+                            bool hasHeader,
+                            bool containsText,
+                            char delimiter,
+                            bool isOfflineMode,
+                            const std::string& dbHost,
+                            int dbPort,
+                            const std::string& dbUser,
+                            const std::string& dbPassword,
+                            const std::string& dbSchema,
+                            bool calculusActivation) {
     try {
         if (verbose_) {
             std::cout << "[PREDICT] Starting prediction process..." << std::endl;
@@ -86,6 +87,14 @@ bool Predict::runPrediction(const std::string& inputFile,
         if (!preprocessData(minRange, maxRange)) {
             std::cerr << "[PREDICT] Failed to preprocess data." << std::endl;
             return false;
+        }
+
+        // Apply calculus activation if requested
+        if (calculusActivation && trainer_) {
+            CoreAI* core = trainer_->getCore();
+            if (core) {
+                core->setAllLayerActivations(ActivationType::INTEGRAL_SIGMOID, 1.0f, 0.1f, 1.0f, 10, 1.0f, 1.0f);
+            }
         }
 
         // Train model
