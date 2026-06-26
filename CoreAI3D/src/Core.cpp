@@ -1735,33 +1735,43 @@ void CoreAI::denormalizeOutput()
     }
 
     float normalized_range_diff = this->maxVal - this->minVal;
-    float original_range_diff = trainer->original_data_global_max - trainer->original_data_global_min;
+    size_t num_target_features = trainer->target_mins.size();
 
     // Check for valid ranges
     if (std::abs(normalized_range_diff) < std::numeric_limits<float>::epsilon()) {
         std::cerr << "Warning: Normalized range is zero, cannot denormalize properly." << std::endl;
         return;
     }
-    if (std::abs(original_range_diff) < std::numeric_limits<float>::epsilon()) {
-        std::cerr << "Warning: Original data range is zero, denormalizing to constant value." << std::endl;
-    }
 
     for (auto& row : results)
     { // Denormalize the results/predictions
-        for (float& val : row)
+        for (size_t j = 0; j < row.size(); ++j)
         {
-            float original_val = val;
-            if (std::abs(original_range_diff) > std::numeric_limits<float>::epsilon()) {
-                val = ((val - this->minVal) / normalized_range_diff) * original_range_diff + trainer->original_data_global_min;
+            float original_val = row[j];
+            
+            // Use per-target bounds if available, otherwise fallback to global bounds
+            float y_min, y_max, original_range_diff;
+            if (j < num_target_features && !trainer->target_mins.empty()) {
+                y_min = trainer->target_mins[j];
+                y_max = trainer->target_maxs[j];
+                original_range_diff = y_max - y_min;
             } else {
-                val = trainer->original_data_global_min; // If original range is zero, map to original min
+                y_min = trainer->original_data_global_min;
+                y_max = trainer->original_data_global_max;
+                original_range_diff = y_max - y_min;
+            }
+            
+            if (std::abs(original_range_diff) > std::numeric_limits<float>::epsilon()) {
+                row[j] = ((original_val - this->minVal) / normalized_range_diff) * original_range_diff + y_min;
+            } else {
+                row[j] = y_min; // If original range is zero, map to original min
             }
 
             // DEBUG: Log first few denormalizations (per call, not static)
             if (verbose) {
                 static int call_count = 0;
                 if (call_count++ < 5) {
-                    std::cout << "[DEBUG DENORMALIZE] prediction " << original_val << " -> " << val << std::endl;
+                    std::cout << "[DEBUG DENORMALIZE] prediction " << original_val << " -> " << row[j] << std::endl;
                 }
             }
         }

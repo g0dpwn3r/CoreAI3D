@@ -95,13 +95,44 @@ public:
 #endif
     void printFullMatrix(std::vector<std::vector<float>>& data, int len, int precision = 6);
     void printDenormalizedAsOriginalMatrix(std::vector<std::vector<float>>& normalized_data, int len, int precision = 4);
-    float original_data_global_min;                 // Stores global min from original data for denorm
-    float original_data_global_max;                 // Stores global max from original data for denorm
+    // Per-feature normalization bounds for independent scaling
+    // These replace the single global min/max to prevent gradient collapse
+    // when input features (x, y) have vastly different scales than target (z)
+    std::vector<float> input_min;   // Min value for each input feature dimension (x, y)
+    std::vector<float> input_max;   // Max value for each input feature dimension (x, y)
+    std::vector<float> target_mins; // Min value for each target feature dimension (z)
+    std::vector<float> target_maxs; // Max value for each target feature dimension (z)
+    float target_min;               // Overall min for single-target convenience
+    float target_max;               // Overall max for single-target convenience
+    float original_data_global_min;                 // Kept for backward compatibility / fallback
+    float original_data_global_max;                 // Kept for backward compatibility / fallback
 
 
     // New method to save results to CSV
     bool saveResultsToCSV(const std::string& filename, const std::string& inputFilename, bool hasHeader, const char& delimiter); // New parameter for input filename and header
     std::vector<std::vector<float>> denormalizeMatrix(const std::vector<std::vector<float>>& normalized_data) const;
+
+    // Independent feature normalization for inference on new data
+    // Normalizes each column of data_to_normalize using its corresponding
+    // original_mins[j] / original_maxs[j], mapping to the [target_min, target_max] range.
+    std::vector<std::vector<float>> normalizeDataIndependent(const std::vector<std::vector<float>>& data_to_normalize,
+        const std::vector<float>& original_mins,
+        const std::vector<float>& original_maxs,
+        float target_min, float target_max) const;
+
+    // Core normalization methods with independent X,Y -> Z mapping
+    // Computes per-dimension bounds for inputs and targets
+    void compute_normalization_bounds();
+    // Normalizes inputs (x, y) against their own per-feature bounds
+    void normalize_inputs(float minRange, float maxRange);
+    // Normalizes targets (z) against their own bounds, isolating the target scale
+    void normalize_targets(float minRange, float maxRange);
+    // Reconstructs real-world prediction from normalized z_hat using stored target bounds
+    float denormalize_prediction(float z_norm) const;
+
+    // Denormalization helpers using per-feature and per-target bounds
+    void denormalizeInputs(std::vector<std::vector<float>>& input_data) const;
+    void denormalizeTargets(std::vector<std::vector<float>>& target_data) const;
 
     // Asynchronous training methods
     bool startTraining(double learningRate, int epochs);
