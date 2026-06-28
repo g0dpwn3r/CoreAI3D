@@ -85,7 +85,8 @@ RUN git lfs install
 # ==============================================================================
 FROM system-deps AS vcpkg-bootstrap
 
-RUN git clone --depth 1 https://github.com/g0dpwn3r/vcpkg.git /opt/vcpkg \
+# Clone vcpkg from your fork (full history for compatibility)
+RUN git clone https://github.com/g0dpwn3r/vcpkg.git /opt/vcpkg \
     && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
 RUN printf '%s\n' \
@@ -191,10 +192,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     libgcc-s1 \
     ca-certificates \
-    libglib2.0-0 \
+    libglib2.0-0t64 \
     libgl1 \
     libglu1-mesa \
-    libasound2 \
+    libasound2t64 \
     libpulse0 \
     libx11-6 \
     libxext6 \

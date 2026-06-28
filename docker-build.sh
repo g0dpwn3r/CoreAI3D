@@ -115,8 +115,8 @@ build_coreai3d() {
     log_info "First build will take 1-2 hours (vcpkg dependencies)"
     log_info "Subsequent builds will take 30-60 seconds (source code only)"
     
-    # Build using docker-compose
-    docker-compose build $build_args coreai3d
+    # Build using docker compose
+    docker compose build $build_args coreai3d
     
     log_success "Build completed successfully"
 }
@@ -146,22 +146,22 @@ build_stage() {
 run_app() {
     log_info "Starting CoreAI3D application..."
     
-    docker-compose up -d mysql
+    docker compose up -d mysql
     log_info "Waiting for MySQL to be ready..."
     sleep 10
     
-    docker-compose up -d coreai3d
+    docker compose up -d coreai3d
     
     log_success "Application started"
     log_info "API Server: http://localhost:1906"
     log_info "WebSocket Server: ws://localhost:1907"
-    log_info "View logs: docker-compose logs -f coreai3d"
+    log_info "View logs: docker compose logs -f coreai3d"
 }
 
 # Stop the application
 stop_app() {
     log_info "Stopping CoreAI3D application..."
-    docker-compose down
+    docker compose down
     log_success "Application stopped"
 }
 
@@ -172,7 +172,7 @@ clean() {
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         log_info "Cleaning Docker images..."
-        docker-compose down --rmi all --volumes --remove-orphans
+        docker compose down --rmi all --volumes --remove-orphans
         
         log_info "Pruning build cache..."
         docker builder prune -f
