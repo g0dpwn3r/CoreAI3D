@@ -39,7 +39,8 @@ public:
                       const std::string& dbUser = "",
                       const std::string& dbPassword = "",
                       const std::string& dbSchema = "",
-                      bool calculusActivation = false);
+                      bool calculusActivation = false,
+                      int windowSize = 1);
 
     // Get evaluation metrics
     float getRMSE() const { return rmse_; }

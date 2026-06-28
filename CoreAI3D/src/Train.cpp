@@ -33,7 +33,7 @@ Training::Training(bool isOffline, bool verbose, WebSocketServer* wsServer)
     : isOfflineMode(isOffline), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     input_min(), input_max(), target_min(0.0f), target_max(0.0f),
-    layers(0), neurons(0), learningRate(0.0), min(0.0f), max(0.0f), last_known_timestamp(0.0f), // Initialize
+    layers(0), neurons(0), learningRate(0.0), min(0.0f), max(1.0f), last_known_timestamp(0.0f), // Initialize min/max to [0,1] for normalization
     verbose(verbose), // Initialize verbose from parameter
     webSocketServer(wsServer), // Initialize WebSocket server
     trainingActive(false), trainingStopRequested(false), currentEpoch(0), totalEpochs(0), currentLoss(0.0f), // Initialize training state
@@ -930,6 +930,7 @@ void Training::normalize(float minRange, float maxRange) {
 // Computes and stores per-feature bounds for inputs, per-target bounds for outputs,
 // and global bounds for backward compatibility.
 // This is the first step in the independent normalization pipeline.
+// Memory-safe: Explicitly resizes input_min/input_max/target_mins/target_maxs before use.
 void Training::compute_normalization_bounds() {
     size_t num_input_features = inputs.empty() ? 0 : inputs[0].size();
     size_t num_target_features = targets.empty() ? 0 : targets[0].size();
@@ -940,15 +941,32 @@ void Training::compute_normalization_bounds() {
     // This prevents features with large numerical ranges (e.g., Unix timestamps)
     // from dominating the normalization and collapsing other features.
     // ========================================================================
-    input_min.assign(num_input_features, std::numeric_limits<float>::max());
-    input_max.assign(num_input_features, std::numeric_limits<float>::lowest());
+    input_min.assign(num_input_features, 0.0f);
+    input_max.assign(num_input_features, 1.0f);
 
-    for (const auto& row : inputs) {
-        for (size_t j = 0; j < row.size() && j < num_input_features; ++j) {
-            float val = row[j];
-            if (!std::isnan(val) && !std::isinf(val)) {
-                input_min[j] = std::min(input_min[j], val);
-                input_max[j] = std::max(input_max[j], val);
+    for (size_t j = 0; j < num_input_features; ++j) {
+        float featureMin = std::numeric_limits<float>::max();
+        float featureMax = std::numeric_limits<float>::lowest();
+        bool hasValidData = false;
+
+        for (const auto& row : inputs) {
+            if (j < row.size()) {
+                float val = row[j];
+                if (!std::isnan(val) && !std::isinf(val)) {
+                    featureMin = std::min(featureMin, val);
+                    featureMax = std::max(featureMax, val);
+                    hasValidData = true;
+                }
+            }
+        }
+
+        if (hasValidData) {
+            input_min[j] = featureMin;
+            input_max[j] = featureMax;
+            // Defensive: Expand zero range to avoid divide-by-zero in denorm
+            float featureRangeDiff = featureMax - featureMin;
+            if (std::abs(featureRangeDiff) < std::numeric_limits<float>::epsilon()) {
+                input_max[j] = featureMin + 1.0f;
             }
         }
     }
@@ -957,15 +975,32 @@ void Training::compute_normalization_bounds() {
     // PHASE 2: Compute per-target min/max for outputs independently
     // Each target dimension (z) gets its own [Z_min, Z_max] interval.
     // ========================================================================
-    target_mins.assign(num_target_features, std::numeric_limits<float>::max());
-    target_maxs.assign(num_target_features, std::numeric_limits<float>::lowest());
+    target_mins.assign(num_target_features, 0.0f);
+    target_maxs.assign(num_target_features, 1.0f);
 
-    for (const auto& row : targets) {
-        for (size_t j = 0; j < row.size() && j < num_target_features; ++j) {
-            float val = row[j];
-            if (!std::isnan(val) && !std::isinf(val)) {
-                target_mins[j] = std::min(target_mins[j], val);
-                target_maxs[j] = std::max(target_maxs[j], val);
+    for (size_t j = 0; j < num_target_features; ++j) {
+        float featureMin = std::numeric_limits<float>::max();
+        float featureMax = std::numeric_limits<float>::lowest();
+        bool hasValidData = false;
+
+        for (const auto& row : targets) {
+            if (j < row.size()) {
+                float val = row[j];
+                if (!std::isnan(val) && !std::isinf(val)) {
+                    featureMin = std::min(featureMin, val);
+                    featureMax = std::max(featureMax, val);
+                    hasValidData = true;
+                }
+            }
+        }
+
+        if (hasValidData) {
+            target_mins[j] = featureMin;
+            target_maxs[j] = featureMax;
+            // Defensive: Expand zero range to avoid divide-by-zero in denorm
+            float featureRangeDiff = featureMax - featureMin;
+            if (std::abs(featureRangeDiff) < std::numeric_limits<float>::epsilon()) {
+                target_maxs[j] = featureMin + 1.0f;
             }
         }
     }
@@ -1012,6 +1047,7 @@ void Training::compute_normalization_bounds() {
 
 // Normalize input features (x, y) independently per dimension.
 // Formula: X_norm = (X - X_min) / (X_max - X_min) * (maxRange - minRange) + minRange
+// Memory-safe: Explicitly resizes input_min/input_max before use, with defensive zero-variance handling.
 void Training::normalize_inputs(float minRange, float maxRange) {
     if (inputs.empty()) {
         std::cerr << "Warning: No input data to normalize." << std::endl;
@@ -1022,9 +1058,60 @@ void Training::normalize_inputs(float minRange, float maxRange) {
         throw std::invalid_argument("Training::normalize_inputs: minRange must be less than maxRange");
     }
 
-    size_t num_input_features = inputs.empty() ? 0 : inputs[0].size();
+    // STRICT VALIDATION: Ensure all input rows have consistent size
+    size_t num_input_features = inputs[0].size();
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        if (inputs[i].size() != num_input_features) {
+            std::cerr << "[FATAL] Inconsistent input row size at index " << i
+                      << ": expected " << num_input_features << ", got " << inputs[i].size() << std::endl;
+            throw std::runtime_error("Training::normalize_inputs: Inconsistent input dimensions detected");
+        }
+    }
+
     float targetRangeDiff = maxRange - minRange;
 
+    // Memory-safe: Explicitly initialize and resize per-feature bounds vectors
+    // This ensures input_min and input_max are sized correctly BEFORE the normalization loop
+    input_min.clear();
+    input_max.clear();
+    input_min.resize(num_input_features, 0.0f);
+    input_max.resize(num_input_features, 1.0f);
+
+    // Compute per-feature min/max from actual data
+    for (size_t j = 0; j < num_input_features; ++j) {
+        float featureMin = std::numeric_limits<float>::max();
+        float featureMax = std::numeric_limits<float>::lowest();
+        bool hasValidData = false;
+
+        for (size_t i = 0; i < inputs.size(); ++i) {
+            float val = inputs[i][j];
+            if (!std::isnan(val) && !std::isinf(val)) {
+                featureMin = std::min(featureMin, val);
+                featureMax = std::max(featureMax, val);
+                hasValidData = true;
+            }
+        }
+
+        // Defensive: Ensure valid bounds even for constant features
+        if (hasValidData) {
+            input_min[j] = featureMin;
+            input_max[j] = featureMax;
+            float featureRangeDiff = featureMax - featureMin;
+            // Defensive: If range is zero (constant feature), expand range to avoid divide-by-zero
+            if (std::abs(featureRangeDiff) < std::numeric_limits<float>::epsilon()) {
+                input_max[j] = featureMin + 1.0f; // Expand to [min, min+1] range
+            }
+        }
+    }
+
+    // VERIFICATION: Confirm vectors are fully populated before normalization loop
+    if (input_min.size() != num_input_features || input_max.size() != num_input_features) {
+        std::cerr << "[FATAL] Normalization bounds vectors not fully populated!" << std::endl;
+        throw std::runtime_error("Training::normalize_inputs: Bounds vector size mismatch");
+    }
+
+    // Perform normalization with divide-by-zero protection
+    // Zero variance features map to 0.5 (middle of target range) to preserve signal
     for (size_t i = 0; i < inputs.size(); ++i) {
         for (size_t j = 0; j < inputs[i].size() && j < num_input_features; ++j) {
             float val = inputs[i][j];
@@ -1039,7 +1126,8 @@ void Training::normalize_inputs(float minRange, float maxRange) {
                 inputs[i][j] = minRange;
             }
             else if (std::abs(featureRangeDiff) < std::numeric_limits<float>::epsilon()) {
-                inputs[i][j] = minRange; // Constant feature, map to min of target range
+                // Safe default: constant features map to middle of target range
+                inputs[i][j] = minRange + targetRangeDiff * 0.5f;
             }
             else {
                 inputs[i][j] = minRange + ((val - featureMin) * targetRangeDiff) / featureRangeDiff;
@@ -1051,6 +1139,8 @@ void Training::normalize_inputs(float minRange, float maxRange) {
 // Normalize target features (z) independently per dimension.
 // Formula: Z_norm = (Z - Z_min) / (Z_max - Z_min) * (maxRange - minRange) + minRange
 // This isolates the target scale from input scales, protecting calculus gradients.
+// Memory-safe: Explicitly resizes target_mins/target_maxs before use.
+// Defensive: Zero variance features map to 0.5 (middle of target range).
 void Training::normalize_targets(float minRange, float maxRange) {
     if (targets.empty()) {
         std::cerr << "Warning: No target data to normalize." << std::endl;
@@ -1061,11 +1151,64 @@ void Training::normalize_targets(float minRange, float maxRange) {
         throw std::invalid_argument("Training::normalize_targets: minRange must be less than maxRange");
     }
 
-    size_t num_target_features = targets.empty() ? 0 : targets[0].size();
+    // STRICT VALIDATION: Ensure all target rows have consistent size
+    size_t num_target_features = targets[0].size();
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (targets[i].size() != num_target_features) {
+            std::cerr << "[FATAL] Inconsistent target row size at index " << i
+                      << ": expected " << num_target_features << ", got " << targets[i].size() << std::endl;
+            throw std::runtime_error("Training::normalize_targets: Inconsistent target dimensions detected");
+        }
+    }
+
     float targetRangeDiff = maxRange - minRange;
 
+    // Memory-safe: Explicitly initialize and resize per-feature bounds vectors
+    target_mins.clear();
+    target_maxs.clear();
+    target_mins.resize(num_target_features, 0.0f);
+    target_maxs.resize(num_target_features, 1.0f);
+
+    // Compute per-feature min/max from actual data
+    for (size_t j = 0; j < num_target_features; ++j) {
+        float featureMin = std::numeric_limits<float>::max();
+        float featureMax = std::numeric_limits<float>::lowest();
+        bool hasValidData = false;
+
+        for (size_t i = 0; i < targets.size(); ++i) {
+            float val = targets[i][j];
+            if (!std::isnan(val) && !std::isinf(val)) {
+                featureMin = std::min(featureMin, val);
+                featureMax = std::max(featureMax, val);
+                hasValidData = true;
+            }
+        }
+
+        if (hasValidData) {
+            target_mins[j] = featureMin;
+            target_maxs[j] = featureMax;
+            float featureRangeDiff = featureMax - featureMin;
+            // Defensive: Expand zero range to avoid divide-by-zero
+            // STRICT CHECK: X_max == X_min (zero variance) -> safe default to 0.5
+            if (featureMax == featureMin) {
+                target_maxs[j] = featureMin + 1.0f;
+            }
+            else if (std::abs(featureRangeDiff) < std::numeric_limits<float>::epsilon()) {
+                target_maxs[j] = featureMin + 1.0f;
+            }
+        }
+    }
+
+    // VERIFICATION: Confirm vectors are fully populated before normalization loop
+    if (target_mins.size() != num_target_features || target_maxs.size() != num_target_features) {
+        std::cerr << "[FATAL] Target normalization bounds vectors not fully populated!" << std::endl;
+        throw std::runtime_error("Training::normalize_targets: Bounds vector size mismatch");
+    }
+
+    // Perform normalization with divide-by-zero protection
+    // Zero variance features map to 0.5 (middle of target range)
     for (size_t i = 0; i < targets.size(); ++i) {
-        for (size_t j = 0; j < targets[i].size() && j < num_target_features; ++j) {
+        for (size_t j = 0; j < num_target_features; ++j) {
             float val = targets[i][j];
             float featureMin = target_mins[j];
             float featureMax = target_maxs[j];
@@ -1077,8 +1220,13 @@ void Training::normalize_targets(float minRange, float maxRange) {
             else if (std::isnan(val)) {
                 targets[i][j] = minRange;
             }
+            else if (featureMax == featureMin) {
+                // STRICT CHECK: X_max == X_min -> normalized value defaults to 0.5 (middle of target range)
+                targets[i][j] = minRange + targetRangeDiff * 0.5f;
+            }
             else if (std::abs(featureRangeDiff) < std::numeric_limits<float>::epsilon()) {
-                targets[i][j] = minRange;
+                // Safe default: constant features map to middle of target range
+                targets[i][j] = minRange + targetRangeDiff * 0.5f;
             }
             else {
                 targets[i][j] = minRange + ((val - featureMin) * targetRangeDiff) / featureRangeDiff;
@@ -2286,7 +2434,8 @@ std::vector<std::vector<float>> Training::normalizeData(const std::vector<std::v
                 normalized_row.push_back(((val - original_min) / original_range_diff) * target_range_diff + target_min);
             }
             else {
-                normalized_row.push_back(target_min + 0.1f); // Handle zero range
+                // Safe default: constant data maps to middle of target range
+                normalized_row.push_back(target_min + target_range_diff * 0.5f);
             }
         }
         normalized_copy.push_back(normalized_row);
@@ -2299,6 +2448,7 @@ std::vector<std::vector<float>> Training::normalizeData(const std::vector<std::v
 // original_mins[j]..original_maxs[j] into the target range [target_min, target_max].
 // This prevents a single feature's scale (e.g., timestamps) from collapsing
 // the representation of other features (e.g., prices).
+// Defensive: Zero variance features map to 0.5 (middle of target range).
 std::vector<std::vector<float>> Training::normalizeDataIndependent(const std::vector<std::vector<float>>& data_to_normalize,
     const std::vector<float>& original_mins,
     const std::vector<float>& original_maxs,
@@ -2310,6 +2460,14 @@ std::vector<std::vector<float>> Training::normalizeDataIndependent(const std::ve
     std::vector<std::vector<float>> normalized_copy;
     float target_range_diff = target_max - target_min;
     size_t num_features = original_mins.size();
+
+    // Defensive: Handle case where original_mins/original_maxs are empty or mismatched
+    if (num_features == 0 || num_features != original_maxs.size()) {
+        if (verbose) {
+            std::cerr << "[NORMALIZE_INDEPENDENT] Warning: Bounds vectors empty or mismatched. Cannot normalize." << std::endl;
+        }
+        return normalized_copy;
+    }
 
     for (const auto& row : data_to_normalize) {
         std::vector<float> normalized_row;
@@ -2324,7 +2482,8 @@ std::vector<std::vector<float>> Training::normalizeDataIndependent(const std::ve
             } else if (std::abs(original_range_diff) > std::numeric_limits<float>::epsilon()) {
                 normalized_row.push_back(target_min + ((val - original_mins[j]) / original_range_diff) * target_range_diff);
             } else {
-                normalized_row.push_back(target_min);
+                // Safe default: constant features map to middle of target range
+                normalized_row.push_back(target_min + target_range_diff * 0.5f);
             }
         }
         normalized_copy.push_back(normalized_row);
@@ -4667,6 +4826,137 @@ bool Training::loadCSVFromData(const std::vector<std::vector<float>>& data, cons
 
     // Save dataset name
     currentDatasetName = datasetName;
+
+    return true;
+}
+
+bool Training::applySlidingWindows(int windowSize) {
+    if (windowSize <= 1) {
+        return true;
+    }
+
+    if (numSamples < windowSize + 1) {
+        std::cerr << "[TRAIN] Not enough samples (" << numSamples
+                  << ") for window size " << windowSize << std::endl;
+        return false;
+    }
+
+    if (targets.empty() || targets[0].empty()) {
+        std::cerr << "[TRAIN] No target data available for windowing." << std::endl;
+        return false;
+    }
+
+    // Step 1: Extract price series from target column (first column)
+    std::vector<float> prices;
+    prices.reserve(static_cast<size_t>(numSamples));
+    for (const auto& t : targets) {
+        if (!t.empty()) {
+            prices.push_back(t[0]);
+        }
+    }
+
+    if (prices.empty()) {
+        std::cerr << "[TRAIN] No valid price values extracted for windowing." << std::endl;
+        return false;
+    }
+
+    // Step 2: Memory-safe sliding window allocation
+    // Explicitly size and initialize the output matrices BEFORE population
+    const size_t newNumSamples = static_cast<size_t>(prices.size() - windowSize);
+    
+    // Initialize outer vectors to exact size with default-constructed inner vectors
+    std::vector<std::vector<float>> newInputs;
+    std::vector<std::vector<float>> newTargets;
+    newInputs.resize(newNumSamples);
+    newTargets.resize(newNumSamples);
+    
+    // Step 3: Pre-initialize ALL inner vectors to correct size BEFORE data assignment
+    // This prevents any accidental out-of-bounds access during population
+    for (size_t idx = 0; idx < newNumSamples; ++idx) {
+        newInputs[idx].resize(static_cast<size_t>(windowSize));
+        newTargets[idx].resize(1);
+        // Explicitly initialize all values (defensive: zero-initialize then overwrite)
+        std::fill(newInputs[idx].begin(), newInputs[idx].end(), 0.0f);
+        std::fill(newTargets[idx].begin(), newTargets[idx].end(), 0.0f);
+    }
+
+    // Step 4: Populate sliding window matrices with strict bounds checking
+    // Each sample: windowSize historical prices -> 1 future price
+    for (size_t i = static_cast<size_t>(windowSize); i < prices.size(); ++i) {
+        size_t outIdx = i - windowSize;
+        
+        // VERIFIED: outIdx is within bounds [0, newNumSamples)
+        if (outIdx >= newNumSamples) {
+            std::cerr << "[TRAIN] FATAL: outIdx out of bounds: " << outIdx << " >= " << newNumSamples << std::endl;
+            return false;
+        }
+        
+        // Fill input window with historical prices - STRICT PASS-BY-REFERENCE via index assignment
+        for (int j = 0; j < windowSize; ++j) {
+            size_t histIdx = i - windowSize + static_cast<size_t>(j);
+            
+            // VERIFIED: histIdx is within bounds [0, windowSize) relative to i
+            // Therefore histIdx < prices.size() is guaranteed
+            if (histIdx >= prices.size() || j >= static_cast<int>(newInputs[outIdx].size())) {
+                std::cerr << "[TRAIN] FATAL: Array bounds violation at window index" << std::endl;
+                return false;
+            }
+            
+            newInputs[outIdx][static_cast<size_t>(j)] = prices[histIdx];
+        }
+        
+        // Fill target with the next price after the window
+        if (i >= prices.size()) {
+            std::cerr << "[TRAIN] FATAL: Target index out of bounds" << std::endl;
+            return false;
+        }
+        newTargets[outIdx][0] = prices[i];
+    }
+
+    // Step 5: Debug output - print first sliding window after population
+    if (verbose && !newInputs.empty() && !newTargets.empty()) {
+        std::cout << "[DEBUG SLIDING WINDOW] First window populated (before normalization):" << std::endl;
+        std::cout << "  Input:  [";
+        for (size_t j = 0; j < newInputs[0].size(); ++j) {
+            std::cout << std::fixed << std::setprecision(6) << newInputs[0][j];
+            if (j < newInputs[0].size() - 1) std::cout << ", ";
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "  Target: [" << std::fixed << std::setprecision(6) << newTargets[0][0] << "]" << std::endl;
+        std::cout << "  Vector sizes - inputs[0].size(): " << newInputs[0].size()
+                  << ", targets[0].size(): " << newTargets[0].size() << std::endl;
+    }
+
+// Step 6: Commit the sliding window data to member variables
+     inputs.swap(newInputs);
+     targets.swap(newTargets);
+     inputSize = windowSize;
+     outputSize = 1;
+     numSamples = static_cast<int>(inputs.size());
+
+     // Step 7: Compute normalization bounds for later use in denormalization
+     // Note: We do NOT normalize here - preprocess() will handle normalization
+     // to avoid double-normalization. Bounds are computed for denormalize_prediction().
+     compute_normalization_bounds();
+
+     // Step 8: Debug output - print first sliding window after sliding window creation
+     if (verbose && !inputs.empty() && !targets.empty()) {
+         std::cout << "[DEBUG SLIDING WINDOW] First window created (raw prices):" << std::endl;
+         std::cout << "  Input:  [";
+        for (size_t j = 0; j < inputs[0].size(); ++j) {
+            std::cout << std::fixed << std::setprecision(6) << inputs[0][j];
+            if (j < inputs[0].size() - 1) std::cout << ", ";
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "  Target: [" << std::fixed << std::setprecision(6) << targets[0][0] << "]" << std::endl;
+    }
+
+    if (verbose) {
+        std::cout << "[TRAIN] Sliding windows created: " << numSamples
+                  << " samples, inputSize=" << inputSize
+                  << ", outputSize=" << outputSize << std::endl;
+        std::cout << "[TRAIN] Recomputed normalization bounds for " << input_min.size() << " input features" << std::endl;
+    }
 
     return true;
 }

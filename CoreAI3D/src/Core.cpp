@@ -698,159 +698,169 @@ std::vector<std::vector<float>> CoreAI::forward(const std::vector<std::vector<fl
     {
         std::vector<float> hiddenLayer(this->neurons, 0.0f);
 
-        // Input to hidden layer - 3D neural network computation with stable transforms
-        for (int j = 0; j < this->neurons; ++j)
-        {
-            float sum = 0.0f;
-            float last_distance = 0.0f;
-            for (size_t k = 0; k < this->input[i].size(); ++k)
-            {
-                if (safe2DIndex(this->weigth_input_hidden, j, k))
-                {
-                    // Apply stable 3D transforms with spatial awareness
-                    float input_val = this->input[i][k];
-                    float weight_val = this->weigth_input_hidden[j][k];
+// Input to hidden layer computation
+         for (int j = 0; j < this->neurons; ++j)
+         {
+             float sum = 0.0f;
+             float last_distance = 0.0f;
+             for (size_t k = 0; k < this->input[i].size(); ++k)
+             {
+                 if (safe2DIndex(this->weigth_input_hidden, j, k))
+                 {
+                     float input_val = this->input[i][k];
+                     float weight_val = this->weigth_input_hidden[j][k];
 
-                    // Get triplet coordinates for spatial context
-                    size_t triplet_base = (k / 3) * 3;
-                    float x = (triplet_base < this->input[i].size()) ? this->input[i][triplet_base] : 0.0f;
-                    float y = (triplet_base + 1 < this->input[i].size()) ? this->input[i][triplet_base + 1] : 0.0f;
-                    float z = (triplet_base + 2 < this->input[i].size()) ? this->input[i][triplet_base + 2] : 0.0f;
+                     // Only use 3D triplet coordinates when at least one 3D transform is enabled.
+                     // For sliding window time series (inputSize % 3 == 0 but no 3D intent),
+                     // use the direct input value without coordinate transformations.
+                     if (enable_transformations || enable_polynomial || enable_trigonometric ||
+                         enable_log_exp || enable_rbf || enable_angular || 
+                         enable_projections || enable_ratios) {
+                         // Get triplet coordinates for spatial context
+                         size_t triplet_base = (k / 3) * 3;
+                         float x = (triplet_base < this->input[i].size()) ? this->input[i][triplet_base] : 0.0f;
+                         float y = (triplet_base + 1 < this->input[i].size()) ? this->input[i][triplet_base + 1] : 0.0f;
+                         float z = (triplet_base + 2 < this->input[i].size()) ? this->input[i][triplet_base + 2] : 0.0f;
 
-                    // Apply coordinate transformations if enabled
-                    if (enable_transformations) {
-                        // Apply scaling
-                        x = x * scale_x;
-                        y = y * scale_y;
-                        z = z * scale_z;
+                         // Apply coordinate transformations if enabled
+                         if (enable_transformations) {
+                             // Apply scaling
+                             x = x * scale_x;
+                             y = y * scale_y;
+                             z = z * scale_z;
 
-                        // Apply translation
-                        x += translation_x;
-                        y += translation_y;
-                        z += translation_z;
+                             // Apply translation
+                             x += translation_x;
+                             y += translation_y;
+                             z += translation_z;
 
-                        // Apply rotations (order: Z, Y, X)
-                        // Rotation around Z-axis
-                        float cos_z = std::cos(rotation_angle_z);
-                        float sin_z = std::sin(rotation_angle_z);
-                        float temp_x = x * cos_z - y * sin_z;
-                        float temp_y = x * sin_z + y * cos_z;
-                        x = temp_x;
-                        y = temp_y;
+                             // Apply rotations (order: Z, Y, X)
+                             // Rotation around Z-axis
+                             float cos_z = std::cos(rotation_angle_z);
+                             float sin_z = std::sin(rotation_angle_z);
+                             float temp_x = x * cos_z - y * sin_z;
+                             float temp_y = x * sin_z + y * cos_z;
+                             x = temp_x;
+                             y = temp_y;
 
-                        // Rotation around Y-axis
-                        float cos_y = std::cos(rotation_angle_y);
-                        float sin_y = std::sin(rotation_angle_y);
-                        float temp_x2 = x * cos_y + z * sin_y;
-                        float temp_z = -x * sin_y + z * cos_y;
-                        x = temp_x2;
-                        z = temp_z;
+                             // Rotation around Y-axis
+                             float cos_y = std::cos(rotation_angle_y);
+                             float sin_y = std::sin(rotation_angle_y);
+                             float temp_x2 = x * cos_y + z * sin_y;
+                             float temp_z = -x * sin_y + z * cos_y;
+                             x = temp_x2;
+                             z = temp_z;
 
-                        // Rotation around X-axis
-                        float cos_x = std::cos(rotation_angle_x);
-                        float sin_x = std::sin(rotation_angle_x);
-                        float temp_y2 = y * cos_x - z * sin_x;
-                        float temp_z2 = y * sin_x + z * cos_x;
-                        y = temp_y2;
-                        z = temp_z2;
-                    }
+                             // Rotation around X-axis
+                             float cos_x = std::cos(rotation_angle_x);
+                             float sin_x = std::sin(rotation_angle_x);
+                             float temp_y2 = y * cos_x - z * sin_x;
+                             float temp_z2 = y * sin_x + z * cos_x;
+                             y = temp_y2;
+                             z = temp_z2;
+                         }
 
-                    // Compute spatial features
-                    last_distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
+                         // Compute spatial features
+                         last_distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
-                    // Apply advanced 3D transformations
-                    float transformed = 0.0f;
-                    int coord_type = k % 3;
+                         // Apply advanced 3D transformations
+                         float transformed = 0.0f;
+                         int coord_type = k % 3;
 
-                    // Original linear transforms
-                    if (coord_type == 0) {
-                        transformed += x * weight_val;
-                    } else if (coord_type == 1) {
-                        transformed += y * weight_val;
-                    } else {
-                        transformed += z * weight_val;
-                    }
+                         // Original linear transforms
+                         if (coord_type == 0) {
+                             transformed += x * weight_val;
+                         } else if (coord_type == 1) {
+                             transformed += y * weight_val;
+                         } else {
+                             transformed += z * weight_val;
+                         }
 
-                    // Distance weighting
-                    transformed += last_distance * 0.1f;
+                         // Distance weighting
+                         transformed += last_distance * 0.1f;
 
-                    // Polynomial transforms
-                    if (enable_polynomial) {
-                        if (coord_type == 0) {
-                            transformed += polynomial_weight * (x*x + x*y + x*z);
-                        } else if (coord_type == 1) {
-                            transformed += polynomial_weight * (y*y + x*y + y*z);
-                        } else {
-                            transformed += polynomial_weight * (z*z + x*z + y*z);
-                        }
-                    }
+                         // Polynomial transforms
+                         if (enable_polynomial) {
+                             if (coord_type == 0) {
+                                 transformed += polynomial_weight * (x*x + x*y + x*z);
+                             } else if (coord_type == 1) {
+                                 transformed += polynomial_weight * (y*y + x*y + y*z);
+                             } else {
+                                 transformed += polynomial_weight * (z*z + x*z + y*z);
+                             }
+                         }
 
-                    // Trigonometric transforms
-                    if (enable_trigonometric) {
-                        if (coord_type == 0) {
-                            transformed += trig_weight * std::sin(x);
-                        } else if (coord_type == 1) {
-                            transformed += trig_weight * std::cos(y);
-                        } else {
-                            float z_clamped = std::max(-std::acos(-1.0f)/2 + 0.01f, std::min(std::acos(-1.0f)/2 - 0.01f, z));
-                            transformed += trig_weight * std::tan(z_clamped);
-                        }
-                    }
+                         // Trigonometric transforms
+                         if (enable_trigonometric) {
+                             if (coord_type == 0) {
+                                 transformed += trig_weight * std::sin(x);
+                             } else if (coord_type == 1) {
+                                 transformed += trig_weight * std::cos(y);
+                             } else {
+                                 float z_clamped = std::max(-std::acos(-1.0f)/2 + 0.01f, std::min(std::acos(-1.0f)/2 - 0.01f, z));
+                                 transformed += trig_weight * std::tan(z_clamped);
+                             }
+                         }
 
-                    // Logarithmic/exponential transforms
-                    if (enable_log_exp) {
-                        if (coord_type == 0) {
-                            transformed += log_exp_weight * std::log(1.0f + std::abs(x));
-                        } else if (coord_type == 1) {
-                            transformed += log_exp_weight * std::exp(-last_distance);
-                        } else {
-                            transformed += log_exp_weight * std::log(1.0f + std::abs(z));
-                        }
-                    }
+                         // Logarithmic/exponential transforms
+                         if (enable_log_exp) {
+                             if (coord_type == 0) {
+                                 transformed += log_exp_weight * std::log(1.0f + std::abs(x));
+                             } else if (coord_type == 1) {
+                                 transformed += log_exp_weight * std::exp(-last_distance);
+                             } else {
+                                 transformed += log_exp_weight * std::log(1.0f + std::abs(z));
+                             }
+                         }
 
-                    // Radial basis function
-                    if (enable_rbf) {
-                        float dx = x - rbf_center[0];
-                        float dy = y - rbf_center[1];
-                        float dz = z - rbf_center[2];
-                        float dist_sq = dx*dx + dy*dy + dz*dz;
-                        transformed += rbf_weight * std::exp(-dist_sq / (rbf_sigma * rbf_sigma));
-                    }
+                         // Radial basis function
+                         if (enable_rbf) {
+                             float dx = x - rbf_center[0];
+                             float dy = y - rbf_center[1];
+                             float dz = z - rbf_center[2];
+                             float dist_sq = dx*dx + dy*dy + dz*dz;
+                             transformed += rbf_weight * std::exp(-dist_sq / (rbf_sigma * rbf_sigma));
+                         }
 
-                    // Angular features (spherical coordinates θ, φ)
-                    if (enable_angular) {
-                        float r = last_distance;
-                        float theta = (r > this->epsilon) ? std::acos(std::max(-1.0f, std::min(1.0f, z / r))) : 0.0f;
-                        float phi = std::atan2(y, x);
-                        transformed += angular_weight * theta;
-                        transformed += angular_weight * phi;
-                    }
+                         // Angular features (spherical coordinates θ, φ)
+                         if (enable_angular) {
+                             float r = last_distance;
+                             float theta = (r > this->epsilon) ? std::acos(std::max(-1.0f, std::min(1.0f, z / r))) : 0.0f;
+                             float phi = std::atan2(y, x);
+                             transformed += angular_weight * theta;
+                             transformed += angular_weight * phi;
+                         }
 
-                    // Projection features (plane distances)
-                    if (enable_projections) {
-                        float proj_xy = std::sqrt(x*x + y*y + this->epsilon);
-                        float proj_xz = std::sqrt(x*x + z*z + this->epsilon);
-                        float proj_yz = std::sqrt(y*y + z*z + this->epsilon);
-                        transformed += projections_weight * proj_xy;
-                        transformed += projections_weight * proj_xz;
-                        transformed += projections_weight * proj_yz;
-                    }
+                         // Projection features (plane distances)
+                         if (enable_projections) {
+                             float proj_xy = std::sqrt(x*x + y*y + this->epsilon);
+                             float proj_xz = std::sqrt(x*x + z*z + this->epsilon);
+                             float proj_yz = std::sqrt(y*y + z*z + this->epsilon);
+                             transformed += projections_weight * proj_xy;
+                             transformed += projections_weight * proj_xz;
+                             transformed += projections_weight * proj_yz;
+                         }
 
-                    // Distance ratios
-                    if (enable_ratios) {
-                        float ratio_xy = (std::abs(y) > this->epsilon) ? x / y : 0.0f;
-                        float ratio_yz = (std::abs(z) > this->epsilon) ? y / z : 0.0f;
-                        float ratio_xz = (std::abs(z) > this->epsilon) ? x / z : 0.0f;
-                        transformed += ratios_weight * ratio_xy;
-                        transformed += ratios_weight * ratio_yz;
-                        transformed += ratios_weight * ratio_xz;
-                    }
+                         // Distance ratios
+                         if (enable_ratios) {
+                             float ratio_xy = (std::abs(y) > this->epsilon) ? x / y : 0.0f;
+                             float ratio_yz = (std::abs(z) > this->epsilon) ? y / z : 0.0f;
+                             float ratio_xz = (std::abs(z) > this->epsilon) ? x / z : 0.0f;
+                             transformed += ratios_weight * ratio_xy;
+                             transformed += ratios_weight * ratio_yz;
+                             transformed += ratios_weight * ratio_xz;
+                         }
 
-                    sum += transformed;
-                }
-            }
-            hiddenLayer[j] = this->activate(sum, layer_activation_configs[1], last_distance);
-        }
+                         sum += transformed;
+                     } else {
+                         // For non-3D data (sliding windows, standard regression),
+                         // use the direct input value without coordinate transformations
+                         sum += input_val * weight_val;
+                     }
+                 }
+             }
+             hiddenLayer[j] = this->activate(sum, layer_activation_configs[1], 0.0f);
+         }
         raw_hidden_activations.push_back(hiddenLayer);
     }
 
@@ -990,12 +1000,18 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
         }
     }
 
-    // Normalize inputs and targets for 3D spatial coordinates
-    std::vector<std::vector<float>> normalized_inputs = inputs;
+// Normalize inputs and targets for 3D spatial coordinates
+     std::vector<std::vector<float>> normalized_inputs = inputs;
     std::vector<std::vector<float>> normalized_targets = targets;
 
-    // For 3D coordinates, normalize each dimension separately
-    if (!inputs.empty() && inputs[0].size() % 3 == 0) {
+    // For 3D coordinates, normalize each dimension separately ONLY when at least one 3D transform is enabled.
+    // The check `inputs[0].size() % 3 == 0` is insufficient to detect 3D intent - sliding windows also
+    // produce divisible-by-3 sizes. We use the enable flags to determine the correct path.
+    bool use_3d_transforms = enable_transformations || enable_polynomial || enable_trigonometric ||
+                             enable_log_exp || enable_rbf || enable_angular || 
+                             enable_projections || enable_ratios;
+
+    if (!inputs.empty() && inputs[0].size() % 3 == 0 && use_3d_transforms) {
         // Per-dimension normalization for spatial coordinates
         for (size_t dim = 0; dim < 3; ++dim) {
             float dim_min = std::numeric_limits<float>::max();
@@ -1022,22 +1038,37 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
             }
         }
     } else {
-        // Fallback to global normalization if not 3D
+        // Fallback to global normalization if not 3D or no 3D transforms enabled
+        // Check if data is already normalized to [0, 1] range to avoid double-normalization
         float input_min, input_max;
         computeMinMax(inputs, input_min, input_max);
-        for (auto& row : normalized_inputs) {
-            for (float& val : row) {
-                val = (val - input_min) / (input_max - input_min);
+        
+        // Only normalize if data is NOT already in [0, 1] range
+        // Data is considered normalized if min >= 0 and max <= 1 (with small tolerance for numerical precision)
+        bool already_normalized = (input_min >= 0.0f - 1e-5f) && (input_max <= 1.0f + 1e-5f) && 
+                                   (input_min >= 0.0f) && (input_max <= 1.0f);
+        
+        if (!already_normalized) {
+            for (auto& row : normalized_inputs) {
+                for (float& val : row) {
+                    val = (val - input_min) / (input_max - input_min);
+                }
             }
         }
     }
 
     // Normalize targets globally to [0,1]
+    // Only normalize if data is NOT already in [0, 1] range
     float target_min, target_max;
     computeMinMax(targets, target_min, target_max);
-    for (auto& row : normalized_targets) {
-        for (float& val : row) {
-            val = (val - target_min) / (target_max - target_min);
+    bool targets_already_normalized = (target_min >= 0.0f - 1e-5f) && (target_max <= 1.0f + 1e-5f) &&
+                                       (target_min >= 0.0f) && (target_max <= 1.0f);
+    
+    if (!targets_already_normalized) {
+        for (auto& row : normalized_targets) {
+            for (float& val : row) {
+                val = (val - target_min) / (target_max - target_min);
+            }
         }
     }
 
@@ -1196,203 +1227,210 @@ void CoreAI::train(const std::vector<std::vector<float> >& inputs,
                 }
             }
 
-            // Accumulate gradients for input to hidden weights with CORRECT 3D transform derivatives
-            for (int j = 0; j < this->neurons; ++j) {
-                for (size_t k = 0; k < batch_inputs[batch_sample].size(); ++k) {
-                    if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
-                        throw std::out_of_range("CoreAI::train: Index out of range during weight update");
-                    }
+// Accumulate gradients for input to hidden weights with CORRECT 3D transform derivatives
+             for (int j = 0; j < this->neurons; ++j) {
+                 for (size_t k = 0; k < batch_inputs[batch_sample].size(); ++k) {
+                     if(!safe2DIndex(this->weigth_input_hidden, j, k)) {
+                         throw std::out_of_range("CoreAI::train: Index out of range during weight update");
+                     }
 
-                    // Get triplet coordinates for spatial context (same as forward pass)
-                    size_t triplet_base = (k / 3) * 3;
-                    float x = (triplet_base < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base] : 0.0f;
-                    float y = (triplet_base + 1 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 1] : 0.0f;
-                    float z = (triplet_base + 2 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 2] : 0.0f;
+                     bool use_3d = enable_transformations || enable_polynomial || enable_trigonometric ||
+                                 enable_log_exp || enable_rbf || enable_angular || 
+                                 enable_projections || enable_ratios;
 
-                    // Apply coordinate transformations if enabled (same as forward pass)
-                    if (enable_transformations) {
-                        // Apply scaling
-                        x = x * scale_x;
-                        y = y * scale_y;
-                        z = z * scale_z;
+                     float transform_derivative = 0.0f;
 
-                        // Apply translation
-                        x += translation_x;
-                        y += translation_y;
-                        z += translation_z;
+                     if (use_3d) {
+                         // Get triplet coordinates for spatial context (same as forward pass)
+                         size_t triplet_base = (k / 3) * 3;
+                         float x = (triplet_base < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base] : 0.0f;
+                         float y = (triplet_base + 1 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 1] : 0.0f;
+                         float z = (triplet_base + 2 < batch_inputs[batch_sample].size()) ? batch_inputs[batch_sample][triplet_base + 2] : 0.0f;
 
-                        // Apply rotations (order: Z, Y, X)
-                        // Rotation around Z-axis
-                        float cos_z = std::cos(rotation_angle_z);
-                        float sin_z = std::sin(rotation_angle_z);
-                        float temp_x = x * cos_z - y * sin_z;
-                        float temp_y = x * sin_z + y * cos_z;
-                        x = temp_x;
-                        y = temp_y;
+                         // Apply coordinate transformations if enabled (same as forward pass)
+                         if (enable_transformations) {
+                             // Apply scaling
+                             x = x * scale_x;
+                             y = y * scale_y;
+                             z = z * scale_z;
 
-                        // Rotation around Y-axis
-                        float cos_y = std::cos(rotation_angle_y);
-                        float sin_y = std::sin(rotation_angle_y);
-                        float temp_x2 = x * cos_y + z * sin_y;
-                        float temp_z = -x * sin_y + z * cos_y;
-                        x = temp_x2;
-                        z = temp_z;
+                             // Apply translation
+                             x += translation_x;
+                             y += translation_y;
+                             z += translation_z;
 
-                        // Rotation around X-axis
-                        float cos_x = std::cos(rotation_angle_x);
-                        float sin_x = std::sin(rotation_angle_x);
-                        float temp_y2 = y * cos_x - z * sin_x;
-                        float temp_z2 = y * sin_x + z * cos_x;
-                        y = temp_y2;
-                        z = temp_z2;
-                    }
+                             // Apply rotations (order: Z, Y, X)
+                             // Rotation around Z-axis
+                             float cos_z = std::cos(rotation_angle_z);
+                             float sin_z = std::sin(rotation_angle_z);
+                             float temp_x = x * cos_z - y * sin_z;
+                             float temp_y = x * sin_z + y * cos_z;
+                             x = temp_x;
+                             y = temp_y;
 
-                    // Compute spatial features for consistency with forward pass
-                    float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
+                             // Rotation around Y-axis
+                             float cos_y = std::cos(rotation_angle_y);
+                             float sin_y = std::sin(rotation_angle_y);
+                             float temp_x2 = x * cos_y + z * sin_y;
+                             float temp_z = -x * sin_y + z * cos_y;
+                             x = temp_x2;
+                             z = temp_z;
 
-                    // Compute CORRECT derivative of the transform w.r.t weight
-                    // When complex transforms are disabled, use simple linear derivatives
-                    int coord_type = k % 3;
-                    float transform_derivative = 0.0f;
+                             // Rotation around X-axis
+                             float cos_x = std::cos(rotation_angle_x);
+                             float sin_x = std::sin(rotation_angle_x);
+                             float temp_y2 = y * cos_x - z * sin_x;
+                             float temp_z2 = y * sin_x + z * cos_x;
+                             y = temp_y2;
+                             z = temp_z2;
+                         }
 
-                    if (!enable_transformations && !enable_polynomial && !enable_trigonometric &&
-                        !enable_log_exp && !enable_rbf && !enable_angular && !enable_projections && !enable_ratios) {
-                        // SIMPLE LINEAR CASE: When all complex transforms are disabled
-                        // d/dw(x*w) = x, d/dw(y*w) = y, d/dw(z*w) = z
-                        if (coord_type == 0) {
-                            transform_derivative = x;
-                        } else if (coord_type == 1) {
-                            transform_derivative = y;
-                        } else {
-                            transform_derivative = z;
-                        }
-                        // Distance weighting: d/dw(distance * 0.1f) = 0.1f (constant)
-                        transform_derivative += 0.1f;
-                    } else {
-                        // COMPLEX TRANSFORMS ENABLED: Use full derivative calculations
-                        // Original linear transforms: d/dw(x*w + ...) = x, d/dw(y*w + ...) = y, d/dw(z*w + ...) = z
-                        if (coord_type == 0) {
-                            transform_derivative += x;
-                        } else if (coord_type == 1) {
-                            transform_derivative += y;
-                        } else {
-                            transform_derivative += z;
-                        }
+                         // Compute spatial features for consistency with forward pass
+                         float distance = std::sqrt(x*x + y*y + z*z + this->epsilon);
 
-                        // Distance weighting: d/dw(distance * 0.1f) = 0.1f (constant)
-                        transform_derivative += 0.1f;
+                         // Compute CORRECT derivative of the transform w.r.t weight
+                         // When complex transforms are disabled, use simple linear derivatives
+                         int coord_type = k % 3;
 
-                        // Polynomial transforms: d/dw(polynomial_weight * (x*x + x*y + x*z)) etc.
-                        if (enable_polynomial) {
-                            if (coord_type == 0) {
-                                transform_derivative += polynomial_weight * (x*x + x*y + x*z);
-                            } else if (coord_type == 1) {
-                                transform_derivative += polynomial_weight * (y*y + x*y + y*z);
-                            } else {
-                                transform_derivative += polynomial_weight * (z*z + x*z + y*z);
-                            }
-                        }
+if (!enable_transformations && !enable_polynomial && !enable_trigonometric &&
+                              !enable_log_exp && !enable_rbf && !enable_angular && !enable_projections && !enable_ratios) {
+                              // SIMPLE LINEAR CASE: When all complex transforms are disabled
+                              // d/dw(x*w) = x, d/dw(y*w) = y, d/dw(z*w) = z
+                              if (coord_type == 0) {
+                                  transform_derivative = x;
+                              } else if (coord_type == 1) {
+                                  transform_derivative = y;
+                              } else {
+                                  transform_derivative = z;
+                              }
+                              // No distance weighting for simple linear case
+} else {
+                              // COMPLEX TRANSFORMS ENABLED: Use full derivative calculations
+                              // Original linear transforms: d/dw(x*w) = x, d/dw(y*w) = y, d/dw(z*w) = z
+                              if (coord_type == 0) {
+                                  transform_derivative += x;
+                              } else if (coord_type == 1) {
+                                  transform_derivative += y;
+                              } else {
+                                  transform_derivative += z;
+                              }
 
-                        // Trigonometric transforms: d/dw(trig_weight * sin(x)) = trig_weight * cos(x), etc.
-                        if (enable_trigonometric) {
-                            if (coord_type == 0) {
-                                transform_derivative += trig_weight * std::cos(x);
-                            } else if (coord_type == 1) {
-                                transform_derivative += trig_weight * std::cos(y);
-                            } else {
-                                float z_clamped = std::max(-std::acos(-1.0f)/2 + 0.01f, std::min(std::acos(-1.0f)/2 - 0.01f, z));
-                                transform_derivative += trig_weight * (1.0f / std::cos(z_clamped)); // derivative of tan
-                            }
-                        }
+                              // Polynomial transforms: d/dw(polynomial_weight * (x*x + x*y + x*z)) etc.
+                              if (enable_polynomial) {
+                                 if (coord_type == 0) {
+                                     transform_derivative += polynomial_weight * (x*x + x*y + x*z);
+                                 } else if (coord_type == 1) {
+                                     transform_derivative += polynomial_weight * (y*y + x*y + y*z);
+                                 } else {
+                                     transform_derivative += polynomial_weight * (z*z + x*z + y*z);
+                                 }
+                             }
 
-                        // Logarithmic/exponential transforms
-                        if (enable_log_exp) {
-                            if (coord_type == 0) {
-                                transform_derivative += log_exp_weight * (1.0f / (1.0f + std::abs(x))); // derivative of log(1+|x|)
-                            } else if (coord_type == 1) {
-                                transform_derivative += log_exp_weight * (-distance); // derivative of exp(-distance)
-                            } else {
-                                transform_derivative += log_exp_weight * (1.0f / (1.0f + std::abs(z))); // derivative of log(1+|z|)
-                            }
-                        }
+                             // Trigonometric transforms: d/dw(trig_weight * sin(x)) = trig_weight * cos(x), etc.
+                             if (enable_trigonometric) {
+                                 if (coord_type == 0) {
+                                     transform_derivative += trig_weight * std::cos(x);
+                                 } else if (coord_type == 1) {
+                                     transform_derivative += trig_weight * std::cos(y);
+                                 } else {
+                                     float z_clamped = std::max(-std::acos(-1.0f)/2 + 0.01f, std::min(std::acos(-1.0f)/2 - 0.01f, z));
+                                     transform_derivative += trig_weight * (1.0f / std::cos(z_clamped)); // derivative of tan
+                                 }
+                             }
 
-                        // Radial basis function: d/dw(rbf_weight * exp(-dist_sq/sigma^2))
-                        if (enable_rbf) {
-                            float dx = x - rbf_center[0];
-                            float dy = y - rbf_center[1];
-                            float dz = z - rbf_center[2];
-                            float dist_sq = dx*dx + dy*dy + dz*dz;
-                            float rbf_derivative = rbf_weight * std::exp(-dist_sq / (rbf_sigma * rbf_sigma));
-                            rbf_derivative *= (-2.0f / (rbf_sigma * rbf_sigma)); // derivative of exp(-dist_sq/sigma^2)
+                             // Logarithmic/exponential transforms
+                             if (enable_log_exp) {
+                                 if (coord_type == 0) {
+                                     transform_derivative += log_exp_weight * (1.0f / (1.0f + std::abs(x))); // derivative of log(1+|x|)
+                                 } else if (coord_type == 1) {
+                                     transform_derivative += log_exp_weight * (-distance); // derivative of exp(-distance)
+                                 } else {
+                                     transform_derivative += log_exp_weight * (1.0f / (1.0f + std::abs(z))); // derivative of log(1+|z|)
+                                 }
+                             }
 
-                            if (coord_type == 0) {
-                                transform_derivative += rbf_derivative * dx;
-                            } else if (coord_type == 1) {
-                                transform_derivative += rbf_derivative * dy;
-                            } else {
-                                transform_derivative += rbf_derivative * dz;
-                            }
-                        }
+                             // Radial basis function: d/dw(rbf_weight * exp(-dist_sq/sigma^2))
+                             if (enable_rbf) {
+                                 float dx = x - rbf_center[0];
+                                 float dy = y - rbf_center[1];
+                                 float dz = z - rbf_center[2];
+                                 float dist_sq = dx*dx + dy*dy + dz*dz;
+                                 float rbf_derivative = rbf_weight * std::exp(-dist_sq / (rbf_sigma * rbf_sigma));
+                                 rbf_derivative *= (-2.0f / (rbf_sigma * rbf_sigma)); // derivative of exp(-dist_sq/sigma^2)
 
-                        // Angular features: d/dw(theta) and d/dw(phi)
-                        if (enable_angular) {
-                        float r = distance;
-                            if (r > this->epsilon) {
-                                float theta = std::acos(std::max(-1.0f, std::min(1.0f, z / r)));
-                                // derivative of theta w.r.t coordinates is complex, approximate with finite difference
-                                transform_derivative += angular_weight * 0.1f; // simplified approximation
-                            }
-                            // phi derivative also complex, use approximation
-                            transform_derivative += angular_weight * 0.1f;
-                        }
+                                 if (coord_type == 0) {
+                                     transform_derivative += rbf_derivative * dx;
+                                 } else if (coord_type == 1) {
+                                     transform_derivative += rbf_derivative * dy;
+                                 } else {
+                                     transform_derivative += rbf_derivative * dz;
+                                 }
+                             }
 
-                        // Projection features: derivatives are straightforward
-                        if (enable_projections) {
-                            float proj_xy = std::sqrt(x*x + y*y + this->epsilon);
-                            float proj_xz = std::sqrt(x*x + z*z + this->epsilon);
-                            float proj_yz = std::sqrt(y*y + z*z + this->epsilon);
+                             // Angular features: d/dw(theta) and d/dw(phi)
+                             if (enable_angular) {
+                                 float r = distance;
+                                 if (r > this->epsilon) {
+                                     float theta = std::acos(std::max(-1.0f, std::min(1.0f, z / r)));
+                                     // derivative of theta w.r.t coordinates is complex, approximate with finite difference
+                                     transform_derivative += angular_weight * 0.1f; // simplified approximation
+                                 }
+                                 // phi derivative also complex, use approximation
+                                 transform_derivative += angular_weight * 0.1f;
+                             }
 
-                            if (coord_type == 0) {
-                                transform_derivative += projections_weight * (x / proj_xy + x / proj_xz);
-                            } else if (coord_type == 1) {
-                                transform_derivative += projections_weight * (y / proj_xy + y / proj_yz);
-                            } else {
-                                transform_derivative += projections_weight * (z / proj_xz + z / proj_yz);
-                            }
-                        }
+                             // Projection features: derivatives are straightforward
+                             if (enable_projections) {
+                                 float proj_xy = std::sqrt(x*x + y*y + this->epsilon);
+                                 float proj_xz = std::sqrt(x*x + z*z + this->epsilon);
+                                 float proj_yz = std::sqrt(y*y + z*z + this->epsilon);
 
-                        // Distance ratios: derivatives are complex, use approximation
-                        if (enable_ratios) {
-                            transform_derivative += ratios_weight * 0.1f; // simplified approximation
-                        }
-                    }
+                                 if (coord_type == 0) {
+                                     transform_derivative += projections_weight * (x / proj_xy + x / proj_xz);
+                                 } else if (coord_type == 1) {
+                                     transform_derivative += projections_weight * (y / proj_xy + y / proj_yz);
+                                 } else {
+                                     transform_derivative += projections_weight * (z / proj_xz + z / proj_yz);
+                                 }
+                             }
 
-                    // Backpropagation with CORRECT 3D transform derivative: gradient = error * transform_derivative
-                    float gradient = hidden_errors[j] * transform_derivative;
+                             // Distance ratios: derivatives are complex, use approximation
+                             if (enable_ratios) {
+                                 transform_derivative += ratios_weight * 0.1f; // simplified approximation
+                             }
+                         }
+} else {
+                          // For non-3D data (sliding windows, standard regression),
+                          // use the direct input value derivative
+                          transform_derivative = batch_inputs[batch_sample][k];
+                      }
 
-                    // DEBUG: Log gradient calculation for first sample, first neuron, first few inputs
-                    if (verbose && global_sample == 0 && j == 0 && k < 5) {
-                        std::cout << "[DEBUG GRADIENT] Input-Hidden gradient calc - sample: " << global_sample
-                                  << ", neuron: " << j << ", input: " << k
-                                  << ", hidden_error: " << hidden_errors[j]
-                                  << ", transform_derivative: " << transform_derivative
-                                  << ", gradient: " << gradient << std::endl;
-                    }
+                     // Backpropagation with CORRECT 3D transform derivative: gradient = error * transform_derivative
+                     float gradient = hidden_errors[j] * transform_derivative;
 
-                    // Add L2 regularization gradient: 2 * lambda * weight
-                    if (use_l2_reg) {
-                        gradient += 2.0f * l2_lambda * this->weigth_input_hidden[j][k];
-                    }
+                     // DEBUG: Log gradient calculation for first sample, first neuron, first few inputs
+                     if (verbose && global_sample == 0 && j == 0 && k < 5) {
+                         std::cout << "[DEBUG GRADIENT] Input-Hidden gradient calc - sample: " << global_sample
+                                   << ", neuron: " << j << ", input: " << k
+                                   << ", hidden_error: " << hidden_errors[j]
+                                   << ", transform_derivative: " << transform_derivative
+                                   << ", gradient: " << gradient << std::endl;
+                     }
 
-                    // Gradient clipping to prevent exploding gradients
-                    if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
-                        gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
-                    }
+                     // Add L2 regularization gradient: 2 * lambda * weight
+                     if (use_l2_reg) {
+                         gradient += 2.0f * l2_lambda * this->weigth_input_hidden[j][k];
+                     }
 
-                    input_hidden_gradients[j][k] += gradient;
-                }
-            }
-        }
+                     // Gradient clipping to prevent exploding gradients
+                     if (use_grad_clip && std::abs(gradient) > grad_clip_threshold) {
+                         gradient = (gradient > 0 ? grad_clip_threshold : -grad_clip_threshold);
+                     }
+
+                     input_hidden_gradients[j][k] += gradient;
+                 }
+             }
+         }
 
         // Average gradients over the current batch
         for (auto& row : output_hidden_gradients) {

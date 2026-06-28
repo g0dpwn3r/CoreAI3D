@@ -1,32 +1,18 @@
-FROM ubuntu:latest
+# syntax=docker/dockerfile:1
 
-# Set environment variables to prevent interactive prompts
+# ==============================================================================
+# Stage 1: System dependencies
+# Only rebuilds when apt package list changes.
+# ==============================================================================
+FROM ubuntu:24.04 AS system-deps
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
-ENV CXXFLAGS="-Wno-error=override-init"
-ENV CFLAGS="-Wno-error=override-init"
 
-# Restrict vcpkg concurrency to prevent Out-Of-Memory (OOM) kills on heavy compiles
-
-ENV VCPKG_MAX_CONCURRENCY=1
-# Force vcpkg to retry downloads more aggressively and wait longer for GitHub
-ENV VCPKG_KEEP_GOING=1 \
-    VCPKG_MAX_CONCURRENCY=1 \
-    CURL_MAX_RETRIES=10 \
-    CURL_RETRY_DELAY=5
-# -----------------------------------------------------------------------------
-# MASSIVE DEPENDENCY INSTALLATION
-# We group these by category so you can see what is covered.
-# -----------------------------------------------------------------------------
-# -----------------------------------------------------------------------------
-# MASSIVE DEPENDENCY INSTALLATION (Updated)
-# -----------------------------------------------------------------------------
-# -----------------------------------------------------------------------------
-# MASSIVE DEPENDENCY INSTALLATION (Updated)
-# -----------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y \
-    # --- Core Build Tools & Post-Processing ---
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     ninja-build \
@@ -51,7 +37,6 @@ RUN apt-get update && apt-get install -y \
     m4 \
     gettext \
     patchelf \
-    # --- Python & System Utilities ---
     python3 \
     python3-dev \
     python-is-python3 \
@@ -61,12 +46,10 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     libssl-dev \
     zlib1g-dev \
-    # --- MySQL & Database Dependencies ---
     libaio-dev \
     libncurses-dev \
     libtinfo-dev \
     libtirpc-dev \
-    # --- X11 / GUI / Windowing ---
     libx11-dev \
     libxft-dev \
     libxext-dev \
@@ -82,71 +65,157 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
-    # --- Audio & Media ---
     libasound2-dev \
     libpulse-dev \
     libudev-dev \
-    # --- SystemD & DBus ---
     libdbus-1-dev \
     libcap-dev \
     libcap2-bin \
     libmount-dev \
     libblkid-dev \
     libglib2.0-dev \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN git lfs install
+
+# ==============================================================================
+# Stage 2: vcpkg bootstrap
+# Only rebuilds when vcpkg fork/branch changes.
+# ==============================================================================
+FROM system-deps AS vcpkg-bootstrap
+
+RUN git clone --depth 1 https://github.com/g0dpwn3r/vcpkg.git /opt/vcpkg \
+    && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+RUN printf '%s\n' \
+    'set(VCPKG_TARGET_ARCHITECTURE x64)' \
+    'set(VCPKG_CRT_LINKAGE dynamic)' \
+    'set(VCPKG_LIBRARY_LINKAGE static)' \
+    'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
+    'set(VCPKG_BUILD_TYPE release)' \
+    > /opt/vcpkg/triplets/x64-linux-release.cmake
+
+# ==============================================================================
+# Stage 3: vcpkg dependency installation
+# Rebuilds ONLY when vcpkg.json or custom-ports change.
+# Cache mounts persist downloads/buildtrees across builds so even when
+# vcpkg.json changes, only the delta recompiles.
+# ==============================================================================
+FROM vcpkg-bootstrap AS vcpkg-install
 
 WORKDIR /app
 
-# Initialize git-lfs
-RUN git lfs install
-
-# Clone repositories
-RUN git clone https://github.com/g0dpwn3r/vcpkg.git
-RUN git clone -b v0.8 https://github.com/g0dpwn3r/CoreAI3D.git
-
-# Update LFS
-RUN cd CoreAI3D && git lfs pull
-
-# Bootstrap Vcpkg
-RUN cd vcpkg && ./bootstrap-vcpkg.sh && ./vcpkg integrate install
-
-# Install system-level build dependencies required by libsystemd in vcpkg
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    gperf \
-    python3-jinja2 \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-# ---------------------------------------------------------------------
-# FORCE RELEASE-ONLY BUILD
-# ---------------------------------------------------------------------
-RUN echo "set(VCPKG_TARGET_ARCHITECTURE x64)" > /app/vcpkg/triplets/x64-linux-release.cmake && \
-    echo "set(VCPKG_CRT_LINKAGE dynamic)" >> /app/vcpkg/triplets/x64-linux-release.cmake && \
-    echo "set(VCPKG_LIBRARY_LINKAGE static)" >> /app/vcpkg/triplets/x64-linux-release.cmake && \
-    echo "set(VCPKG_CMAKE_SYSTEM_NAME Linux)" >> /app/vcpkg/triplets/x64-linux-release.cmake && \
-    echo "set(VCPKG_BUILD_TYPE release)" >> /app/vcpkg/triplets/x64-linux-release.cmake
-
-# Configure CMake
-# Configure CMake and force log dump on vcpkg # Configure CMake and isolate the exact error on failure
-# Configure CMake and output the main manifest log on failure
-# Configure CMake and output the exact utfcpp logs on failure
-# Configure CMake and output the main manifest log on failure
-# Configure CMake and output the exact libsystemd error
-# Configure CMake
 COPY vcpkg.json ./
+COPY custom-ports/ ./custom-ports/
 
-RUN mkdir -p CoreAI3D/build && cd CoreAI3D/build && \
+ENV VCPKG_MAX_CONCURRENCY=1 \
+    VCPKG_KEEP_GOING=1 \
+    CURL_MAX_RETRIES=10 \
+    CURL_RETRY_DELAY=5 \
+    CXXFLAGS="-Wno-error=override-init" \
+    CFLAGS="-Wno-error=override-init"
+
+RUN --mount=type=cache,target=/root/.cache/vcpkg \
+    --mount=type=cache,target=/opt/vcpkg/downloads \
+    --mount=type=cache,target=/opt/vcpkg/buildtrees \
+    --mount=type=cache,target=/opt/vcpkg/packages \
+    /opt/vcpkg/vcpkg install \
+        --x-manifest-root=/app \
+        --overlay-ports=/app/custom-ports \
+        --triplet=x64-linux-release \
+        --vcpkg-root=/opt/vcpkg \
+    || { \
+        echo ""; \
+        echo "========================================"; \
+        echo " VCPKG BUILD FAILURE - DIAGNOSTIC DUMP"; \
+        echo "========================================"; \
+        for log in $(find /opt/vcpkg/buildtrees -name "install.log" -o -name "config.log" -o -name "CMakeError.log" 2>/dev/null); do \
+            echo ""; \
+            echo "--- $log ---"; \
+            tail -80 "$log"; \
+        done; \
+        exit 1; \
+    }
+
+# ==============================================================================
+# Stage 4: Application build
+# This is the ONLY stage that rebuilds when you edit source code.
+# All vcpkg dependencies are copied from the previous stage as pre-built
+# static libraries, so no recompilation of dependencies ever occurs.
+# ==============================================================================
+FROM system-deps AS builder
+
+COPY --from=vcpkg-install /opt/vcpkg /opt/vcpkg
+
+WORKDIR /app/CoreAI3D
+
+COPY CMakeLists.txt ./
+COPY CoreAI3D/ ./CoreAI3D/
+COPY custom-ports/ ./custom-ports/
+COPY config.json* ./
+COPY test/ ./test/
+
+ENV CXXFLAGS="-Wno-error=override-init" \
+    CFLAGS="-Wno-error=override-init"
+
+RUN mkdir -p build && cd build && \
     cmake .. \
-    -G "Ninja" \
-    -DCMAKE_MAKE_PROGRAM=/usr/bin/ninja \
-    -DCMAKE_C_COMPILER=/usr/bin/gcc \
-    -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_TOOLCHAIN_FILE=/app/vcpkg/scripts/buildsystems/vcpkg.cmake \
-    -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
-    -DVCPKG_TARGET_TRIPLET=x64-linux-release
-# Build
-RUN cd CoreAI3D/build && ninja
+        -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+        -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
+        -DVCPKG_TARGET_TRIPLET=x64-linux-release \
+        -DSKIP_POST_BUILD=ON \
+    && ninja \
+    || { \
+        echo ""; \
+        echo "========================================"; \
+        echo " APPLICATION BUILD FAILURE"; \
+        echo "========================================"; \
+        if [ -f CMakeFiles/CMakeError.log ]; then \
+            echo "--- CMakeError.log ---"; \
+            tail -80 CMakeFiles/CMakeError.log; \
+        fi; \
+        exit 1; \
+    }
 
-# Default command
-CMD ["/app/CoreAI3D/build/CoreAI3D"]
+# ==============================================================================
+# Stage 5: Minimal runtime image (~200MB vs ~15GB full build image)
+# ==============================================================================
+FROM ubuntu:24.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libstdc++6 \
+    libgcc-s1 \
+    ca-certificates \
+    libglib2.0-0 \
+    libgl1 \
+    libglu1-mesa \
+    libasound2 \
+    libpulse0 \
+    libx11-6 \
+    libxext6 \
+    libxrandr2 \
+    libxinerama1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxcomposite1 \
+    libxfixes3 \
+    libxrender1 \
+    libxi6 \
+    libxtst6 \
+    libdbus-1-3 \
+    libudev1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/CoreAI3D/build/CoreAI3D/CoreAI3D /app/CoreAI3D
+COPY --from=builder /app/CoreAI3D/build/CoreAI3D/config.json /app/config.json
+
+WORKDIR /app
+
+EXPOSE 8080 8081
+
+CMD ["./CoreAI3D"]

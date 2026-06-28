@@ -110,6 +110,7 @@ public:
 
     // New method to save results to CSV
     bool saveResultsToCSV(const std::string& filename, const std::string& inputFilename, bool hasHeader, const char& delimiter); // New parameter for input filename and header
+    bool applySlidingWindows(int windowSize);
     std::vector<std::vector<float>> denormalizeMatrix(const std::vector<std::vector<float>>& normalized_data) const;
 
     // Independent feature normalization for inference on new data

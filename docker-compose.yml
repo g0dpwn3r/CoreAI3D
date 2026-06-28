@@ -15,6 +15,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
     container_name: coreai3d
     depends_on:
       - mysql
@@ -31,7 +33,7 @@ services:
       - ./linux_gui/training_data:/training_data
       - ./emb.txt:/training_data/emb.txt:ro
     command:
-      - "/app/CoreAI3D/build/CoreAI3D"
+      - "/app/CoreAI3D"
       - "--api-port"
       - "8080"
       - "--enable-websocket"

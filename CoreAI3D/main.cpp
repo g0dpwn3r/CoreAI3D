@@ -28,6 +28,7 @@ int main(int argc, char* argv[]) {
     std::string learningRate = "0.01";
     std::string layers = "3";
     std::string neurons = "10";
+    std::string windowSize = "1";
     std::string minRange = "0.0";
     std::string maxRange = "1.0";
     std::string inputSize = "1";
@@ -406,6 +407,9 @@ int main(int argc, char* argv[]) {
         } else if (arg.find("--threads") == 0 || arg == "-j") {
             std::string value = extractValue(i, "--threads", arg);
             if (!value.empty()) threads = value;
+        } else if (arg.find("--window-size") == 0 || arg == "-w") {
+            std::string value = extractValue(i, "--window-size", arg);
+            if (!value.empty()) windowSize = value;
         } else {
             std::cerr << "ERROR: Unknown argument: " << arg << std::endl;
         }
@@ -486,6 +490,10 @@ int main(int argc, char* argv[]) {
     int dbPort_val = 3306;
     try { dbPort_val = std::stoi(dbPort); }
     catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for db-port. Defaulting to 3306.\n"; dbPort_val = 3306; }
+
+    int windowSize_val = 1;
+    try { windowSize_val = std::stoi(windowSize); }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for window-size. Defaulting to 1.\n"; windowSize_val = 1; }
 
     if (verbose) std::cout << "DEBUG: All arguments retrieved. Proceeding to logic.\n";
 
@@ -590,10 +598,10 @@ int main(int argc, char* argv[]) {
             bool success = predictor.runPrediction(
                 inputFile, outputCsvFile, targetFile, loadModelId, datasetId_val,
                 layers_val, neurons_val, minRange_val, maxRange_val,
-                0, 1, numSamples_val, learningRate_val, epochs_val,  // inputSize=0 (dynamic), outputSize=1
+                0, 1, numSamples_val, learningRate_val, epochs_val,
                 embeddingFile, language, datasetName, containsHeader, containsTextFlag, delimiter_char,
                 isOfflineMode, dbHost, dbPort_val, dbUser, dbPassword, dbSchema,
-                calculusActivation
+                calculusActivation, windowSize_val
             );
 
             if (!success) {

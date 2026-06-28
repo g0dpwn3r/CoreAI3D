@@ -42,10 +42,12 @@ bool Predict::runPrediction(const std::string& inputFile,
                             const std::string& dbUser,
                             const std::string& dbPassword,
                             const std::string& dbSchema,
-                            bool calculusActivation) {
+                             bool calculusActivation,
+                             int windowSize) {
     try {
         if (verbose_) {
-            std::cout << "[PREDICT] Starting prediction process..." << std::endl;
+            std::cout << "[PREDICT] Starting prediction process..."
+                      << " windowSize=" << windowSize << std::endl;
         }
 
         // Initialize trainer with database if parameters provided
@@ -74,6 +76,16 @@ bool Predict::runPrediction(const std::string& inputFile,
         if (!loadData(inputFile, targetFile, numSamples, outputSize, hasHeader, containsText, delimiter, datasetName)) {
             std::cerr << "[PREDICT] Failed to load data." << std::endl;
             return false;
+        }
+
+        if (windowSize > 1) {
+            if (!trainer_->applySlidingWindows(windowSize)) {
+                std::cerr << "[PREDICT] Failed to build sliding windows." << std::endl;
+                return false;
+            }
+            if (!trainer_->original_date_strings.empty() && trainer_->original_date_strings.size() > (size_t)trainer_->numSamples) {
+                trainer_->original_date_strings.resize(trainer_->numSamples);
+            }
         }
 
         // Load model if specified
