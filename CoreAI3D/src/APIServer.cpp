@@ -1570,6 +1570,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
 
             // Save chat message to database if available
             if (database && !sessionId.empty()) {
+                #ifdef USE_MYSQL
                 try {
                     int sessionIdInt = std::stoi(sessionId); // Convert string to int
                     std::string role = "user"; // Assume user message for now
@@ -1580,13 +1581,12 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                         {"timestamp", getTimestampString()}
                     }).dump();
 
-#ifdef USE_MYSQL
                     database->saveChatMessage(sessionIdInt, role, message, messageType, confidence, metadata);
                 } catch (const std::exception& dbError) {
                     std::cerr << "Warning: Failed to save chat message to database: " << dbError.what() << std::endl;
                     // Continue with processing even if database save fails
                 }
-#endif
+                #endif
             }
 
             // For now, return a simple echo response

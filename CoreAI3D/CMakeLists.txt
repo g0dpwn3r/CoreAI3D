@@ -131,32 +131,58 @@ endif()
 
 # --- Define Executable and Link Libraries ---
 
-# Use protobuf_generate_cpp (from FindProtobuf)
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
-    ${CLOUD_SPEECH_PROTO}
-    IMPORT_DIRS ${VALID_PROTOBUF_IMPORT_DIRS}
-)
+# Note: cloud_speech.proto imports google/cloud/speech/v1/resource.proto and google/rpc/status.proto.
+# google-cloud-cpp provides pre-generated protobuf headers and libraries that include all these types.
+# Instead of generating our own protos (which would conflict with the pre-built ones), we use the
+# ones from vcpkg's google-cloud-cpp package.
 
-add_library(proto_objs ${PROTO_SRCS} ${PROTO_HDRS})
-
-# Copy protobuf include directories to build directory for easier access only when local dirs exist
-if(EXISTS "${LOCAL_GOOGLE_DIR}" AND EXISTS "${LOCAL_GOOGLEAPIS_DIR}")
-    add_custom_command(TARGET proto_objs PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${LOCAL_GOOGLE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/google
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${LOCAL_GOOGLEAPIS_DIR} ${CMAKE_CURRENT_BINARY_DIR}/googleapis
-        COMMENT "Copying protobuf include directories to build directory"
-    )
-else()
-    message(STATUS "Skipping copy of google/googleapis into build tree because local directories are missing; using Protobuf include paths from system")
+# Find and link against google-cloud-cpp speech protos library
+# VCPKG_TARGET_TRIPLET is set by vcpkg toolchain, default to common values if not set
+if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET "x64-linux")
 endif()
 
-target_include_directories(proto_objs PUBLIC
-    ${CMAKE_CURRENT_BINARY_DIR}
+# Determine the correct library path based on build type (use generator expression for multi-config)
+set(_speech_protos_lib_dir "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}")
+
+find_library(GOOGLE_CLOUD_SPEECH_PROTOS_LIB
+    NAMES google_cloud_cpp_speech_protos
+    PATHS "${_speech_protos_lib_dir}"
+    PATH_SUFFIXES lib debug/lib
 )
-if(PROTOBUF_INCLUDE_DIR)
-    target_include_directories(proto_objs PUBLIC ${PROTOBUF_INCLUDE_DIR})
+
+# Find rpc_status_protos for google.rpc.Status symbols
+find_library(GOOGLE_CLOUD_RPC_STATUS_PROTOS_LIB
+    NAMES google_cloud_cpp_rpc_status_protos
+    PATHS "${_speech_protos_lib_dir}"
+    PATH_SUFFIXES lib debug/lib
+)
+
+if(GOOGLE_CLOUD_SPEECH_PROTOS_LIB)
+    message(STATUS "Found google-cloud-cpp speech protos library: ${GOOGLE_CLOUD_SPEECH_PROTOS_LIB}")
+    if(GOOGLE_CLOUD_RPC_STATUS_PROTOS_LIB)
+        message(STATUS "Found google-cloud-cpp rpc_status protos library: ${GOOGLE_CLOUD_RPC_STATUS_PROTOS_LIB}")
+    endif()
+    
+    # Create an interface library to provide include paths and link deps
+    add_library(proto_objs INTERFACE)
+    # Add include directories for the protobuf headers from vcpkg
+    target_include_directories(proto_objs INTERFACE
+        ${PROTOBUF_INCLUDE_DIR}
+        "${_speech_protos_lib_dir}/include"
+    )
+    target_link_libraries(proto_objs INTERFACE ${GOOGLE_CLOUD_SPEECH_PROTOS_LIB})
+    if(GOOGLE_CLOUD_RPC_STATUS_PROTOS_LIB)
+        target_link_libraries(proto_objs INTERFACE ${GOOGLE_CLOUD_RPC_STATUS_PROTOS_LIB})
+    endif()
+else()
+    message(WARNING "google-cloud-cpp speech protos library not found - falling back to generating protos")
+    # Fallback to generating protos ourselves
+    protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+        ${CLOUD_SPEECH_PROTO}
+        IMPORT_DIRS ${VALID_PROTOBUF_IMPORT_DIRS}
+    )
+    add_library(proto_objs ${PROTO_SRCS} ${PROTO_HDRS})
 endif()
 
 set(SOURCE_FILES
@@ -217,7 +243,7 @@ target_precompile_headers(CoreAI3DLib
 
 find_path(MYSQL_INCLUDE_DIR 
     NAMES mysqlx/xdevapi.h 
-    PATHS "${CMAKE_TOOLCHAIN_FILE}/../../installed/${VCPKG_TARGET_TRIPLET}/include"
+    PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include"
 )
 # Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
 option(USE_MYSQL "Enable MySQL support" ON)
@@ -340,17 +366,13 @@ target_link_libraries(CoreAI3DLib PUBLIC
 
 add_executable(CoreAI3D main.cpp)
 
-# Enable LTO if available
-include(CheckIPOSupported)
-check_ipo_supported(RESULT IPO_SUPPORTED)
+# Disable LTO for now to avoid protobuf symbol conflicts
+set_property(TARGET CoreAI3DLib PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+set_property(TARGET CoreAI3D PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
 
-if(IPO_SUPPORTED)
-    # This automatically adds -flto (full LTO) depending on CMake/Compiler version
-    set_property(TARGET CoreAI3DLib PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    set_property(TARGET CoreAI3D PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    message(STATUS "Link-Time Optimization (LTO) enabled.")
-else()
-    message(WARNING "Compiler does not support Link-Time Optimization.")
+# Allow multiple symbol definitions due to mysql-connector-cpp bundling protobuf-lite
+if(NOT WIN32 AND NOT USE_MYSQL)
+    target_link_options(CoreAI3D PRIVATE -Wl,--allow-multiple-definition)
 endif()
 
 # Include directories for the executable

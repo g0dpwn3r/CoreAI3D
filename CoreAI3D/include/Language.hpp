@@ -59,6 +59,7 @@ private:
     std::unique_ptr<Training> trainer;
     std::unique_ptr<class Database> database;
     std::string answer(std::vector<float>& textEmbedding);
+    std::vector<float> findClosestWord(const std::string& word);
 
     // New methods for learning from conversations
     std::vector<std::pair<std::string, std::string>> parseConversation(const std::string& conversation);

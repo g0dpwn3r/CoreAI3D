@@ -122,28 +122,69 @@ std::string Language::answer(std::vector<float>& textEmbedding) {
     std::vector<float> data = textEmbedding;
     if (!core) {
         std::cerr << "Error: CoreAI is not initialized in Language::answer. Cannot perform forward pass." << std::endl;
-        return "Error: AI Core not ready.";
+        return "Core: I don't have enough offline data to respond to that.";
     }
     std::vector<std::vector<float>> model_input_reshaped = reshape(data, embeddingDim);
     std::vector<std::vector<float>> model_prediction = core->forward(model_input_reshaped);
     if (model_prediction.empty() || model_prediction[0].empty()) {
-        std::cerr << "Warning: Model prediction returned empty. Cannot determine class." << std::endl;
-        return "No clear answer.";
+        return "Core: I don't have enough offline data to respond to that.";
     }
-    std::vector<float>& output = model_prediction[0];  
+    std::vector<float>& output = model_prediction[0];
+
+    float maxVal = *std::max_element(output.begin(), output.end());
+    float sumExp = 0.0f;
+    std::vector<float> probs(output.size());
+    for (size_t i = 0; i < output.size(); ++i) {
+        probs[i] = std::exp(output[i] - maxVal);
+        sumExp += probs[i];
+    }
+    for (size_t i = 0; i < probs.size(); ++i) {
+        probs[i] /= sumExp;
+    }
+
     int predictedClassIndex = 0;
-    float maxProb = output[0];
-    for (size_t j = 1; j < output.size(); ++j) { 
-        if (output[j] > maxProb) {
-            maxProb = output[j];
+    float maxProb = probs[0];
+    for (size_t j = 1; j < probs.size(); ++j) {
+        if (probs[j] > maxProb) {
+            maxProb = probs[j];
             predictedClassIndex = j;
         }
     }
-    if (predictedClassIndex >= 0 && predictedClassIndex < classLabels.size()) {
+
+    float confidenceThreshold = 0.25f;
+    if (maxProb < confidenceThreshold) {
+        std::string nearestWord;
+        float bestSim = -1.0f;
+        for (const auto& entry : embeddingsByLang) {
+            std::vector<float> inputAvg(embeddingDim, 0.0f);
+            size_t wordsInInput = data.size() / embeddingDim;
+            if (wordsInInput == 0) break;
+            for (size_t w = 0; w < wordsInInput; ++w) {
+                for (int d = 0; d < embeddingDim; ++d) {
+                    inputAvg[d] += data[w * embeddingDim + d];
+                }
+            }
+            for (int d = 0; d < embeddingDim; ++d) inputAvg[d] /= wordsInInput;
+            float sim = cosine_similarity(inputAvg, entry.second);
+            if (sim > bestSim) {
+                bestSim = sim;
+                nearestWord = entry.first;
+            }
+        }
+        if (!nearestWord.empty() && bestSim > 0.3f) {
+            std::string langPrefix = currentLang + ":";
+            std::string displayWord = nearestWord;
+            if (displayWord.find(langPrefix) == 0) displayWord = displayWord.substr(langPrefix.size());
+            return "Core: I don't have enough offline data for a full response, but your message is semantically close to '" + displayWord + "'.";
+        }
+        return "Core: I received your message but I don't have enough offline data to respond to that. Train me with more data for a better answer.";
+    }
+
+    if (predictedClassIndex >= 0 && predictedClassIndex < (int)classLabels.size()) {
         return classLabels[predictedClassIndex];
     }
     else {
-        return "Prediction out of bounds.";
+        return "Core: I don't have enough offline data to respond to that.";
     }
 }
 int Language::chat() {
@@ -361,6 +402,7 @@ int Language::chat() {
         // For now, we'll just update the model state periodically
         static int trainingCounter = 0;
         if (++trainingCounter % 5 == 0 && database) { // Save every 5 messages, only if database available
+#ifdef USE_MYSQL
             try {
                 nlohmann::json jsonData;
                 jsonData["model_state"] = {
@@ -383,15 +425,11 @@ int Language::chat() {
                     jsonData["embeddings"][pair.first] = pair.second;
                 }
 
-#ifdef USE_MYSQL
                 database->saveModelState(sessionId, jsonData);
-                if (trainer && trainer->verbose) {
-                    std::cout << "Model state saved to database." << std::endl;
-                }
             } catch (const std::exception& ex) {
                 std::cerr << "DEBUG: Failed to save model state to database: " << ex.what() << std::endl;
-#endif
             }
+#endif
         }
 
         // Output the AI response
@@ -477,25 +515,74 @@ std::unordered_map<std::string, std::vector<float>> Language::createEmbeddingsBy
     return embeddings;
 }
 
+std::vector<float> Language::findClosestWord(const std::string& word)
+{
+    std::string langKey = currentLang + ":" + word;
+    auto directLang = embeddingsByLang.find(langKey);
+    if (directLang != embeddingsByLang.end()) {
+        return directLang->second;
+    }
+    auto directBare = embeddingsByLang.find(word);
+    if (directBare != embeddingsByLang.end()) {
+        return directBare->second;
+    }
+
+    std::string lowerWord = word;
+    std::transform(lowerWord.begin(), lowerWord.end(), lowerWord.begin(), ::tolower);
+    for (const auto& entry : embeddingsByLang) {
+        const std::string& key = entry.first;
+        std::string keyLower = key;
+        std::transform(keyLower.begin(), keyLower.end(), keyLower.begin(), ::tolower);
+        std::string bareKey = key;
+        auto colonPos = key.find(':');
+        if (colonPos != std::string::npos) {
+            bareKey = key.substr(colonPos + 1);
+        }
+        std::string bareKeyLower = bareKey;
+        std::transform(bareKeyLower.begin(), bareKeyLower.end(), bareKeyLower.begin(), ::tolower);
+        if (bareKeyLower == lowerWord) {
+            return entry.second;
+        }
+    }
+
+    return std::vector<float>(embeddingDim, 0.0f);
+}
+
 std::vector<float> Language::encodeText(const std::string& text)
 {
     std::vector<std::string> words = tokenize(text);
     std::vector<float> flattenedEmbedding;
-    std::unordered_map<std::string, std::vector<float>>& currentEmbeddings = this->embeddingsByLang;
 
     for (std::string& word : words)
     {
         std::string key = currentLang + ":" + word;
-        auto it = currentEmbeddings.find(key);
+        auto it = embeddingsByLang.find(key);
 
-        if (it != currentEmbeddings.end())
+        if (it != embeddingsByLang.end())
         {
             flattenedEmbedding.insert(flattenedEmbedding.end(), it->second.begin(), it->second.end());
         }
         else
         {
-            std::vector<float> randomEmbedding = this->generateRandomEmbedding();
-            flattenedEmbedding.insert(flattenedEmbedding.end(), randomEmbedding.begin(), randomEmbedding.end());
+            auto bareIt = embeddingsByLang.find(word);
+            if (bareIt != embeddingsByLang.end()) {
+                flattenedEmbedding.insert(flattenedEmbedding.end(), bareIt->second.begin(), bareIt->second.end());
+            } else {
+                std::string lowerWord = word;
+                std::transform(lowerWord.begin(), lowerWord.end(), lowerWord.begin(), ::tolower);
+                std::vector<float> closest = findClosestWord(lowerWord);
+                if (!closest.empty() && (int)closest.size() == embeddingDim) {
+                    bool isZero = true;
+                    for (float v : closest) { if (v != 0.0f) { isZero = false; break; } }
+                    if (!isZero) {
+                        flattenedEmbedding.insert(flattenedEmbedding.end(), closest.begin(), closest.end());
+                    } else {
+                        flattenedEmbedding.insert(flattenedEmbedding.end(), embeddingDim, 0.0f);
+                    }
+                } else {
+                    flattenedEmbedding.insert(flattenedEmbedding.end(), embeddingDim, 0.0f);
+                }
+            }
         }
     }
 
