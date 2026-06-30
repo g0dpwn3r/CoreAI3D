@@ -75,6 +75,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libblkid-dev \
     libglib2.0-dev \
     libstdc++6 \
+    libltdl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git lfs install
@@ -95,7 +96,19 @@ RUN printf '%s\n' \
     'set(VCPKG_LIBRARY_LINKAGE static)' \
     'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
     'set(VCPKG_BUILD_TYPE release)' \
+    'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
     > /opt/vcpkg/triplets/x64-linux-release.cmake
+
+RUN printf '%s\n' \
+    'set(VCPKG_TARGET_ARCHITECTURE x64)' \
+    'set(VCPKG_CRT_LINKAGE dynamic)' \
+    'set(VCPKG_LIBRARY_LINKAGE static)' \
+    'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
+    'set(VCPKG_BUILD_TYPE release)' \
+    'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+    > /opt/vcpkg/triplets/community/x64-linux-release.cmake
 
 # ==============================================================================
 # Stage 3: vcpkg dependency installation
@@ -114,8 +127,8 @@ ENV VCPKG_MAX_CONCURRENCY=1 \
     VCPKG_KEEP_GOING=1 \
     CURL_MAX_RETRIES=10 \
     CURL_RETRY_DELAY=5 \
-    CXXFLAGS="-Wno-error=override-init" \
-    CFLAGS="-Wno-error=override-init"
+    CXXFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types" \
+    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
 
 RUN --mount=type=cache,target=/root/.cache/vcpkg \
     --mount=type=cache,target=/opt/vcpkg/downloads \
@@ -126,18 +139,18 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
         --overlay-ports=/app/custom-ports \
         --triplet=x64-linux-release \
         --vcpkg-root=/opt/vcpkg \
-    || { \
-        echo ""; \
-        echo "========================================"; \
-        echo " VCPKG BUILD FAILURE - DIAGNOSTIC DUMP"; \
-        echo "========================================"; \
-        for log in $(find /opt/vcpkg/buildtrees -name "install.log" -o -name "config.log" -o -name "CMakeError.log" 2>/dev/null); do \
-            echo ""; \
-            echo "--- $log ---"; \
-            tail -80 "$log"; \
-        done; \
-        exit 1; \
-    }
+        2>&1 | tee /tmp/vcpkg-build.log ; \
+      VCPKG_RC=${PIPESTATUS[0]} ; \
+      if [ "$VCPKG_RC" -ne 0 ]; then \
+        echo "" ; \
+        echo "========================================" ; \
+        echo " VCPKG BUILD FAILED (exit code $VCPKG_RC)" ; \
+        echo "========================================" ; \
+        echo "" ; \
+        echo ">>> LAST 200 LINES OF BUILD OUTPUT <<<" ; \
+        tail -200 /tmp/vcpkg-build.log ; \
+        exit 1 ; \
+      fi
 
 # ==============================================================================
 # Stage 4: Application build
@@ -157,8 +170,8 @@ COPY custom-ports/ ./custom-ports/
 COPY config.json* ./
 COPY test/ ./test/
 
-ENV CXXFLAGS="-Wno-error=override-init" \
-    CFLAGS="-Wno-error=override-init"
+ENV CXXFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types" \
+    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
 
 RUN mkdir -p build && cd build && \
     cmake .. \
