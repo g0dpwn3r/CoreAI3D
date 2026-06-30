@@ -92,24 +92,24 @@ RUN git clone https://github.com/g0dpwn3r/vcpkg.git /opt/vcpkg \
     && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
 RUN printf '%s\n' \
-    'set(VCPKG_TARGET_ARCHITECTURE x64)' \
-    'set(VCPKG_CRT_LINKAGE dynamic)' \
-    'set(VCPKG_LIBRARY_LINKAGE static)' \
-    'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
-    'set(VCPKG_BUILD_TYPE release)' \
-    'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
-    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init")' \
-    > /opt/vcpkg/triplets/x64-linux-release.cmake
+     'set(VCPKG_TARGET_ARCHITECTURE x64)' \
+     'set(VCPKG_CRT_LINKAGE dynamic)' \
+     'set(VCPKG_LIBRARY_LINKAGE static)' \
+     'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
+     'set(VCPKG_BUILD_TYPE release)' \
+     'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+     'set(VCPKG_CXX_FLAGS "-Wno-error=override-init")' \
+     > /opt/vcpkg/triplets/x64-linux.cmake
 
 RUN printf '%s\n' \
-    'set(VCPKG_TARGET_ARCHITECTURE x64)' \
-    'set(VCPKG_CRT_LINKAGE dynamic)' \
-    'set(VCPKG_LIBRARY_LINKAGE static)' \
-    'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
-    'set(VCPKG_BUILD_TYPE release)' \
-    'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
-    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init")' \
-    > /opt/vcpkg/triplets/community/x64-linux-release.cmake
+     'set(VCPKG_TARGET_ARCHITECTURE x64)' \
+     'set(VCPKG_CRT_LINKAGE dynamic)' \
+     'set(VCPKG_LIBRARY_LINKAGE static)' \
+     'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
+     'set(VCPKG_BUILD_TYPE release)' \
+     'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+     'set(VCPKG_CXX_FLAGS "-Wno-error=override-init")' \
+     > /opt/vcpkg/triplets/community/x64-linux.cmake
 
 # ==============================================================================
 # Stage 3: vcpkg dependency installation
@@ -147,7 +147,7 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
     { /opt/vcpkg/vcpkg install \
         --x-manifest-root=/app \
         --overlay-ports=/app/custom-ports \
-        --triplet=x64-linux-release \
+        --triplet=x64-linux \
         --vcpkg-root=/opt/vcpkg \
         2>&1 ; echo $? > /tmp/vcpkg_rc ; } | tee /tmp/vcpkg-build.log ; \
       VCPKG_RC=$(cat /tmp/vcpkg_rc 2>/dev/null || echo 1) ; \
@@ -203,7 +203,7 @@ RUN mkdir -p build && cd build && \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
         -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
-        -DVCPKG_TARGET_TRIPLET=x64-linux-release \
+        -DVCPKG_TARGET_TRIPLET=x64-linux \
         -DSKIP_POST_BUILD=ON \
     && ninja \
     || { \
