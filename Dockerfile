@@ -4,7 +4,7 @@
 # Stage 1: System dependencies
 # Only rebuilds when apt package list changes.
 # ==============================================================================
-FROM ubuntu:24.04 AS system-deps
+FROM --platform=linux/amd64 ubuntu:24.04 AS system-deps
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
@@ -98,7 +98,7 @@ RUN printf '%s\n' \
     'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
     'set(VCPKG_BUILD_TYPE release)' \
     'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
-    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init")' \
     > /opt/vcpkg/triplets/x64-linux-release.cmake
 
 RUN printf '%s\n' \
@@ -108,7 +108,7 @@ RUN printf '%s\n' \
     'set(VCPKG_CMAKE_SYSTEM_NAME Linux)' \
     'set(VCPKG_BUILD_TYPE release)' \
     'set(VCPKG_C_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
-    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types")' \
+    'set(VCPKG_CXX_FLAGS "-Wno-error=override-init")' \
     > /opt/vcpkg/triplets/community/x64-linux-release.cmake
 
 # ==============================================================================
@@ -124,17 +124,26 @@ WORKDIR /app
 COPY vcpkg.json ./
 COPY custom-ports/ ./custom-ports/
 
-ENV VCPKG_MAX_CONCURRENCY=1 \
+# Validate host architecture — the x64 triplet requires an x86_64 CPU
+RUN case "$(uname -m)" in x86_64|amd64) echo "OK: building on x86_64 ($(uname -m))" ;; \
+    *) echo "ERROR: this Dockerfile requires an x86_64 host; detected $(uname -m)" ; exit 1 ;; esac
+
+ENV VCPKG_MAX_CONCURRENCY=4 \
     VCPKG_KEEP_GOING=1 \
     CURL_MAX_RETRIES=10 \
-    CURL_RETRY_DELAY=5 \
-    CXXFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types" \
-    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
+    CURL_RETRY_DELAY=5
 
 RUN --mount=type=cache,target=/root/.cache/vcpkg \
     --mount=type=cache,target=/opt/vcpkg/downloads \
     --mount=type=cache,target=/opt/vcpkg/buildtrees \
     --mount=type=cache,target=/opt/vcpkg/packages \
+    ARCH_FILE=/opt/vcpkg/buildtrees/.last_build_arch; \
+    if [ -f "$ARCH_FILE" ] && [ "$(cat "$ARCH_FILE")" != "$(uname -m)" ]; then \
+        echo "Host architecture changed from $(cat "$ARCH_FILE") to $(uname -m); clearing stale vcpkg buildtrees"; \
+        rm -rf /opt/vcpkg/buildtrees/*; \
+    fi; \
+    mkdir -p /opt/vcpkg/buildtrees; \
+    uname -m > "$ARCH_FILE"; \
     { /opt/vcpkg/vcpkg install \
         --x-manifest-root=/app \
         --overlay-ports=/app/custom-ports \
@@ -185,7 +194,7 @@ COPY custom-ports/ ./custom-ports/
 COPY config.json* ./
 COPY test/ ./test/
 
-ENV CXXFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types" \
+ENV CXXFLAGS="-Wno-error=override-init" \
     CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
 
 RUN mkdir -p build && cd build && \
@@ -212,7 +221,7 @@ RUN mkdir -p build && cd build && \
 # ==============================================================================
 # Stage 5: Minimal runtime image (~200MB vs ~15GB full build image)
 # ==============================================================================
-FROM ubuntu:24.04 AS runtime
+FROM --platform=linux/amd64 ubuntu:24.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
