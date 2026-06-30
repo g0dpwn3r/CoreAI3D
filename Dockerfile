@@ -41,6 +41,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     python3-dev \
     python-is-python3 \
     python3-pip \
+    python3-venv \
     python3-jinja2 \
     ca-certificates \
     libffi-dev \
@@ -134,13 +135,13 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
     --mount=type=cache,target=/opt/vcpkg/downloads \
     --mount=type=cache,target=/opt/vcpkg/buildtrees \
     --mount=type=cache,target=/opt/vcpkg/packages \
-    /opt/vcpkg/vcpkg install \
+    { /opt/vcpkg/vcpkg install \
         --x-manifest-root=/app \
         --overlay-ports=/app/custom-ports \
         --triplet=x64-linux-release \
         --vcpkg-root=/opt/vcpkg \
-        2>&1 | tee /tmp/vcpkg-build.log ; \
-      VCPKG_RC=${PIPESTATUS[0]} ; \
+        2>&1 ; echo $? > /tmp/vcpkg_rc ; } | tee /tmp/vcpkg-build.log ; \
+      VCPKG_RC=$(cat /tmp/vcpkg_rc 2>/dev/null || echo 1) ; \
       if [ "$VCPKG_RC" -ne 0 ]; then \
         echo "" ; \
         echo "========================================" ; \
