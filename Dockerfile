@@ -150,6 +150,20 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
         echo "" ; \
         echo ">>> LAST 200 LINES OF BUILD OUTPUT <<<" ; \
         tail -200 /tmp/vcpkg-build.log ; \
+        echo "" ; \
+        echo ">>> MOST RECENT CMAKE CONFIG LOGS <<<" ; \
+        find /opt/vcpkg/buildtrees -type f \( \
+                -name "config-*-out.log" -o \
+                -name "config-*-err.log" -o \
+                -name "config-*-CMakeConfigureLog.yaml.log" \
+            \) -printf "%T@ %p\n" 2>/dev/null | \
+            sort -rn | head -5 | cut -d' ' -f2- | \
+            while IFS= read -r logfile; do \
+                sz=$(wc -c < "$logfile" 2>/dev/null || echo 0) ; \
+                echo "" ; \
+                echo "=== $logfile ($sz bytes) ===" ; \
+                tail -150 "$logfile" ; \
+            done ; \
         exit 1 ; \
       fi
 
