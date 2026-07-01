@@ -183,27 +183,29 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
 # static libraries, so no recompilation of dependencies ever occurs.
 # ==============================================================================
 FROM system-deps AS builder
+ARG PROJECT_NAME=CoreAI3D
 
 COPY --from=vcpkg-install /opt/vcpkg /opt/vcpkg
-COPY --from=vcpkg-install /app/vcpkg_installed /app/CoreAI3D/vcpkg_installed
+COPY --from=vcpkg-install /app/vcpkg_installed /app/vcpkg_installed
 
-WORKDIR /app/CoreAI3D
+WORKDIR /app/${PROJECT_NAME}
 
 COPY CMakeLists.txt ./
-COPY CoreAI3D/ ./CoreAI3D/
+COPY ${PROJECT_NAME}/ ./${PROJECT_NAME}/
 COPY custom-ports/ ./custom-ports/
 COPY config.json* ./
 COPY test/ ./test/
 
 ENV CXXFLAGS="-Wno-error=override-init" \
-    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
+    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types" \
+    VCPKG_INSTALLED_DIR=/app/vcpkg_installed
 
 RUN mkdir -p build && cd build && \
     cmake .. \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
-        -DVCPKG_OVERLAY_PORTS=/app/CoreAI3D/custom-ports \
+        -DVCPKG_OVERLAY_PORTS=/app/${PROJECT_NAME}/custom-ports \
         -DVCPKG_TARGET_TRIPLET=x64-linux \
         -DSKIP_POST_BUILD=ON \
     && ninja \
@@ -223,6 +225,7 @@ RUN mkdir -p build && cd build && \
 # Stage 5: Minimal runtime image (~200MB vs ~15GB full build image)
 # ==============================================================================
 FROM --platform=linux/amd64 ubuntu:24.04 AS runtime
+ARG PROJECT_NAME=CoreAI3D
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -250,11 +253,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libudev1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/CoreAI3D/build/CoreAI3D/CoreAI3D /app/CoreAI3D
-COPY --from=builder /app/CoreAI3D/build/CoreAI3D/config.json /app/config.json
+COPY --from=builder /app/${PROJECT_NAME}/build/${PROJECT_NAME}/${PROJECT_NAME} /app/${PROJECT_NAME}
+COPY --from=builder /app/${PROJECT_NAME}/build/${PROJECT_NAME}/config.json /app/config.json
 
 WORKDIR /app
 
 EXPOSE 8080 8081
 
-CMD ["./CoreAI3D"]
+CMD ./${PROJECT_NAME}
