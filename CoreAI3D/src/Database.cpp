@@ -38,40 +38,70 @@ Database::Database(const std::string& host, unsigned int port,
                 break;
         };
 
-        // First, connect without schema to create it if it doesn't exist
+        // First, connect without schema to create it if it doesn't exist.
+        // MySQL (and especially the X Plugin on port 33060) can still be finishing
+        // its startup when we attempt this, producing a transient
+        // "Connection refused" (CDK Error: generic:111). Retry a few times before
+        // giving up so we survive the container startup race condition.
         std::cout << "DEBUG: Attempting temporary connection to create database..." << std::endl;
-        try {
-            mysqlx::SessionSettings tempSettings(
-                mysqlx::SessionOption::HOST, host,
-                mysqlx::SessionOption::PORT, port,
-                mysqlx::SessionOption::USER, user,
-                mysqlx::SessionOption::PWD, password
-            );
-            tempSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
-            mysqlx::Session tempSession(tempSettings);
-            std::cout << "DEBUG: Temporary session created successfully" << std::endl;
+        {
+            const int maxRetries = 30;
+            const auto retryDelay = std::chrono::seconds(2);
+            bool tempConnected = false;
 
-            std::string createDbQuery = "CREATE DATABASE IF NOT EXISTS " + schemaName;
-            std::cout << "DEBUG: Executing query: " << createDbQuery << std::endl;
-            tempSession.sql(createDbQuery).execute();
-            std::cout << "DEBUG: Database creation query executed successfully" << std::endl;
-
-            tempSession.close();
-            std::cout << "DEBUG: Temporary session closed" << std::endl;
-        } catch (const mysqlx::Error& mysqlEx) {
-            // Handle MySQL-specific errors more gracefully
-            std::string errorMsg = mysqlEx.what();
-            if (errorMsg.find("Broken pipe") != std::string::npos ||
-                errorMsg.find("unexpected message") != std::string::npos) {
-                std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl;
-                std::cerr << "DEBUG: Trying to continue with main connection attempt..." << std::endl;
-            } else {
-                std::cerr << "DEBUG: Temporary session creation failed: " << errorMsg << std::endl;
-                throw std::runtime_error("Failed to create temporary database session: " + errorMsg);
+            // A transient connection error means MySQL / the X Plugin isn't
+            // accepting connections yet; we should wait and retry rather than fail.
+            auto isTransientConnError = [](const std::string& msg) {
+                return msg.find("Connection refused") != std::string::npos ||
+                       msg.find("Can't connect")     != std::string::npos ||
+                       msg.find("generic:111")       != std::string::npos;
             };
-        } catch (const std::exception& tempEx) {
-            std::cerr << "DEBUG: Temporary session creation failed: " << tempEx.what() << std::endl;
-            throw std::runtime_error("Failed to create temporary database session: " + std::string(tempEx.what()));
+
+            for (int attempt = 1; attempt <= maxRetries && !tempConnected; ++attempt) {
+                try {
+                    mysqlx::SessionSettings tempSettings(
+                        mysqlx::SessionOption::HOST, host,
+                        mysqlx::SessionOption::PORT, port,
+                        mysqlx::SessionOption::USER, user,
+                        mysqlx::SessionOption::PWD, password
+                    );
+                    tempSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
+                    mysqlx::Session tempSession(tempSettings);
+                    std::cout << "DEBUG: Temporary session created successfully" << std::endl;
+
+                    std::string createDbQuery = "CREATE DATABASE IF NOT EXISTS " + schemaName;
+                    std::cout << "DEBUG: Executing query: " << createDbQuery << std::endl;
+                    tempSession.sql(createDbQuery).execute();
+                    std::cout << "DEBUG: Database creation query executed successfully" << std::endl;
+
+                    tempSession.close();
+                    std::cout << "DEBUG: Temporary session closed" << std::endl;
+                    tempConnected = true;
+                } catch (const std::exception& tempEx) {
+                    // mysqlx::Error derives from std::exception, so both are handled here.
+                    std::string errorMsg = tempEx.what();
+                    if (errorMsg.find("Broken pipe") != std::string::npos ||
+                        errorMsg.find("unexpected message") != std::string::npos) {
+                        // Recoverable handshake glitch; let the main connection retry.
+                        std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl;
+                        std::cerr << "DEBUG: Trying to continue with main connection attempt..." << std::endl;
+                        tempConnected = true;
+                    } else if (isTransientConnError(errorMsg)) {
+                        // MySQL not ready yet - wait and retry.
+                        std::cerr << "DEBUG: MySQL not ready yet (attempt " << attempt << "/" << maxRetries
+                                  << "): " << errorMsg << ". Retrying in "
+                                  << retryDelay.count() << "s..." << std::endl;
+                        if (attempt == maxRetries) {
+                            throw std::runtime_error("Failed to create temporary database session after "
+                                + std::to_string(maxRetries) + " attempts: " + errorMsg);
+                        }
+                        std::this_thread::sleep_for(retryDelay);
+                    } else {
+                        std::cerr << "DEBUG: Temporary session creation failed: " << errorMsg << std::endl;
+                        throw std::runtime_error("Failed to create temporary database session: " + errorMsg);
+                    };
+                };
+            };
         };
 
         // Now establish connection to the specific schema

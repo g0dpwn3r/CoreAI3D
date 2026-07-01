@@ -125,7 +125,8 @@ RUN npm install -g --unsafe-perm \
     axios \
     ws
 # Supervisor setup
-RUN mkdir -p /etc/supervisor/conf.d
+RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor && \
+    chown -R sandbox:sandbox /var/log/supervisor
 COPY docker/sandbox/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Copy training scripts

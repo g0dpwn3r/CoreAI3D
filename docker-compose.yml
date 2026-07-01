@@ -5,6 +5,12 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: pmAkRV4lAAKsOfdWCUxP
       MYSQL_DATABASE: CoreAI3D
+    # Explicitly enable the X Plugin (X DevAPI / port 33060) and bind it on all
+    # interfaces so other containers on the network can reach it.
+    command:
+      - "--mysqlx=ON"
+      - "--mysqlx-bind-address=0.0.0.0"
+      - "--mysqlx-port=33060"
     ports:
       - "33060:33060" # X Plugin
       - "33061:3306"   # classic protocol
@@ -13,6 +19,16 @@ services:
     restart: unless-stopped
     networks:
       - skynet
+    # Wait until MySQL is actually accepting connections before dependents start.
+    # start_period covers the first-run data directory initialization.
+    healthcheck:
+      # Use the same MYSQL_ROOT_PASSWORD value set above so rotating the password
+      # can't silently break the healthcheck (which would block dependents forever).
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   coreai3d:
     build:
@@ -22,7 +38,8 @@ services:
         BUILDKIT_INLINE_CACHE: "1"
     container_name: coreai3d
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy # Wait for MySQL healthcheck to pass
     networks:
       - skynet
     environment:
