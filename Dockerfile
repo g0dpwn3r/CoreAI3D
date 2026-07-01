@@ -4,7 +4,7 @@
 # Stage 1: System dependencies
 # Only rebuilds when apt package list changes.
 # ==============================================================================
-FROM --platform=linux/amd64 ubuntu:24.04 AS system-deps
+FROM --platform=$TARGETPLATFORM ubuntu:24.04 AS system-deps
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
@@ -224,7 +224,7 @@ RUN mkdir -p build && cd build && \
 # ==============================================================================
 # Stage 5: Minimal runtime image (~200MB vs ~15GB full build image)
 # ==============================================================================
-FROM --platform=linux/amd64 ubuntu:24.04 AS runtime
+FROM --platform=$TARGETPLATFORM ubuntu:24.04 AS runtime
 ARG PROJECT_NAME=CoreAI3D
 
 ENV DEBIAN_FRONTEND=noninteractive
