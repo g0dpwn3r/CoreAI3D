@@ -10,6 +10,9 @@ services:
       - "33061:3306"   # classic protocol
     volumes:
         - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+    networks:
+      - skynet
 
   coreai3d:
     build:
@@ -20,6 +23,8 @@ services:
     container_name: coreai3d
     depends_on:
       - mysql
+    networks:
+      - skynet
     environment:
       DB_HOST: mysql
       DB_PORT: 33060
@@ -73,7 +78,7 @@ services:
       - DEBIAN_FRONTEND=noninteractive
       - SANDBOX_TYPE=ubuntu
     networks:
-      - sandbox_network
+      - skynet  
 
   kali-sandbox:
     build:
@@ -96,7 +101,7 @@ services:
       - DEBIAN_FRONTEND=noninteractive
       - SANDBOX_TYPE=kali
     networks:
-      - sandbox_network
+      - skynet    
 
   alpine-sandbox:
     build:
@@ -118,7 +123,7 @@ services:
     environment:
       - SANDBOX_TYPE=alpine
     networks:
-      - sandbox_network
+      - skynet
 
   # AI Training Environment
   ai-trainer:
@@ -126,6 +131,9 @@ services:
       context: .
       dockerfile: docker/training/Dockerfile.trainer
     container_name: ai_trainer
+    networks:
+      - skynet
+    restart: unless-stopped
     depends_on:
       - ubuntu-sandbox
       - kali-sandbox
@@ -154,10 +162,12 @@ services:
     ports:
       - "3001:3001"
     restart: unless-stopped
+    networks:          # <--- ADD THIS LINE
+      - skynet
 volumes:
     mysql_data:
     webtop_desktop_config:
 
 networks:
-  sandbox_network:
+  skynet:
     driver: bridge

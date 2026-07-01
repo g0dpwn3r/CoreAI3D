@@ -94,8 +94,25 @@ bool APIServer::initialize(const std::string& configPath,
         this->createTables = createTables;
 
         // Set working directory to project root
-        std::filesystem::current_path("/home/carlon/code/CoreAI3D");
-        std::cout << "Server working directory set to: " << std::filesystem::current_path() << std::endl;
+        std::filesystem::path projectRoot = "/home/carlon/code/CoreAI3D";
+        try {
+            if (!std::filesystem::exists(projectRoot)) {
+                std::cerr << "Working directory " << projectRoot << " does not exist; creating it..." << std::endl;
+                std::filesystem::create_directories(projectRoot);
+            }
+            if (std::filesystem::is_directory(projectRoot)) {
+                std::filesystem::current_path(projectRoot);
+                std::cout << "Server working directory set to: " << std::filesystem::current_path() << std::endl;
+            } else {
+                std::cerr << "Warning: " << projectRoot << " is not a directory; using current working directory." << std::endl;
+            }
+        } catch (const std::filesystem::filesystem_error& fsErr) {
+            std::cerr << "Warning: Could not set working directory to " << projectRoot
+                      << ": " << fsErr.what() << ". Continuing with current directory." << std::endl;
+        } catch (const std::exception& ex) {
+            std::cerr << "Warning: Unexpected error setting working directory: " << ex.what()
+                      << ". Continuing with current directory." << std::endl;
+        }
 
         // Initialize orchestrator
         orchestrator = std::make_unique<ModuleOrchestrator>(serverName + "_orchestrator");

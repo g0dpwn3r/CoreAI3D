@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreAI3DCommon.hpp"
 
+#include <memory>
 #include "Core.hpp"
 #include "Train.hpp"
 #include "Language.hpp"
@@ -23,8 +24,10 @@ enum class SSLMode {
 class Database
 {
 public:
-    // Constructor signature: Changed 'int port' to 'unsigned int port' to match implementation
-    Database(const std::string& host, unsigned int port, const std::string& user, const std::string password, const std::string& schemaName, SSLMode ssl, bool createTables = false);
+    // Constructor uses MySQL X DevAPI Session on port 33060 by default
+    Database(const std::string& host, unsigned int port, const std::string& user,
+             const std::string& password, const std::string& schemaName,
+             SSLMode ssl, bool createTables = false);
 
     void createTables();
 
@@ -164,7 +167,7 @@ private:
     SSLMode sslMode;
 
 #ifdef USE_MYSQL
-    mysqlx::Session* session;
+    std::unique_ptr<mysqlx::Session> session;
 #endif
 
     // Helper functions for BLOB conversion of 2D matrices

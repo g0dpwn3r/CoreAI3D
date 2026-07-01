@@ -2,7 +2,7 @@
 
 // Constructor
 Database::Database(const std::string& host, unsigned int port,
-    const std::string& user, const std::string password,
+    const std::string& user, const std::string& password,
     const std::string& schemaName, SSLMode ssl, bool createTables)
     : dbHost(host), dbPort(port), dbUser(user), dbPassword(password),
       dbSchema(schemaName), sslMode(ssl)
@@ -41,7 +41,14 @@ Database::Database(const std::string& host, unsigned int port,
         // First, connect without schema to create it if it doesn't exist
         std::cout << "DEBUG: Attempting temporary connection to create database..." << std::endl;
         try {
-            mysqlx::Session tempSession(host, port, user, password);
+            mysqlx::SessionSettings tempSettings(
+                mysqlx::SessionOption::HOST, host,
+                mysqlx::SessionOption::PORT, port,
+                mysqlx::SessionOption::USER, user,
+                mysqlx::SessionOption::PWD, password
+            );
+            tempSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
+            mysqlx::Session tempSession(tempSettings);
             std::cout << "DEBUG: Temporary session created successfully" << std::endl;
 
             std::string createDbQuery = "CREATE DATABASE IF NOT EXISTS " + schemaName;
@@ -70,7 +77,15 @@ Database::Database(const std::string& host, unsigned int port,
         // Now establish connection to the specific schema
         std::cout << "DEBUG: Attempting main connection to schema..." << std::endl;
         try {
-            session = new mysqlx::Session(host, port, user, password, schemaName);
+            mysqlx::SessionSettings mainSettings(
+                mysqlx::SessionOption::HOST, host,
+                mysqlx::SessionOption::PORT, port,
+                mysqlx::SessionOption::USER, user,
+                mysqlx::SessionOption::PWD, password,
+                mysqlx::SessionOption::DB, schemaName
+            );
+            mainSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
+            session = std::make_unique<mysqlx::Session>(mainSettings);
             std::cout << "DEBUG: Main session created successfully" << std::endl;
             std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
         } catch (const mysqlx::Error& mysqlEx) {
@@ -83,9 +98,16 @@ Database::Database(const std::string& host, unsigned int port,
 
                 // Try connecting without specifying schema first, then switch
                 try {
-                    mysqlx::Session tempSession(host, port, user, password);
+                    mysqlx::SessionSettings altSettings(
+                        mysqlx::SessionOption::HOST, host,
+                        mysqlx::SessionOption::PORT, port,
+                        mysqlx::SessionOption::USER, user,
+                        mysqlx::SessionOption::PWD, password
+                    );
+                    altSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
+                    mysqlx::Session tempSession(altSettings);
                     tempSession.sql("USE " + schemaName).execute();
-                    session = new mysqlx::Session(host, port, user, password, schemaName);
+                    session = std::make_unique<mysqlx::Session>(altSettings);
                     std::cout << "DEBUG: Alternative connection method successful" << std::endl;
                     std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
                 } catch (const std::exception& altEx) {
@@ -1408,8 +1430,7 @@ void Database::reconnect() {
         // Close existing session if it exists
         if (session) {
             session->close();
-            delete session;
-            session = nullptr;
+            session.reset();
         };
 
         // Convert SSLMode enum to mysqlx::SSLMode
@@ -1433,12 +1454,27 @@ void Database::reconnect() {
         };
 
         // First, connect without schema to ensure database exists
-        mysqlx::Session tempSession(dbHost, dbPort, dbUser, dbPassword);
+        mysqlx::SessionSettings tempSettings(
+            mysqlx::SessionOption::HOST, dbHost,
+            mysqlx::SessionOption::PORT, dbPort,
+            mysqlx::SessionOption::USER, dbUser,
+            mysqlx::SessionOption::PWD, dbPassword
+        );
+        tempSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
+        mysqlx::Session tempSession(tempSettings);
         tempSession.sql("CREATE DATABASE IF NOT EXISTS " + dbSchema).execute();
         tempSession.close();
 
         // Now establish connection to the specific schema
-        session = new mysqlx::Session(dbHost, dbPort, dbUser, dbPassword, dbSchema);
+        mysqlx::SessionSettings mainSettings(
+            mysqlx::SessionOption::HOST, dbHost,
+            mysqlx::SessionOption::PORT, dbPort,
+            mysqlx::SessionOption::USER, dbUser,
+            mysqlx::SessionOption::PWD, dbPassword,
+            mysqlx::SessionOption::DB, dbSchema
+        );
+        mainSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
+        session = std::make_unique<mysqlx::Session>(mainSettings);
         std::cout << "Database reconnection successful to " << dbHost << ":" << dbPort << "/" << dbSchema << std::endl;
     } catch (const std::exception& ex) {
         std::cerr << "Database reconnection failed: " << ex.what() << std::endl;
@@ -1461,8 +1497,7 @@ Database::~Database() {
 #ifdef USE_MYSQL
     if (session) {
         session->close();
-        delete session;
-        session = nullptr;
+        session.reset();
     };
 #endif
 };

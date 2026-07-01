@@ -265,7 +265,7 @@ find_path(MYSQL_INCLUDE_DIR
     PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include"
 )
 if(USE_MYSQL)
-    # Try to find mysql-connector-cpp via CMake config first
+    # Try to find mysql-connector-cpp via CMake config first (preferred)
     find_package(mysql-connector-cpp CONFIG QUIET)
 
     if(mysql-connector-cpp_FOUND)
@@ -281,11 +281,26 @@ if(USE_MYSQL)
         endif()
     else()
         message(STATUS "mysql-connector-cpp CMake config not found, using manual find_library")
-        find_library(MYSQL_CONCPP_LIB NAMES mysqlcppconn8x mysqlcppconn8 mysqlcppconn-static)
+        set(_mysql_concpp_root "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}")
+        find_library(MYSQL_CONCPP_LIB
+            NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn8-static mysqlcppconn-static
+            PATHS "${_mysql_concpp_root}"
+            PATH_SUFFIXES lib debug/lib
+            NO_DEFAULT_PATH
+        )
         if(NOT MYSQL_CONCPP_LIB)
-            message(FATAL_ERROR "Could not find MySQL Connector/C++ library")
+            find_library(MYSQL_CONCPP_LIB
+                NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn8-static mysqlcppconn-static
+            )
         endif()
+        if(NOT MYSQL_CONCPP_LIB)
+            message(FATAL_ERROR "Could not find MySQL Connector/C++ library (looked for mysqlcppconn8 / mysqlcppconn)")
+        endif()
+        message(STATUS "Found MySQL Connector/C++ library: ${MYSQL_CONCPP_LIB}")
         target_link_libraries(CoreAI3DLib PUBLIC ${MYSQL_CONCPP_LIB})
+        if(MYSQL_INCLUDE_DIR)
+            target_include_directories(CoreAI3DLib PUBLIC ${MYSQL_INCLUDE_DIR})
+        endif()
     endif()
 
     target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
