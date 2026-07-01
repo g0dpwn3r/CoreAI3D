@@ -4,7 +4,7 @@
 # Stage 1: System dependencies
 # Only rebuilds when apt package list changes.
 # ==============================================================================
-FROM --platform=$TARGETPLATFORM ubuntu:24.04 AS system-deps
+FROM ubuntu:24.04 AS system-deps
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
@@ -183,12 +183,15 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
 # static libraries, so no recompilation of dependencies ever occurs.
 # ==============================================================================
 FROM system-deps AS builder
-ARG PROJECT_NAME=CoreAI3D
+ARG PROJECT_NAME=CoreAUDIO
+ARG EXECUTABLE_NAME=${PROJECT_NAME}
 
 COPY --from=vcpkg-install /opt/vcpkg /opt/vcpkg
 COPY --from=vcpkg-install /app/vcpkg_installed /app/${PROJECT_NAME}/vcpkg_installed
 
 WORKDIR /app/${PROJECT_NAME}
+
+SHELL ["/bin/bash", "-c"]
 
 COPY vcpkg.json ./
 COPY CMakeLists.txt ./
@@ -200,32 +203,52 @@ COPY test/ ./test/
 ENV CXXFLAGS="-Wno-error=override-init" \
     CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
 
-RUN mkdir -p build && cd build && \
+RUN --mount=type=cache,target=/root/.cache/vcpkg \
+    mkdir -p build && cd build && \
     cmake .. \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
         -DVCPKG_OVERLAY_PORTS=/app/${PROJECT_NAME}/custom-ports \
         -DVCPKG_TARGET_TRIPLET=x64-linux \
-        -DSKIP_POST_BUILD=ON \
-    && ninja \
-    || { \
+        -DVCPKG_INSTALLED_DIR=/app/${PROJECT_NAME}/vcpkg_installed 2>&1 | tee /tmp/cmake.log; \
+    CMAKE_RC=${PIPESTATUS[0]}; \
+    if [ "$CMAKE_RC" -ne 0 ]; then \
         echo ""; \
         echo "========================================"; \
-        echo " APPLICATION BUILD FAILURE"; \
+        echo " CMAKE CONFIGURATION FAILURE (exit $CMAKE_RC)"; \
         echo "========================================"; \
-        if [ -f CMakeFiles/CMakeError.log ]; then \
-            echo "--- CMakeError.log ---"; \
-            tail -80 CMakeFiles/CMakeError.log; \
-        fi; \
+        echo ""; \
+        echo ">>> Installed packages check <<<"; \
+        ls -la /app/${PROJECT_NAME}/vcpkg_installed/x64-linux/share/ 2>/dev/null | head -30 || echo "No share dir"; \
+        echo ""; \
+        echo ">>> Last 100 lines of cmake output <<<"; \
+        tail -100 /tmp/cmake.log; \
+        echo ""; \
+        echo ">>> CMakeError.log <<<"; \
+        cat CMakeFiles/CMakeError.log 2>/dev/null || echo "No CMakeError.log"; \
         exit 1; \
-    }
+    fi
+
+RUN cd build && ninja -j$(nproc) 2>&1 | tee /tmp/ninja.log; \
+    NINJA_RC=${PIPESTATUS[0]}; \
+    if [ "$NINJA_RC" -ne 0 ]; then \
+        echo ""; \
+        echo "========================================"; \
+        echo " NINJA BUILD FAILURE (exit $NINJA_RC)"; \
+        echo "========================================"; \
+        echo ""; \
+        echo ">>> Last 150 lines of ninja output <<<"; \
+        tail -150 /tmp/ninja.log; \
+        exit 1; \
+    fi
 
 # ==============================================================================
 # Stage 5: Minimal runtime image (~200MB vs ~15GB full build image)
 # ==============================================================================
-FROM --platform=$TARGETPLATFORM ubuntu:24.04 AS runtime
-ARG PROJECT_NAME=CoreAI3D
+FROM ubuntu:24.04 AS runtime
+ARG PROJECT_NAME=CoreAUDIO
+ARG EXECUTABLE_NAME=${PROJECT_NAME}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -253,11 +276,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libudev1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/${PROJECT_NAME}/build/${PROJECT_NAME}/${PROJECT_NAME} /app/${PROJECT_NAME}
+COPY --from=builder /app/${PROJECT_NAME}/build/${PROJECT_NAME}/${EXECUTABLE_NAME} /app/${PROJECT_NAME}
 COPY --from=builder /app/${PROJECT_NAME}/build/${PROJECT_NAME}/config.json /app/config.json
 
 WORKDIR /app
 
 EXPOSE 8080 8081
 
-CMD ./${PROJECT_NAME}
+CMD ["/bin/sh", "-c", "./${EXECUTABLE_NAME}"]
