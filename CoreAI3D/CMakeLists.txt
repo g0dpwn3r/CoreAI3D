@@ -222,6 +222,12 @@ set(SOURCE_FILES
     # src/HyperparameterTuner.cpp
 )
 
+# Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
+# NOTE: must be declared before the first use of USE_MYSQL below, otherwise
+# Database.cpp would not be compiled while the USE_MYSQL macro is still defined,
+# producing undefined-reference link errors for Database::* symbols.
+option(USE_MYSQL "Enable MySQL support" ON)
+
 if(USE_MYSQL)
     list(APPEND SOURCE_FILES src/Database.cpp)
 endif()
@@ -258,9 +264,6 @@ find_path(MYSQL_INCLUDE_DIR
     NAMES mysqlx/xdevapi.h 
     PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include"
 )
-# Add USE_MYSQL preprocessor definition conditionally (default ON for database functionality)
-option(USE_MYSQL "Enable MySQL support" ON)
-
 if(USE_MYSQL)
     # Try to find mysql-connector-cpp via CMake config first
     find_package(mysql-connector-cpp CONFIG QUIET)
