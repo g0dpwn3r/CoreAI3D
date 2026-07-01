@@ -183,7 +183,7 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
 # static libraries, so no recompilation of dependencies ever occurs.
 # ==============================================================================
 FROM system-deps AS builder
-ARG PROJECT_NAME=CoreAUDIO
+ARG PROJECT_NAME=CoreAI3D
 ARG EXECUTABLE_NAME=${PROJECT_NAME}
 
 COPY --from=vcpkg-install /opt/vcpkg /opt/vcpkg
