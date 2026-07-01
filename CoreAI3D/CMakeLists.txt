@@ -265,18 +265,26 @@ find_path(MYSQL_INCLUDE_DIR
     PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include"
 )
 if(USE_MYSQL)
-    # Try to find mysql-connector-cpp via CMake config first (preferred)
-    find_package(mysql-connector-cpp CONFIG QUIET)
+    # Try to find mysql-connector-cpp via CMake config first (preferred).
+    # vcpkg's port exports either unofficial::mysql-connector-cpp::connector
+    # (package unofficial-mysql-connector-cpp) or the mysql::concpp alias
+    # (package mysql-concpp). Fall back to manual library lookup if neither
+    # config is present in the installed tree.
+    find_package(unofficial-mysql-connector-cpp CONFIG QUIET)
+    if(NOT unofficial-mysql-connector-cpp_FOUND)
+        find_package(mysql-concpp CONFIG QUIET)
+    endif()
 
-    if(mysql-connector-cpp_FOUND)
-        message(STATUS "Found mysql-connector-cpp via CMake config")
-        # vcpkg exports namespaced targets; prefer the X DevAPI (C++8) target
-        # used by <mysqlx/xdevapi.h>, then fall back to JDBC/legacy names.
-        if(TARGET mysql-connector-cpp::mysqlcppconn8)
-            target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::mysqlcppconn8)
-        elseif(TARGET mysql-connector-cpp::mysqlcppconn)
-            target_link_libraries(CoreAI3DLib PUBLIC mysql-connector-cpp::mysqlcppconn)
-        elseif(TARGET mysql::concpp8)
+    if(unofficial-mysql-connector-cpp_FOUND)
+        message(STATUS "Found mysql-connector-cpp via vcpkg CMake config")
+        if(TARGET unofficial::mysql-connector-cpp::connector)
+            target_link_libraries(CoreAI3DLib PUBLIC unofficial::mysql-connector-cpp::connector)
+        elseif(TARGET unofficial::mysql-connector-cpp::connector-jdbc)
+            target_link_libraries(CoreAI3DLib PUBLIC unofficial::mysql-connector-cpp::connector-jdbc)
+        endif()
+    elseif(mysql-concpp_FOUND)
+        message(STATUS "Found mysql-connector-cpp via mysql-concpp CMake config")
+        if(TARGET mysql::concpp8)
             target_link_libraries(CoreAI3DLib PUBLIC mysql::concpp8)
         elseif(TARGET mysql::concpp8-static)
             target_link_libraries(CoreAI3DLib PUBLIC mysql::concpp8-static)
@@ -284,35 +292,61 @@ if(USE_MYSQL)
             target_link_libraries(CoreAI3DLib PUBLIC mysql::concpp)
         elseif(TARGET mysql::concpp-static)
             target_link_libraries(CoreAI3DLib PUBLIC mysql::concpp-static)
-        elseif(TARGET mysqlcppconn8)
-            target_link_libraries(CoreAI3DLib PUBLIC mysqlcppconn8)
-        elseif(TARGET mysqlcppconn)
-            target_link_libraries(CoreAI3DLib PUBLIC mysqlcppconn)
-        else()
-            message(FATAL_ERROR "mysql-connector-cpp config found but no known target exported")
         endif()
     else()
         message(STATUS "mysql-connector-cpp CMake config not found, using manual find_library")
+        # vcpkg's static build installs two archives:
+        #   libmysqlcppconn8x.a  -> X DevAPI implementation used by mysqlx/xdevapi.h
+        #   libmysqlcppconn8.a   -> bundled MySQL client library
+        # Both must be linked, with the X DevAPI library first.
         set(_mysql_concpp_root "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg_installed/${VCPKG_TARGET_TRIPLET}")
-        find_library(MYSQL_CONCPP_LIB
-            NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn8-static mysqlcppconn-static
+
+        find_library(MYSQL_CONCPP_X_LIB
+            NAMES mysqlcppconn8x mysqlcppconnx mysqlcppconnx-static
             PATHS "${_mysql_concpp_root}"
             PATH_SUFFIXES lib debug/lib
             NO_DEFAULT_PATH
         )
-        if(NOT MYSQL_CONCPP_LIB)
-            find_library(MYSQL_CONCPP_LIB
-                NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn8-static mysqlcppconn-static
+        if(NOT MYSQL_CONCPP_X_LIB)
+            find_library(MYSQL_CONCPP_X_LIB
+                NAMES mysqlcppconn8x mysqlcppconnx mysqlcppconnx-static
             )
         endif()
-        if(NOT MYSQL_CONCPP_LIB)
-            message(FATAL_ERROR "Could not find MySQL Connector/C++ library (looked for mysqlcppconn8 / mysqlcppconn)")
+
+        find_library(MYSQL_CONCPP_CLIENT_LIB
+            NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn-static
+            PATHS "${_mysql_concpp_root}"
+            PATH_SUFFIXES lib debug/lib
+            NO_DEFAULT_PATH
+        )
+        if(NOT MYSQL_CONCPP_CLIENT_LIB)
+            find_library(MYSQL_CONCPP_CLIENT_LIB
+                NAMES mysqlcppconn8 mysqlcppconn mysqlcppconn-static
+            )
         endif()
-        message(STATUS "Found MySQL Connector/C++ library: ${MYSQL_CONCPP_LIB}")
-        target_link_libraries(CoreAI3DLib PUBLIC ${MYSQL_CONCPP_LIB})
+
+        if(NOT MYSQL_CONCPP_X_LIB)
+            message(FATAL_ERROR "Could not find MySQL Connector/C++ X DevAPI library (looked for mysqlcppconn8x / mysqlcppconnx)")
+        endif()
+        if(NOT MYSQL_CONCPP_CLIENT_LIB)
+            message(FATAL_ERROR "Could not find MySQL Connector/C++ client library (looked for mysqlcppconn8 / mysqlcppconn)")
+        endif()
+
+        message(STATUS "Found MySQL Connector/C++ X DevAPI library: ${MYSQL_CONCPP_X_LIB}")
+        message(STATUS "Found MySQL Connector/C++ client library: ${MYSQL_CONCPP_CLIENT_LIB}")
+        target_link_libraries(CoreAI3DLib PUBLIC ${MYSQL_CONCPP_X_LIB} ${MYSQL_CONCPP_CLIENT_LIB})
         if(MYSQL_INCLUDE_DIR)
             target_include_directories(CoreAI3DLib PUBLIC ${MYSQL_INCLUDE_DIR})
         endif()
+
+        # Static mysql-connector-cpp needs these transitive dependencies.
+        find_package(Threads REQUIRED)
+        find_package(RapidJSON CONFIG REQUIRED)
+        target_link_libraries(CoreAI3DLib PUBLIC
+            Threads::Threads
+            rapidjson
+            ${CMAKE_DL_LIBS}
+        )
     endif()
 
     target_compile_definitions(CoreAI3DLib PUBLIC USE_MYSQL)
