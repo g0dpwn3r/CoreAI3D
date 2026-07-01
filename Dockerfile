@@ -247,7 +247,7 @@ RUN cd build && ninja -j$(nproc) 2>&1 | tee /tmp/ninja.log; \
 # Stage 5: Minimal runtime image (~200MB vs ~15GB full build image)
 # ==============================================================================
 FROM ubuntu:24.04 AS runtime
-ARG PROJECT_NAME=CoreAUDIO
+ARG PROJECT_NAME=CoreAI3D
 ARG EXECUTABLE_NAME=${PROJECT_NAME}
 
 ENV DEBIAN_FRONTEND=noninteractive

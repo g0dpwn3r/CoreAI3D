@@ -38,25 +38,26 @@ if(POLICY CMP0167)
 endif()
 
 # --- Find and Link Boost Components ---
-# With vcpkg, modular boost packages are used. Each component provides its own
-# CMake config (e.g., boost_program_options-config.cmake) which defines the
-# Boost::program_options imported target. We don't use find_package(Boost COMPONENTS)
-# because that requires the monolithic Boost CMake package.
+# With vcpkg, Boost is provided via CMake config packages. The component targets
+# (Boost::program_options, Boost::filesystem, ...) are only defined when the
+# components are explicitly requested through find_package COMPONENTS.
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 
-# Find Boost headers (optional - the targets may already be available from vcpkg)
-find_package(Boost QUIET)
+# Request the Boost components this project links against so the imported
+# Boost::* targets are defined.
+find_package(Boost CONFIG REQUIRED COMPONENTS
+    program_options
+    filesystem
+    system
+    regex
+)
 
 if(Boost_FOUND)
     message(STATUS "Found Boost include dirs: ${Boost_INCLUDE_DIRS}")
     message(STATUS "Found Boost libraries: ${Boost_LIBRARIES}")
 endif()
-
-# The individual boost component targets (Boost::program_options, Boost::filesystem,
-# Boost::system, Boost::regex) will be provided by vcpkg's modular boost packages
-# via their config files, so we don't need explicit find_package calls here.
 
 find_package(absl CONFIG REQUIRED)
 # pkg_check_modules(UTF8_RANGE utf8_range)
