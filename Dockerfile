@@ -185,6 +185,7 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
 FROM system-deps AS builder
 
 COPY --from=vcpkg-install /opt/vcpkg /opt/vcpkg
+COPY --from=vcpkg-install /app/vcpkg_installed /app/CoreAI3D/vcpkg_installed
 
 WORKDIR /app/CoreAI3D
 
