@@ -5,6 +5,7 @@ psutil
 python-dateutil
 pathlib2
 numpy
+websockets
 opencv-python
 Pillow
 pytesseract

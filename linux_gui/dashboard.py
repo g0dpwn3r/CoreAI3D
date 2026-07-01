@@ -91,8 +91,8 @@ logging.getLogger('asyncio').setLevel(logging.WARNING)
 @dataclass
 class DashboardConfig:
     """Dashboard configuration settings"""
-    api_url: str = "http://localhost:8080/api/v1"
-    ws_url: str = "ws://localhost:8081"
+    api_url: str = "http://coreai3d:8080/api/v1"
+    ws_url: str = "ws://coreai3d:8081"
     api_key: str = ""
     data_dir: str = "training_data"
     sandbox_timeout: int = 300
@@ -1866,9 +1866,9 @@ class CoreAI3DDashboard(QMainWindow):
         config.log_level = settings.value("log_level", config.log_level)
         config.enable_diagnostics = settings.value("enable_diagnostics", config.enable_diagnostics, type=bool)
 
-        # Force reset API and WebSocket URLs to localhost, overriding any saved QSettings
-        config.api_url = "http://localhost:8080/api/v1"
-        config.ws_url = "ws://localhost:8081"
+        # Force reset API and WebSocket URLs to the coreai3d container, overriding any saved QSettings
+        config.api_url = "http://coreai3d:8080/api/v1"
+        config.ws_url = "ws://coreai3d:8081"
 
         # Validate and sanitize API key
         if config.api_key:
@@ -1957,7 +1957,7 @@ class CoreAI3DDashboard(QMainWindow):
     def setup_ui(self):
         """Setup main user interface"""
         self.setWindowTitle("CoreAI3D Linux Dashboard")
-        self.setGeometry(100, 100, 1400, 900)
+        self.resize(1280, 720)
 
         # Create central widget and layout
         central_widget = QWidget()
@@ -4704,6 +4704,16 @@ if __name__ == "__main__":
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         api_layout.addRow("API Key:", self.api_key_edit)
 
+        # Test Connection button — probes the URL currently entered above,
+        # independent of whether settings have been saved or the main client initialized.
+        self.test_settings_conn_btn = QPushButton("Test Connection")
+        self.test_settings_conn_btn.setToolTip(
+            "Probe the API URL entered above (and WebSocket TCP reachability). "
+            "Uses the values currently in these fields — no need to save first."
+        )
+        self.test_settings_conn_btn.clicked.connect(self.test_settings_connection)
+        api_layout.addRow("", self.test_settings_conn_btn)
+
         layout.addWidget(api_group)
 
         # Data Settings
@@ -4852,7 +4862,7 @@ if __name__ == "__main__":
             # Allow initialization even without API key for offline mode
             if not self.config.api_url:
                 logger.warning("API URL not configured - client will work in offline mode")
-                self.config.api_url = "http://localhost:8080/api/v1"  # Set default
+                self.config.api_url = "http://coreai3d:8080/api/v1"  # Set default
 
             if not self.config.api_key:
                 logger.warning("API key not configured - using empty key (may cause authentication failures)")
@@ -6499,8 +6509,12 @@ if __name__ == "__main__":
             # Save to settings file
             self._save_config()
 
-            # Reinitialize client if needed
-            if self.config.api_url and self.config.api_key:
+            # Reinitialize client whenever a URL is configured. An API key is NOT
+            # required — the client explicitly supports an empty key (offline mode),
+            # and _load_config() force-resets api_key to '' on startup. The previous
+            # `and self.config.api_key` gate silently kept the client pointed at the
+            # stale URL whenever the user saved a new URL without a key.
+            if self.config.api_url:
                 self.initialize_client()
 
             self.status_bar.showMessage("Settings saved successfully")
@@ -6508,6 +6522,148 @@ if __name__ == "__main__":
 
         except Exception as e:
             QMessageBox.warning(self, "Save Error", f"Failed to save settings: {str(e)}")
+
+    def test_settings_connection(self):
+        """Test the API connection using the values currently shown in the Settings tab.
+
+        Reads the URL / WebSocket URL / API Key directly from the form widgets
+        (self.api_url_edit, self.ws_url_edit, self.api_key_edit) rather than from
+        self.config or self.client, so the result reflects exactly what the user
+        sees on screen — independent of whether Save was clicked, whether the
+        main client has finished reinitializing, or whether an API key is set.
+
+        Performs two checks:
+          1. HTTP GET against the API URL (with Bearer token if a key is entered).
+          2. TCP connect against the WebSocket host:port (if a WS URL is entered).
+        """
+        # Read directly from the form widgets, NOT from self.config, so the test
+        # reflects the user's current input even before Save.
+        url = self.api_url_edit.text().strip()
+        ws_url = self.ws_url_edit.text().strip()
+        api_key = self.api_key_edit.text().strip()
+
+        if not url:
+            QMessageBox.warning(
+                self, "Test Connection",
+                "Please enter an API URL in the Settings tab before testing."
+            )
+            return
+
+        # Use a generous but bounded timeout so the UI cannot hang indefinitely.
+        try:
+            timeout = int(self.config.connection_timeout)
+        except (TypeError, ValueError):
+            timeout = 10
+        if timeout <= 0:
+            timeout = 10
+
+        self.test_settings_conn_btn.setEnabled(False)
+        self.status_bar.showMessage(f"Testing connection to {url}...")
+        QApplication.processEvents()
+
+        details = []
+        api_ok = False
+
+        # --- 1. HTTP probe of the API URL ---
+        try:
+            import urllib.error
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'CoreAI3D-Dashboard/1.3.0')
+            if api_key:
+                req.add_header('Authorization', f'Bearer {api_key}')
+
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                status_code = response.getcode()
+                content_type = response.headers.get('content-type', 'Unknown')
+                details.append(f"  HTTP Status: {status_code}")
+                details.append(f"  Content-Type: {content_type}")
+                # Any 2xx/3xx response means the server is reachable and routed
+                # the request — 401/403 still prove the host is up and the URL
+                # resolves, so treat 200-399 as success and only flag 4xx/5xx.
+                if 200 <= status_code < 400:
+                    api_ok = True
+                else:
+                    details.append(f"  Unexpected status: {status_code}")
+        except urllib.error.HTTPError as e:
+            # 4xx/5xx still proves the host is reachable — surface as failure
+            # with details rather than a generic network error.
+            details.append(f"  HTTP {e.code} {e.reason} (host is reachable)")
+        except urllib.error.URLError as e:
+            details.append(f"  URL Error: {e.reason}")
+        except Exception as e:
+            details.append(f"  Error: {e}")
+
+        # --- 2. Optional TCP probe of the WebSocket host:port ---
+        ws_ok = None
+        ws_summary = ""
+        if ws_url:
+            try:
+                import socket
+                parsed = urllib.parse.urlparse(ws_url)
+                host = parsed.hostname
+                port = parsed.port or (443 if parsed.scheme == 'wss' else 80)
+                if not host:
+                    raise ValueError(f"could not parse host from WebSocket URL: {ws_url}")
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                try:
+                    sock.connect((host, port))
+                    ws_ok = True
+                    details.append(f"  WebSocket TCP: reachable at {host}:{port}")
+                except Exception as e:
+                    ws_ok = False
+                    details.append(f"  WebSocket TCP: unreachable at {host}:{port} ({e})")
+                finally:
+                    sock.close()
+                ws_summary = f"WebSocket URL: {ws_url}\n"
+            except Exception as e:
+                ws_ok = False
+                details.append(f"  WebSocket URL error: {e}")
+                ws_summary = f"WebSocket URL: {ws_url}\n"
+
+        # Build the result dialog. The HTTP test is the primary signal; the
+        # WebSocket probe is a secondary reachability hint and never blocks
+        # overall success on its own.
+        overall_ok = api_ok and (ws_ok is not False)
+        if overall_ok:
+            title = "Connection Test Successful"
+            body_lines = [
+                "API connection is reachable.",
+                "",
+                f"API URL: {url}",
+            ]
+            if ws_summary:
+                body_lines.append(ws_summary.rstrip())
+            body_lines.append("")
+            body_lines.append("Details:")
+            body_lines.extend(details)
+            self.status_bar.showMessage("Connection test successful")
+            QMessageBox.information(self, title, "\n".join(body_lines))
+        else:
+            title = "Connection Test Failed"
+            body_lines = [
+                "Could not reach the API server.",
+                "",
+                f"API URL: {url}",
+            ]
+            if ws_summary:
+                body_lines.append(ws_summary.rstrip())
+            body_lines += [
+                "",
+                "Please verify:",
+                "  - The CoreAI3D server is running",
+                "  - The host resolves (for Docker bridge, use the service name,",
+                "    e.g. http://coreai3d:8080)",
+                "  - The port is correct and reachable",
+                "  - The API key is correct (if required)",
+                "",
+                "Details:",
+            ]
+            body_lines.extend(details)
+            self.status_bar.showMessage("Connection test failed")
+            QMessageBox.warning(self, title, "\n".join(body_lines))
+
+        self.test_settings_conn_btn.setEnabled(True)
 
     def refresh_all(self):
         """Refresh all data and displays"""

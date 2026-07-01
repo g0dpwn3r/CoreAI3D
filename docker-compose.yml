@@ -7,7 +7,7 @@ services:
       MYSQL_DATABASE: CoreAI3D
     ports:
       - "33060:33060" # X Plugin
-      - "3306:3306"   # classic protocol
+      - "33061:3306"   # classic protocol
     volumes:
         - mysql_data:/var/lib/mysql
 
@@ -31,12 +31,14 @@ services:
       - "1907:8081" # WebSocket Server
     volumes:
       - ./linux_gui/training_data:/training_data
-      - ./emb.txt:/training_data/emb.txt:ro
+      # Mount the actual embedding file from your host's root folder into the container
+      - ./wiki_giga_2024_300_MFT20_vectors_seed_2024_alpha_0.75_eta_0.05_combined.txt:/training_data/emb.txt:ro
     command:
       - "/app/CoreAI3D"
       - "--api-port"
       - "8080"
       - "--enable-websocket"
+      - "--calculus-activation"  # Enabled calculus-based activation functions
       - "--db-host"
       - "mysql"
       - "--db-port"
@@ -48,8 +50,7 @@ services:
       - "--db-schema"
       - "CoreAI3D"
       - "--embedding-file"
-      - "/training_data/emb.txt"
-
+      - "/training_data/emb.txt" # Points to the mounted file inside the container
   # Linux Sandbox Environments
   ubuntu-sandbox:
     build:
@@ -138,8 +139,24 @@ services:
       - LOG_LEVEL=INFO
     command: ["python3", "/app/train_linux_operations.py"]
 
+  admin-desktop:
+    image: lscr.io/linuxserver/webtop:ubuntu-xfce # <--- This guarantees the latest rolling Ubuntu base
+    container_name: coreai3d_admin_gui
+    privileged: true  # Allows the X server and DBus to launch panels without kernel blocks
+    shm_size: "2gb"   # Expanded video memory allocation
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - .:/app
+      - webtop_desktop_config:/config 
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
 volumes:
     mysql_data:
+    webtop_desktop_config:
 
 networks:
   sandbox_network:
