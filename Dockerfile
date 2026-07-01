@@ -186,10 +186,11 @@ FROM system-deps AS builder
 ARG PROJECT_NAME=CoreAI3D
 
 COPY --from=vcpkg-install /opt/vcpkg /opt/vcpkg
-COPY --from=vcpkg-install /app/vcpkg_installed /app/vcpkg_installed
+COPY --from=vcpkg-install /app/vcpkg_installed /app/${PROJECT_NAME}/vcpkg_installed
 
 WORKDIR /app/${PROJECT_NAME}
 
+COPY vcpkg.json ./
 COPY CMakeLists.txt ./
 COPY ${PROJECT_NAME}/ ./${PROJECT_NAME}/
 COPY custom-ports/ ./custom-ports/
@@ -197,8 +198,7 @@ COPY config.json* ./
 COPY test/ ./test/
 
 ENV CXXFLAGS="-Wno-error=override-init" \
-    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types" \
-    VCPKG_INSTALLED_DIR=/app/vcpkg_installed
+    CFLAGS="-Wno-error=override-init -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types"
 
 RUN mkdir -p build && cd build && \
     cmake .. \
