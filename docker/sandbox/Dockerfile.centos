@@ -47,10 +47,10 @@ RUN dnf update -y && dnf install -y --setopt=strict=0 \
 RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
     dnf install -y nodejs && \
     dnf clean all
-
+RUN groupadd -r sandbox && useradd -r -g sandbox sandbox
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
-    echo "sandbox:sandbox" | passwd --stdin sandbox && \
+    echo "sandbox:sandbox" | chpasswd && \
     usermod -aG wheel sandbox
 
 # Create workspace directory

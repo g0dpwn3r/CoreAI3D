@@ -21,6 +21,7 @@ RUN apt update && apt install -y \
     && apt clean && rm -rf /var/lib/apt/lists/*
 
 # Create sandbox user
+RUN groupadd -r sandbox && useradd -r -g sandbox sandbox
 RUN useradd -m -s /bin/bash sandbox && \
     echo "sandbox:sandbox" | chpasswd && \
     usermod -aG sudo sandbox
