@@ -23,7 +23,8 @@ RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-li
     ln -sf /usr/local/bin/npm /usr/bin/npm
 
 # Create sandbox user
-RUN useradd -m -s /bin/bash sandbox && \
+RUN groupadd -f sandbox && \
+    useradd -m -g sandbox -s /bin/bash sandbox && \
     echo "sandbox:sandbox" | chpasswd
 
 # Create workspace directory
