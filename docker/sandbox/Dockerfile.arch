@@ -44,8 +44,8 @@ RUN /bin/bash -c "eval \"$(pyenv init --path)\" && \
     python --version"
 
 # Install Python packages for AI operations
-RUN python -m pip install --upgrade pip --break-system-packages && \
-    python -m pip install --break-system-packages \
+RUN python -m pip install --upgrade pip && \
+    python -m pip install \
     requests aiohttp websockets \
     psutil docker \
     opencv-python-headless \
