@@ -105,6 +105,7 @@ RUN apt-get update && apt-get install -y \
 
 # 2. Instruct Puppeteer to skip the download and use the system Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # 3. Install Node.js packages for web automation

@@ -42,7 +42,9 @@ RUN python -m pip install --upgrade pip && \
     selenium
 
 # Install Node.js packages for web automation
-RUN npm install -g \
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+RUN npm install -g --unsafe-perm \
     puppeteer \
     cheerio \
     axios \
