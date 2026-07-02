@@ -29,7 +29,7 @@ RUN date
 # Install core packages
 RUN apt-get update && apt full-upgrade -y && apt upgrade -y && apt-get install -y --no-install-recommends \
       curl wget vim nano htop \
-      build-essential cmake git \
+      build-essential cmake git patch \
       procps psmisc lsof strace \
       net-tools iproute2 iputils-ping traceroute \
       python3 python3-pip python3-dev \

@@ -22,7 +22,7 @@ RUN dnf update -y && dnf install -y --setopt=strict=0 \
     # Text processing
     grep sed gawk \
     # Archive tools
-    tar gzip bzip2 unzip \
+    tar gzip bzip2 unzip patch \
     # Python for scripting
     python38 python3-pip python3-devel \
     # System libraries
