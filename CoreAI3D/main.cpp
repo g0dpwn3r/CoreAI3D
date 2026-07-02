@@ -519,10 +519,10 @@ int main(int argc, char* argv[]) {
 #ifdef USE_MYSQL
     // MySQL variables
     bool createTables = createTableFlag;
-    std::string sslModeStr = "DISABLED";
+    std::string sslModeStr = "REQUIRED";
 
     // Map string to SSLMode enum
-    SSLMode ssl = SSLMode::DISABLED; // Default
+    SSLMode ssl = SSLMode::REQUIRED; // Default
     if (sslModeStr == "DISABLED") {
         ssl = SSLMode::DISABLED;
     }
@@ -537,8 +537,8 @@ int main(int argc, char* argv[]) {
     }
     else {
         std::cerr << "Warning: Unrecognized SSL mode '" << sslModeStr
-            << "'. Defaulting to DISABLED." << std::endl;
-        ssl = SSLMode::DISABLED; // Ensure ssl is set to a valid default
+            << "'. Defaulting to REQUIRED." << std::endl;
+        ssl = SSLMode::REQUIRED; // Ensure ssl is set to a valid default
     }
 #endif
 

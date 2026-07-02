@@ -7,7 +7,7 @@
 #ifdef USE_MYSQL
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
     const std::string dbPassword, const std::string& dbSchema, int sslDummy, bool createTables, bool verbose, WebSocketServer* wsServer)
-    : dbManager(std::make_unique<Database>(dbHost, dbPort, dbUser, dbPassword, dbSchema, SSLMode::DISABLED, createTables)),
+    : dbManager(std::make_unique<Database>(dbHost, dbPort, dbUser, dbPassword, dbSchema, SSLMode::REQUIRED, createTables)),
     isOfflineMode(false), currentDatasetId(-1), numSamples(0), inputSize(0), outputSize(0),
     original_data_global_min(std::numeric_limits<float>::max()), original_data_global_max(std::numeric_limits<float>::lowest()), // Initialize
     input_min(), input_max(), target_min(0.0f), target_max(0.0f),

@@ -62,7 +62,7 @@ APIServer::APIServer(const std::string& name, const std::string& host, int port)
       apiVersion("v1"), corsOrigin("*"), requestTimeout(30), maxRequestSize(1024 * 1024),
       enableLogging(true), logFilePath("api_server.log"),
       dbHost("0.0.0.0"), dbPort(33060), dbUser("user"), dbPassword("password"),
-      dbSchema("coreai_db"), dbSSLMode(SSLMode::DISABLED), createTables(false) {
+      dbSchema("coreai_db"), dbSSLMode(SSLMode::REQUIRED), createTables(false) {
 }
 
 // Destructor
@@ -152,7 +152,7 @@ bool APIServer::initialize(const std::string& configPath,
                         else if (sslModeStr == "REQUIRED") this->dbSSLMode = SSLMode::REQUIRED;
                         else if (sslModeStr == "VERIFY_CA") this->dbSSLMode = SSLMode::VERIFY_CA;
                         else if (sslModeStr == "VERIFY_IDENTITY") this->dbSSLMode = SSLMode::VERIFY_IDENTITY;
-                        else this->dbSSLMode = SSLMode::DISABLED;
+                        else this->dbSSLMode = SSLMode::REQUIRED;
                     }
                     if (dbConfig.contains("create_tables")) this->createTables = dbConfig["create_tables"];
                 }

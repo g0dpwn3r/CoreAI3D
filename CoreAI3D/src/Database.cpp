@@ -33,10 +33,10 @@ Database::Database(const std::string& host, unsigned int port,
                 std::cout << "DEBUG: SSL mode set to VERIFY_IDENTITY" << std::endl;
                 break;
             default:
-                mysqlSslMode = mysqlx::SSLMode::DISABLED;
-                std::cout << "DEBUG: SSL mode defaulted to DISABLED" << std::endl;
+                mysqlSslMode = mysqlx::SSLMode::REQUIRED;
+                std::cout << "DEBUG: SSL mode defaulted to REQUIRED" << std::endl;
                 break;
-        };
+        }
 
         // First, connect without schema to create it if it doesn't exist.
         // MySQL (and especially the X Plugin on port 33060) can still be finishing
@@ -1479,7 +1479,7 @@ void Database::reconnect() {
                 mysqlSslMode = mysqlx::SSLMode::VERIFY_IDENTITY;
                 break;
             default:
-                mysqlSslMode = mysqlx::SSLMode::DISABLED;
+                mysqlSslMode = mysqlx::SSLMode::REQUIRED;
                 break;
         };
 

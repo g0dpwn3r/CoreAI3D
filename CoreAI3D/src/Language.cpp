@@ -15,7 +15,7 @@ Language::Language(std::string& embedingFile, int& embeddingDim, std::string& db
     if (!dbHost.empty() && dbHost != "offline") {
         try {
             std::cout << "DEBUG: Initializing database connection in Language constructor..." << std::endl;
-            database = std::make_unique<Database>(dbHost, static_cast<unsigned int>(dbPort), dbUser, dbPassword, dbSchema, SSLMode::DISABLED, true);
+            database = std::make_unique<Database>(dbHost, static_cast<unsigned int>(dbPort), dbUser, dbPassword, dbSchema, SSLMode::REQUIRED, true);
             std::cout << "DEBUG: Database connection initialized successfully in Language constructor" << std::endl;
         } catch (const std::exception& ex) {
             std::cerr << "DEBUG: Database initialization failed in Language constructor: " << ex.what() << std::endl;
