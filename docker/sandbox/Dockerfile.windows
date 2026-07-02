@@ -57,9 +57,9 @@ RUN net user sandbox sandbox /add /passwordchg:no && \
 # Create workspace directories
 RUN New-Item -ItemType Directory -Path C:\workspace, C:\training_data -Force
 
-# Copy training scripts (assuming they exist)
-# Note: In a real scenario, these would be copied from the host
-# COPY docker/training/train_windows_operations.py C:/training_scripts/
+# Copy training scripts
+COPY docker/training/train_windows_operations.py C:\\training_scripts\\
+RUN icacls C:\\training_scripts\\train_windows_operations.py /grant sandbox:F
 
 # Set working directory
 WORKDIR C:\\workspace

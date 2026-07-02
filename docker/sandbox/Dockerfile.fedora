@@ -2,9 +2,6 @@ FROM fedora:40
 
 WORKDIR /root
 
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
 # Update system and install essential packages
 RUN dnf update -y && dnf install -y \
     curl wget gnupg ca-certificates \

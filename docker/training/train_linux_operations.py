@@ -51,6 +51,8 @@ class LinuxOperationTrainer:
 
     async def setup_training_scenarios(self):
         """Set up various Linux operation training scenarios"""
+        package_commands = self._get_package_commands()
+
         scenarios = [
             {
                 "name": "file_system_operations",
@@ -97,14 +99,7 @@ class LinuxOperationTrainer:
             {
                 "name": "package_management",
                 "description": "Package installation and management",
-                "commands": [
-                    "apt update" if self.sandbox_type == "ubuntu" else "yum update",
-                    "apt list --installed" if self.sandbox_type == "ubuntu" else "yum list installed",
-                    "apt search python" if self.sandbox_type == "ubuntu" else "yum search python",
-                    "apt show python3" if self.sandbox_type == "ubuntu" else "yum info python3",
-                    "which python3",
-                    "python3 --version"
-                ]
+                "commands": package_commands
             },
             {
                 "name": "text_processing",
@@ -200,6 +195,45 @@ class LinuxOperationTrainer:
             return "intermediate"
         else:
             return "advanced"
+
+    def _get_package_commands(self) -> List[str]:
+        """Get package management commands based on sandbox type"""
+        if self.sandbox_type in ("ubuntu", "debian", "kali"):
+            return [
+                "apt update",
+                "apt list --installed",
+                "apt search python3",
+                "apt show python3",
+                "which python3",
+                "python3 --version"
+            ]
+        elif self.sandbox_type == "fedora":
+            return [
+                "dnf update -y",
+                "dnf list installed",
+                "dnf search python3",
+                "dnf info python3",
+                "which python3",
+                "python3 --version"
+            ]
+        elif self.sandbox_type == "opensuse":
+            return [
+                "zypper refresh",
+                "zypper search --installed-only python3",
+                "zypper search python3",
+                "zypper info python3",
+                "which python3",
+                "python3 --version"
+            ]
+        else:  # centos
+            return [
+                "yum update -y",
+                "yum list installed",
+                "yum search python3",
+                "yum info python3",
+                "which python3",
+                "python3 --version"
+            ]
 
     async def execute_training_scenario(self, scenario_name: str) -> Dict[str, Any]:
         """Execute a training scenario and record results"""

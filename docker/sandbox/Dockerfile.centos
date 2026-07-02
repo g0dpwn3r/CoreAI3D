@@ -1,5 +1,7 @@
 FROM rockylinux:8
 
+WORKDIR /root
+
 # Install essential packages for AI operations and system control
 RUN dnf update -y && dnf install -y \
     # Core utilities

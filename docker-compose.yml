@@ -194,6 +194,89 @@ services:
     networks:
       - skynet
 
+  centos-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.centos
+    container_name: centos_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=centos
+    networks:
+      - skynet
+
+  fedora-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.fedora
+    container_name: fedora_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=fedora
+    networks:
+      - skynet
+
+  opensuse-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.opensuse
+    container_name: opensuse_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=opensuse
+    networks:
+      - skynet
+
+  windows-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.windows
+    container_name: windows_sandbox
+    stdin_open: true
+    tty: true
+    profiles:
+      - windows
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=windows
+    networks:
+      - skynet
+
   # AI Training Environment
   ai-trainer:
     build:
@@ -209,6 +292,9 @@ services:
       - alpine-sandbox
       - debian-sandbox
       - arch-sandbox
+      - centos-sandbox
+      - fedora-sandbox
+      - opensuse-sandbox
     volumes:
       - ./training_data:/training_data
       - ./ai_models:/ai_models

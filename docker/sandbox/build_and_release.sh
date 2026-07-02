@@ -118,7 +118,7 @@ build_docker_image() {
 
     # Build Docker image
     docker build \
-        --file "${dockerfile}" \
+        --file "${DOCKER_DIR}/Dockerfile.${dockerfile}" \
         --tag "${DOCKER_REGISTRY}/coreai3d-sandbox-${platform}:${version}" \
         --tag "${DOCKER_REGISTRY}/coreai3d-sandbox-${platform}:latest" \
         --build-arg COREAI3D_VERSION="${version}" \
