@@ -40,6 +40,11 @@ RUN eval "$(pyenv init --path)" && \
     pyenv rehash && \
     python --version
 
+# Create the virtual environment
+RUN python3 -m venv /opt/venv
+
+# Ensure all subsequent Python/pip calls use the venv automatically
+ENV PATH="/opt/venv/bin:$PATH"
 # Install Python packages for AI operations
 RUN pip3 install --upgrade pip && \
     pip3 install \
