@@ -18,7 +18,11 @@ services:
         - mysql_data:/var/lib/mysql
     restart: unless-stopped
     networks:
-      - skynet
+      skynet:
+        # Stable, predictable address so coreai3d can also reach the DB at
+        # 172.29.0.5 if DNS resolution ever flakes. The "mysql" hostname still
+        # works as the primary, Docker-DNS-resolved address.
+        ipv4_address: 172.29.0.5
     # Wait until MySQL is actually accepting connections before dependents start.
     # start_period covers the first-run data directory initialization.
     healthcheck:
@@ -43,6 +47,9 @@ services:
     networks:
       - skynet
     environment:
+      # Primary host: Docker's embedded DNS resolves "mysql" to 172.29.0.5
+      # because both containers are on the user-defined "skynet" bridge.
+      # If DNS ever flakes, swap to the literal IP below (no rebuild needed).
       DB_HOST: mysql
       DB_PORT: 33060
       DB_USER: root
@@ -142,6 +149,51 @@ services:
     networks:
       - skynet
 
+  debian-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.debian
+    container_name: debian_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - SANDBOX_TYPE=debian
+    networks:
+      - skynet
+
+  arch-sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile.arch
+    container_name: arch_sandbox
+    stdin_open: true
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    volumes:
+      - ./training_data:/training_data
+      - ./sandbox_workspace:/workspace
+    environment:
+      - SANDBOX_TYPE=arch
+    networks:
+      - skynet
+
   # AI Training Environment
   ai-trainer:
     build:
@@ -155,6 +207,8 @@ services:
       - ubuntu-sandbox
       - kali-sandbox
       - alpine-sandbox
+      - debian-sandbox
+      - arch-sandbox
     volumes:
       - ./training_data:/training_data
       - ./ai_models:/ai_models
@@ -188,3 +242,11 @@ volumes:
 networks:
   skynet:
     driver: bridge
+    # Fixed subnet so the MySQL container always gets a stable, predictable
+    # address (172.29.0.5). The "mysql" hostname keeps working too because
+    # Docker's embedded DNS still resolves service names on the same network.
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.29.0.0/16
+          gateway: 172.29.0.1

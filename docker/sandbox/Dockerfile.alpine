@@ -62,7 +62,7 @@ RUN python3 -m venv /root/venv && \
         requests aiohttp websockets \
         psutil docker opencv-python-headless \
         numpy pandas scipy pillow pytesseract SpeechRecognition \
-        pyttsx3 beautifulsoup4 selenium
+        pyttsx3 beautifulsoup4 selenium psutil
 
 
 # Install Node.js packages for web automation
