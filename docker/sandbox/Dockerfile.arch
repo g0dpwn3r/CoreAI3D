@@ -2,20 +2,20 @@ FROM archlinux:latest
 
 WORKDIR /root
 
+# Initialize keyring and fix permissions before update
+RUN pacman -Sy --noconfirm archlinux-keyring && \
+    rm -rf /var/lib/pacman/sync/*.db && \
+    pacman-key --init && \
+    pacman-key --populate archlinux
+
 # Update system and install essential packages
-RUN pacman -Syu --noconfirm && pacman -S --noconfirm \
-    curl wget gnupg ca-certificates \
-    base-devel file procps-ng net-tools gawk tar \
-    python python-pip python-virtualenv \
-    nodejs npm \
-    libffi sqlite supervisor \
-    imagemagick sox boost \
-    cmake git \
-    openssl zlib bzip2 readline \
-    sqlite ncurses xz tk \
-    libxml2 libxmlsec libffi \
-    lzma make \
-    && pacman -Scc --noconfirm
+RUN rm -f /var/lib/pacman/db.lck && \
+    pacman -Syu --noconfirm && \
+    pacman -S --noconfirm curl wget gnupg ca-certificates base-devel file procps-ng net-tools gawk tar \
+    python python-pip nodejs npm libffi sqlite supervisor \
+    imagemagick sox boost-libs cmake git openssl zlib bzip2 readline \
+    libxml2 xmlsec ncurses xz tk lzma make && \
+    pacman -Scc --noconfirm && rm -rf /var/lib/pacman/sync/*.db
 
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
@@ -31,14 +31,14 @@ RUN curl https://pyenv.run | bash
 
 ENV HOME /root
 # Set up environment variables for pyenv
-ENV PYENV_ROOT="/root/.pyenv"
-ENV PATH="$PYENV_ROOT/bin:$PATH"
+ENV PYENV_ROOT "/root/.pyenv"
+ENV PATH "$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
 
-RUN eval "$(pyenv init --path)" && \
+RUN /bin/bash -c "eval \"$(pyenv init --path)\" && \
     pyenv install 3.10.0 && \
     pyenv global 3.10.0 && \
     pyenv rehash && \
-    python --version
+    python --version"
 
 # Install Python packages for AI operations
 RUN pip3 install --upgrade pip && \
@@ -64,7 +64,8 @@ RUN npm install -g \
     ws
 
 # Set up supervisor for process management
-RUN mkdir -p /etc/supervisor/conf.d
+RUN mkdir -p /etc/supervisor/conf.d /var/log/supervisor && \
+    chown -R sandbox:sandbox /var/log/supervisor
 COPY docker/sandbox/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Copy training scripts
