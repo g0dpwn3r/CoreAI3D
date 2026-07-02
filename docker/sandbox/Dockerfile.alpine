@@ -2,7 +2,7 @@ FROM alpine:3.20
 
 # Update & install base dependencies
 RUN apk update && apk upgrade && apk add --no-cache \
-    python3 py3-pip py3-ensurepip nodejs npm \
+    python3 py3-pip nodejs npm \
     curl ca-certificates bash sudo supervisor \
     build-base git openssl-dev libffi-dev boost-dev \
     sqlite sqlite-dev imagemagick sox ffmpeg \
@@ -24,7 +24,7 @@ RUN apk add --no-cache \
 
 RUN apk add --no-cache \
     build-base gfortran lapack-dev openblas-dev \
-    cython py3-numpy py3-scipy py3-pandas py3-opencv py3-ensurepip \
+    cython py3-numpy py3-scipy py3-pandas py3-opencv \
     meson ninja pkgconf
 
 # Create sandbox user

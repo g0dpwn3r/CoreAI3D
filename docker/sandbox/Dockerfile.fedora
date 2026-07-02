@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Update system and install essential packages
 RUN dnf update -y && dnf install -y \
     curl wget gnupg ca-certificates \
-    build-essential file procps-ng net-tools gawk tar \
+    file procps-ng net-tools gawk tar \
     python3 python3-pip python3-devel \
     nodejs npm \
     libffi-devel sqlite supervisor \
@@ -17,7 +17,7 @@ RUN dnf update -y && dnf install -y \
     libssl-devel zlib-devel bzip2-devel readline-devel \
     sqlite-devel ncurses-devel xz-devel tk-devel \
     libxml2-devel libxmlsec1-devel libffi-devel \
-    lzma-devel make gcc-c++ \
+    lzma-devel make gcc gcc-c++ \
     && dnf clean all
 
 # Create sandbox user
