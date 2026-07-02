@@ -8,7 +8,7 @@ RUN dnf install -y epel-release && \
     dnf clean all
 
 # Install essential packages for AI operations and system control
-RUN dnf update -y && dnf install -y --skip-unavailable \
+RUN dnf update -y && dnf install -y --setopt=strict=0 \
     # Core utilities
     curl wget vim nano htop \
     # Development tools

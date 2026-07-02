@@ -3,14 +3,14 @@ FROM fedora:40
 WORKDIR /root
 
 # Update system and install essential packages
-RUN dnf update -y && dnf install -y --skip-unavailable \
-    curl wget gnupg ca-certificates \
+RUN dnf update -y && dnf install -y --setopt=strict=0 \
+    curl wget gnupg2 ca-certificates \
     file procps-ng net-tools gawk tar \
     python3 python3-pip python3-devel \
     nodejs npm \
     libffi-devel sqlite supervisor \
     ImageMagick sox boost-devel \
-    cmake git supervisor\
+    cmake git \
     openssl-devel zlib-devel bzip2-devel readline-devel \
     sqlite-devel ncurses-devel xz-devel tk-devel \
     libxml2-devel xmlsec1-devel \
