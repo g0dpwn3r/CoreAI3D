@@ -24,8 +24,7 @@ RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-li
 
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
-    echo "sandbox:sandbox" | chpasswd && \
-    usermod -aG wheel sandbox
+    echo "sandbox:sandbox" | chpasswd
 
 # Create workspace directory
 RUN mkdir -p /workspace /training_data && \
