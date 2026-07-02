@@ -2,8 +2,13 @@ FROM rockylinux:8
 
 WORKDIR /root
 
+# Install EPEL repository for additional packages
+RUN dnf install -y epel-release && \
+    dnf config-manager --enable epel && \
+    dnf clean all
+
 # Install essential packages for AI operations and system control
-RUN dnf update -y && dnf install -y \
+RUN dnf update -y && dnf install -y --skip-unavailable \
     # Core utilities
     curl wget vim nano htop \
     # Development tools
@@ -26,8 +31,6 @@ RUN dnf update -y && dnf install -y \
     libffi-devel openssl-devel \
     # Database tools
     sqlite \
-    # Web tools
-    curl \
     # Process management
     supervisor \
     # Security tools
@@ -37,7 +40,7 @@ RUN dnf update -y && dnf install -y \
     # Image processing
     ImageMagick \
     # Audio processing
-    sox ffmpeg \
+    sox \
     # Development libraries
     boost-devel \
     && dnf clean all
