@@ -2,18 +2,22 @@ FROM opensuse/leap:15.5
 
 WORKDIR /root
 
-# Update system and install essential packages
+# Install Node.js repository
+RUN zypper addrepo -f https://download.opensuse.org/repositories/devel:/languages:/nodejs/openSUSE_Leap_15.5/ nodejs && \
+    zypper --gpg-auto-import-keys refresh
+
+# Install essential packages
 RUN zypper refresh && zypper update -y && zypper install -y \
-    curl wget gnupg ca-certificates \
+    curl wget gpg2 ca-certificates \
     make gcc gcc-c++ file procps net-tools gawk tar \
     python3 python3-pip python3-devel \
-    nodejs npm \
+    nodejs \
     libffi-devel sqlite3 supervisor \
-    ImageMagick sox boost-devel \
+    ImageMagick sox libboost_system-devel \
     cmake git \
     libopenssl-devel zlib-devel libbz2-devel readline-devel \
     sqlite3-devel ncurses-devel xz-devel tk-devel \
-    libxml2-devel libxmlsec1-devel \
+    libxml2-devel \
     && zypper clean --all
 
 # Create sandbox user
