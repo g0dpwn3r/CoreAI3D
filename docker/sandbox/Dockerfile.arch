@@ -3,18 +3,21 @@ FROM archlinux:latest
 WORKDIR /root
 
 # Initialize keyring and fix permissions before update
-RUN pacman -Sy --noconfirm archlinux-keyring && \
-    rm -rf /var/lib/pacman/sync/*.db && \
+RUN rm -f /var/lib/pacman/db.lck && \
+    pacman -Sy --noconfirm --needed archlinux-keyring && \
     pacman-key --init && \
-    pacman-key --populate archlinux
+    pacman-key --populate archlinux && \
+    pacman-key --refresh-keys && \
+    rm -rf /var/lib/pacman/sync/*.db
 
 # Update system and install essential packages
 RUN rm -f /var/lib/pacman/db.lck && \
-    pacman -Syu --noconfirm && \
-    pacman -S --noconfirm curl wget gnupg ca-certificates base-devel file procps-ng net-tools gawk tar \
+    pacman -Syu --noconfirm --needed && \
+    pacman -S --noconfirm --needed \
+    curl wget gnupg ca-certificates base-devel file procps-ng net-tools gawk tar \
     python python-pip nodejs npm libffi sqlite supervisor \
     imagemagick sox boost-libs cmake git openssl zlib bzip2 readline \
-    libxml2 xmlsec ncurses xz tk lzma make && \
+    libxml2 xmlsec ncurses xz tk make && \
     pacman -Scc --noconfirm && rm -rf /var/lib/pacman/sync/*.db
 
 # Create sandbox user
@@ -41,8 +44,8 @@ RUN /bin/bash -c "eval \"$(pyenv init --path)\" && \
     python --version"
 
 # Install Python packages for AI operations
-RUN pip3 install --upgrade pip && \
-    pip3 install \
+RUN python -m pip install --upgrade pip --break-system-packages && \
+    python -m pip install --break-system-packages \
     requests aiohttp websockets \
     psutil docker \
     opencv-python-headless \
@@ -57,6 +60,7 @@ RUN pip3 install --upgrade pip && \
     playwright
 
 # Install Node.js packages for web automation
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 RUN npm install -g \
     puppeteer \
     cheerio \

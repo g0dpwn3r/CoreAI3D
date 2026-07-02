@@ -75,25 +75,15 @@ ENV PYENV_ROOT $HOME/.pyenv
 ENV PATH $PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH
 
 RUN curl https://pyenv.run | bash && \
-    # Initialize pyenv within this shell context for pyenv install to work
-    eval "$(pyenv init --path)" && \
-    # Install Python 3.10 (use the latest version available, e.g., 3.10.13)
-    # pyenv install 3.10 installs the latest patch version of 3.10
+    /bin/bash -c "eval \"$(pyenv init --path)\" && \
     pyenv install 3.10 && \
-    # Set Python 3.10 as the global default for this environment
     pyenv global 3.10 && \
-    # Rehash shims so the new python executable is available
     pyenv rehash && \
-    # Verify the installation and version (optional)
-    /bin/bash -c "python --version"
-
-# Do some python version trickery
-RUN python -m ensurepip --upgrade
-RUN python -m pip install --upgrade pip setuptools wheel
-RUN python -m pip install SpeechRecognition
+    python --version"
 
 # Install Python packages for AI/ML
-RUN python -m pip install --break-system-packages \
+RUN python -m pip install --upgrade pip setuptools wheel --break-system-packages && \
+    python -m pip install --break-system-packages \
     requests aiohttp websockets \
     psutil docker \
     opencv-python-headless \
@@ -106,8 +96,7 @@ RUN python -m pip install --break-system-packages \
     beautifulsoup4 \
     selenium \
     playwright \
-    supervisor  \
-    psutil  
+    psutil
 
 # 1. Install the system Chromium package and its dependencies
 RUN apt-get update && apt-get install -y \
@@ -143,7 +132,7 @@ USER sandbox
 # Environment variables
 ENV HOME=/home/sandbox
 ENV PATH="/home/sandbox/.local/bin:${PATH}"
-ENV SANDBOX_TYPE=kalibg
+ENV SANDBOX_TYPE=kali
 
 # Default command
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
