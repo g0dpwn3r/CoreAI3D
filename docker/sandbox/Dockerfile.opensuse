@@ -15,10 +15,12 @@ RUN zypper refresh && zypper update -y && zypper install -y --skip-unavailable \
     libxml2-devel \
     && zypper clean --all
 
-# Install Node.js via NodeSource
-RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
-    zypper install -y nodejs --skip-unavailable && \
-    zypper clean --all
+# Install Node.js (official binary tarball for broad compatibility)
+ENV NODE_VERSION=20.14.0
+RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | \
+    tar -xz -C /usr/local --strip-components=1 && \
+    ln -sf /usr/local/bin/node /usr/bin/node && \
+    ln -sf /usr/local/bin/npm /usr/bin/npm
 
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
