@@ -43,9 +43,9 @@ RUN dnf update -y && dnf install -y --setopt=strict=0 \
     boost-devel \
     && dnf clean all
 
-# Install Node.js from NodeSource for Rocky Linux 8
+# Install Node.js from NodeSource for Rocky Linux 8 (includes npm)
 RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
-    dnf install -y nodejs npm && \
+    dnf install -y nodejs && \
     dnf clean all
 
 # Create sandbox user
