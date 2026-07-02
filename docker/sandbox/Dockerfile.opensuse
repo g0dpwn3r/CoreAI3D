@@ -4,7 +4,7 @@ WORKDIR /root
 
 # Install essential packages
 RUN zypper refresh && zypper update -y && zypper install -y \
-    curl wget gpg2 ca-certificates patch \
+    curl wget gpg2 ca-certificates patch gzip \
     make gcc gcc-c++ file procps net-tools gawk tar \
     python3 python3-pip python3-devel \
     libffi-devel sqlite3 supervisor \
@@ -18,7 +18,7 @@ RUN zypper refresh && zypper update -y && zypper install -y \
 # Install Node.js (official binary tarball for broad compatibility)
 ENV NODE_VERSION=20.14.0
 RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | \
-    tar -xz -C /usr/local --strip-components=1 && \
+    gunzip | tar -x -C /usr/local --strip-components=1 && \
     ln -sf /usr/local/bin/node /usr/bin/node && \
     ln -sf /usr/local/bin/npm /usr/bin/npm
 
