@@ -1916,11 +1916,11 @@ class CoreAI3DDashboard(QMainWindow):
             logger.info("Initializing CoreAI3D client...")
 
             # Create client instance
-            self.client = CoreAI3DClient(
-                api_url=self.config.api_url,
-                ws_url=self.config.ws_url,
-                api_key=self.config.api_key
-            )
+            self.client = CoreAI3DClient({
+                'base_url': self.config.api_url,
+                'ws_url': self.config.ws_url,
+                'api_key': self.config.api_key
+            })
 
             # Register chat response handler
             self.chat_response_handler = self._handle_chat_response
@@ -9671,34 +9671,59 @@ capabilities, training data, performance metrics, and usage instructions."""
     def _setup_websocket_connection(self):
         """Setup WebSocket connection to CoreAI3D server"""
         try:
-            # Extract port from API URL (default to 8080 if not specified)
-            api_url = self.config.api_url
-            port = 8080  # Default port
-            if "localhost:" in api_url:
-                try:
-                    port = int(api_url.split("localhost:")[1].split("/")[0])
-                except (ValueError, IndexError):
-                    port = 8080
-
-            ws_url = f"ws://localhost:{port}/ws"
+            # Use the configured WebSocket URL directly (e.g. ws://coreai3d:8081)
+            ws_url = self.config.ws_url
             logger.info(f"Setting up WebSocket connection to: {ws_url}")
 
-            # Create WebSocket client
+            # Create WebSocket client with all handlers
             self.ws = websocket.WebSocketApp(
                 ws_url,
                 on_message=self._on_websocket_message,
                 on_error=self._on_websocket_error,
-                on_close=self._on_websocket_close
+                on_close=self._on_websocket_close,
+                on_open=self._on_websocket_open
             )
 
-            # Start WebSocket in background thread
-            self.ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
+            # Start WebSocket in background thread with reconnection
+            self.ws_thread = threading.Thread(target=self._websocket_run_with_retry, daemon=True)
             self.ws_thread.start()
 
-            logger.info("WebSocket connection setup completed")
+            logger.info("WebSocket connection thread started")
 
         except Exception as e:
             logger.error(f"Failed to setup WebSocket connection: {str(e)}")
+
+    def _websocket_run_with_retry(self):
+        """Run WebSocket connection with automatic retry"""
+        max_retries = 5
+        retry_delay = 5  # seconds
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"WebSocket connection attempt {attempt}/{max_retries}...")
+                self.ws.run_forever(
+                    ping_interval=30,
+                    ping_timeout=10
+                )
+                # If run_forever exits normally (clean close), don't retry
+                if attempt < max_retries:
+                    logger.info(f"WebSocket closed, retrying in {retry_delay}s...")
+                    import time
+                    time.sleep(retry_delay)
+            except KeyboardInterrupt:
+                logger.info("WebSocket connection interrupted")
+                break
+            except Exception as e:
+                logger.error(f"WebSocket connection error (attempt {attempt}): {str(e)}")
+                if attempt < max_retries:
+                    import time
+                    time.sleep(retry_delay)
+
+    def _on_websocket_open(self, ws):
+        """Handle WebSocket connection open"""
+        logger.info("WebSocket connection established")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("WebSocket connected")
 
     def _on_websocket_message(self, ws, message):
         """Handle incoming WebSocket messages"""
@@ -9763,6 +9788,12 @@ capabilities, training data, performance metrics, and usage instructions."""
         logger.info(f"WebSocket connection closed: {close_status_code} - {close_msg}")
         if hasattr(self, 'status_bar'):
             self.status_bar.showMessage("WebSocket connection closed")
+
+    def _on_websocket_open(self, ws):
+        """Handle WebSocket connection open"""
+        logger.info("WebSocket connection established successfully")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("WebSocket connected to CoreAI3D")
 
     def closeEvent(self, event):
         """Handle application close event with proper async cleanup"""
