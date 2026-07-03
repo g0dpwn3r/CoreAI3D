@@ -6,7 +6,7 @@ WORKDIR /root
 RUN zypper refresh && zypper update -y && zypper install -y \
     curl wget gpg2 ca-certificates patch gzip \
     make gcc gcc-c++ file procps net-tools gawk tar \
-    python3.123 python3.123-pip python3.123-devel \
+    python3.12 python3.12-pip python3.12-devel \
     libffi-devel sqlite3 supervisor \
     ImageMagick sox \
     cmake git \
@@ -14,7 +14,7 @@ RUN zypper refresh && zypper update -y && zypper install -y \
     sqlite3-devel ncurses-devel xz-devel tk-devel \
     libxml2-devel \
     && zypper clean --all
-RUN zypper refresh && zypper install -y python3.123.12 python3.123.12-pip python3.123.12-devel
+RUN zypper refresh && zypper install -y python3.12 python3.12-pip python3.12-devel
 # Install Node.js (official binary tarball for broad compatibility)
 ENV NODE_VERSION=20.14.0
 RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | \
