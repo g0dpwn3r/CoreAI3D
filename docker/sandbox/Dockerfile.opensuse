@@ -6,7 +6,7 @@ WORKDIR /root
 RUN zypper refresh && zypper update -y && zypper install -y \
     curl wget gpg2 ca-certificates patch gzip \
     make gcc gcc-c++ file procps net-tools gawk tar \
-    python3.12 python3.12-pip python3.12-devel \
+    python3.10 python3.10-pip python3.10-devel \
     libffi-devel sqlite3 supervisor \
     ImageMagick sox \
     cmake git \
@@ -14,7 +14,7 @@ RUN zypper refresh && zypper update -y && zypper install -y \
     sqlite3-devel ncurses-devel xz-devel tk-devel \
     libxml2-devel \
     && zypper clean --all
-RUN zypper refresh && zypper install -y python3.12 python3.12-pip python3.12-devel
+RUN zypper refresh && zypper install -y python3.10 python3.10-pip python3.10-devel
 # Install Node.js (official binary tarball for broad compatibility)
 ENV NODE_VERSION=20.14.0
 RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | \
@@ -43,15 +43,15 @@ RUN eval "$(pyenv init --path)" && \
     pyenv install 3.12.0 && \
     pyenv global 3.12.0 && \
     pyenv rehash && \
-    python3.12 --version
+    python3.10 --version
 
-# Install python3.12 packages for AI operations
-# Install python3.12 packages for AI operations using python3.12 3.11
-RUN python3.12 -m pip install --upgrade pip && \
-    python3.12 -m pip install \
+# Install python3.10 packages for AI operations
+# Install python3.10 packages for AI operations using python3.10 3.11
+RUN python3.10 -m pip install --upgrade pip && \
+    python3.10 -m pip install \
     requests aiohttp websockets \
     psutil docker \
-    opencv-python3.12-headless \
+    opencv-python3.10-headless \
     numpy pandas scipy \
     scikit-learn \
     pillow \
