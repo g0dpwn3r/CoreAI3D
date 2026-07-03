@@ -143,13 +143,22 @@ async def check_api_health(session: aiohttp.ClientSession) -> bool:
     return result.ok
 
 
+def build_absolute_path(filename: str) -> str:
+    """
+    Build absolute path for dataset file.
+    The coreai3d container mounts ./training_data as /training_data
+    """
+    return f"/training_data/{filename}"
+
+
 async def load_dataset(
     session: aiohttp.ClientSession,
     ds: dict,
 ) -> ApiResult:
     """Instruct CoreAI3D to load a CSV dataset."""
     payload = {
-        "filename": ds["filename"],
+        "filename": build_absolute_path(ds["filename"]),
+        "directory": "/training_data",
         "output_size": ds["output_size"],
         "input_size": ds["input_size"],
         "has_header": ds["has_header"],
