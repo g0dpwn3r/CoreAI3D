@@ -49,7 +49,7 @@ RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
     dnf clean all
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
-    echo "sandbox:sandbox" | passwd --stdin sandbox && \
+    echo "sandbox:sandbox" | chpasswd --stdin sandbox && \
     usermod -aG wheel sandbox
 
 # Create workspace directory
