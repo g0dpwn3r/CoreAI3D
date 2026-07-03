@@ -302,7 +302,9 @@ services:
     command: ["python3", "/app/train_linux_operations.py"]
 
   admin-desktop:
-    image: lscr.io/linuxserver/webtop:ubuntu-xfce # <--- This guarantees the latest rolling Ubuntu base
+    build:
+      context: ./docker/admin-gui
+      dockerfile: Dockerfile.admin-gui
     container_name: coreai3d_admin_gui
     privileged: true  # Allows the X server and DBus to launch panels without kernel blocks
     shm_size: "2gb"   # Expanded video memory allocation
@@ -313,7 +315,6 @@ services:
     volumes:
       - .:/app
       - webtop_desktop_config:/config 
-      - ./docker/admin-gui/custom-cont-init.d:/config/custom-cont-init.d:ro  # Install Python 3.10
     ports:
       - "3001:3001"
     restart: unless-stopped
