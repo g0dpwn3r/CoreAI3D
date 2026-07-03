@@ -264,8 +264,6 @@ services:
     container_name: windows_sandbox
     stdin_open: true
     tty: true
-    profiles:
-      - windows
     volumes:
       - ./training_data:/training_data
       - ./sandbox_workspace:/workspace
@@ -292,6 +290,7 @@ services:
       - centos-sandbox
       - fedora-sandbox
       - opensuse-sandbox
+      - windows-sandbox
     volumes:
       - ./training_data:/training_data
       - ./ai_models:/ai_models
