@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-CoreAI3D Windows Operations Training Script
-Trains AI to operate Windows systems safely within Docker containers
+CoreAI3D Windows Compatibility Operations Training Script
+Trains AI to operate in Wine-based Windows compatibility environment on Linux
 """
 
 import asyncio
@@ -27,17 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 class WindowsOperationTrainer:
-    """Trains AI to perform Windows operations safely"""
+    """Trains AI to perform Windows compatibility operations safely"""
 
     def __init__(self):
         self.training_data = []
         self.sandbox_type = os.environ.get('SANDBOX_TYPE', 'windows')
-        self.workspace = Path('C:\\workspace')
-        self.training_dir = Path('C:\\training_data')
+        self.workspace = Path('/workspace')
+        self.training_dir = Path('/training_data')
 
     async def initialize_training_environment(self):
         """Initialize the training environment"""
-        logger.info(f"Initializing Windows training environment for {self.sandbox_type}")
+        logger.info(f"Initializing Windows compatibility training environment for {self.sandbox_type}")
 
         # Create necessary directories
         self.workspace.mkdir(exist_ok=True)
@@ -49,70 +49,98 @@ class WindowsOperationTrainer:
         logger.info("Training environment initialized")
 
     async def setup_training_scenarios(self):
-        """Set up various Windows operation training scenarios"""
+        """Set up various Windows compatibility operation training scenarios"""
         scenarios = [
             {
                 "name": "file_system_operations",
                 "description": "Basic file system operations",
                 "commands": [
-                    "Get-ChildItem -Path C:\\workspace -Force",
-                    "Get-Location",
-                    "New-Item -ItemType Directory -Path 'C:\\workspace\\test_directory' -Force",
-                    "New-Item -ItemType File -Path 'C:\\workspace\\test_directory\\test_file.txt' -Force",
-                    "Copy-Item 'C:\\workspace\\test_directory\\test_file.txt' 'C:\\workspace\\test_directory\\backup.txt'",
-                    "Move-Item 'C:\\workspace\\test_directory\\backup.txt' 'C:\\workspace\\test_directory\\renamed.txt'",
-                    "Remove-Item 'C:\\workspace\\test_directory\\renamed.txt'",
-                    "Remove-Item 'C:\\workspace\\test_directory' -Recurse"
+                    "ls -la /workspace",
+                    "pwd",
+                    "mkdir -p /workspace/test_directory",
+                    "touch /workspace/test_directory/test_file.txt",
+                    "cp /workspace/test_directory/test_file.txt /workspace/test_directory/backup.txt",
+                    "mv /workspace/test_directory/backup.txt /workspace/test_directory/renamed.txt",
+                    "cat /workspace/test_directory/renamed.txt",
+                    "rm /workspace/test_directory/renamed.txt && rmdir /workspace/test_directory"
                 ]
             },
             {
                 "name": "process_management",
                 "description": "Process monitoring and management",
                 "commands": [
-                    "Get-Process | Select-Object -First 10",
-                    "Get-Service | Where-Object {$_.Status -eq 'Running'} | Select-Object -First 10",
-                    "Get-NetTCPConnection | Select-Object -First 10",
-                    "Get-EventLog -LogName System -Newest 10"
+                    "ps aux | head -10",
+                    "top -bn1 | head -20",
+                    "pgrep python",
+                    "jobs",
+                    "bg",
+                    "fg"
                 ]
             },
             {
                 "name": "network_operations",
                 "description": "Network configuration and testing",
                 "commands": [
-                    "Get-NetIPAddress",
-                    "Test-NetConnection google.com -Count 3",
-                    "Resolve-DnsName google.com",
-                    "Get-NetRoute",
-                    "Invoke-WebRequest -Uri 'https://google.com' -Method Head"
+                    "ip addr show",
+                    "ip route show",
+                    "ping -c 3 google.com",
+                    "traceroute google.com",
+                    "netstat -tuln",
+                    "ss -tuln",
+                    "curl -I https://google.com",
+                    "wget --spider https://google.com"
                 ]
             },
             {
                 "name": "package_management",
                 "description": "Package installation and management",
                 "commands": [
-                    "choco list --local-only",
-                    "choco search python",
-                    "python --version"
+                    "apt update",
+                    "apt list --installed | head -20",
+                    "apt search python3",
+                    "which python3",
+                    "python3 --version",
+                    "pip3 --version"
                 ]
             },
             {
-                "name": "registry_operations",
-                "description": "Windows registry operations",
+                "name": "wine_compatibility",
+                "description": "Wine Windows compatibility layer operations",
                 "commands": [
-                    "Get-ChildItem -Path 'HKLM:\\SOFTWARE' -ErrorAction SilentlyContinue | Select-Object -First 5",
-                    "Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'",
-                    "Get-Help about_Registry"
+                    "wine --version",
+                    "wineboot --init",
+                    "ls -la ~/.wine",
+                    "which winetricks",
+                    "echo 'Wine environment ready'",
+                    "env | grep WINE"
                 ]
             },
             {
                 "name": "system_monitoring",
                 "description": "System monitoring and diagnostics",
                 "commands": [
-                    "Get-ComputerInfo",
-                    "Get-Disk",
-                    "Get-Volume",
-                    "Get-EventLog -LogName System -Newest 1",
-                    "Get-WmiObject -Class Win32_OperatingSystem"
+                    "df -h",
+                    "du -sh /workspace",
+                    "free -h",
+                    "uptime",
+                    "date",
+                    "uname -a",
+                    "lscpu | head -20",
+                    "vmstat 1 3"
+                ]
+            },
+            {
+                "name": "scripting_automation",
+                "description": "Shell scripting and automation",
+                "commands": [
+                    "echo '#!/bin/bash\necho \"Hello from script\"' > /workspace/hello.sh",
+                    "chmod +x /workspace/hello.sh",
+                    "/workspace/hello.sh",
+                    "bash -c 'for i in {1..5}; do echo $i; done'",
+                    "find /workspace -name '*.sh' -exec ls -l {} \\;",
+                    "crontab -l 2>/dev/null || echo 'No crontab'",
+                    "which bash",
+                    "rm /workspace/hello.sh"
                 ]
             }
         ]
@@ -194,9 +222,9 @@ class WindowsOperationTrainer:
         try:
             start_time = time.time()
 
-            # Execute PowerShell command
+            # Execute bash command
             process = await asyncio.create_subprocess_shell(
-                f"powershell.exe -Command {command}",
+                command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workspace)
@@ -241,7 +269,7 @@ async def main():
 
     try:
         await trainer.initialize_training_environment()
-        logger.info("Windows operations training completed successfully")
+        logger.info("Windows compatibility operations training completed successfully")
     except KeyboardInterrupt:
         logger.info("Training interrupted by user")
     except Exception as e:
