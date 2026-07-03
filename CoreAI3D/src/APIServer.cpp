@@ -84,7 +84,53 @@ bool APIServer::initialize(const std::string& configPath,
             return true;
         }
 
-        // Set database configuration
+        // Load configuration file FIRST (provides base defaults)
+        if (!configPath.empty()) {
+            std::ifstream configFile(configPath);
+            if (configFile.is_open()) {
+                json config;
+                configFile >> config;
+
+                // Load server configuration
+                if (config.contains("server")) {
+                    auto serverConfig = config["server"];
+                    if (serverConfig.contains("host")) host = serverConfig["host"];
+                    if (serverConfig.contains("port")) port = serverConfig["port"];
+                    if (serverConfig.contains("threads")) numThreads = serverConfig["threads"];
+                    if (serverConfig.contains("api_version")) apiVersion = serverConfig["api_version"];
+                    if (serverConfig.contains("cors_origin")) corsOrigin = serverConfig["cors_origin"];
+                    if (serverConfig.contains("request_timeout")) requestTimeout = serverConfig["request_timeout"];
+                    if (serverConfig.contains("max_request_size")) maxRequestSize = serverConfig["max_request_size"];
+                    if (serverConfig.contains("enable_logging")) enableLogging = serverConfig["enable_logging"];
+                    if (serverConfig.contains("log_file")) logFilePath = serverConfig["log_file"];
+                }
+
+                // Load database configuration from JSON (base defaults, overridden by CLI args)
+                if (config.contains("database")) {
+                    auto dbConfig = config["database"];
+                    if (dbConfig.contains("host")) this->dbHost = dbConfig["host"];
+                    if (dbConfig.contains("port")) this->dbPort = dbConfig["port"];
+                    if (dbConfig.contains("user")) this->dbUser = dbConfig["user"];
+                    if (dbConfig.contains("password")) this->dbPassword = dbConfig["password"];
+                    if (dbConfig.contains("schema")) this->dbSchema = dbConfig["schema"];
+                    if (dbConfig.contains("ssl_mode")) {
+                        std::string sslModeStr = dbConfig["ssl_mode"];
+                        if (sslModeStr == "DISABLED") this->dbSSLMode = SSLMode::DISABLED;
+                        else if (sslModeStr == "REQUIRED") this->dbSSLMode = SSLMode::REQUIRED;
+                        else if (sslModeStr == "VERIFY_CA") this->dbSSLMode = SSLMode::VERIFY_CA;
+                        else if (sslModeStr == "VERIFY_IDENTITY") this->dbSSLMode = SSLMode::VERIFY_IDENTITY;
+                        else this->dbSSLMode = SSLMode::REQUIRED;
+                    }
+                    if (dbConfig.contains("create_tables")) this->createTables = dbConfig["create_tables"];
+                }
+
+                std::cout << "Configuration loaded from " << configPath << std::endl;
+            } else {
+                std::cout << "Configuration file not found, using defaults" << std::endl;
+            }
+        }
+
+        // CLI args override config.json values (always take priority)
         this->dbHost = dbHost;
         this->dbPort = dbPort;
         this->dbUser = dbUser;
@@ -123,52 +169,6 @@ bool APIServer::initialize(const std::string& configPath,
 
         // Initialize orchestrator
         orchestrator = std::make_unique<ModuleOrchestrator>(serverName + "_orchestrator");
-
-        // Load configuration if provided
-        if (!configPath.empty()) {
-            std::ifstream configFile(configPath);
-            if (configFile.is_open()) {
-                json config;
-                configFile >> config;
-
-                // Load server configuration
-                if (config.contains("server")) {
-                    auto serverConfig = config["server"];
-                    if (serverConfig.contains("host")) host = serverConfig["host"];
-                    if (serverConfig.contains("port")) port = serverConfig["port"];
-                    if (serverConfig.contains("threads")) numThreads = serverConfig["threads"];
-                    if (serverConfig.contains("api_version")) apiVersion = serverConfig["api_version"];
-                    if (serverConfig.contains("cors_origin")) corsOrigin = serverConfig["cors_origin"];
-                    if (serverConfig.contains("request_timeout")) requestTimeout = serverConfig["request_timeout"];
-                    if (serverConfig.contains("max_request_size")) maxRequestSize = serverConfig["max_request_size"];
-                    if (serverConfig.contains("enable_logging")) enableLogging = serverConfig["enable_logging"];
-                    if (serverConfig.contains("log_file")) logFilePath = serverConfig["log_file"];
-                }
-
-                // Load database configuration from JSON (overrides command-line args)
-                if (config.contains("database")) {
-                    auto dbConfig = config["database"];
-                    if (dbConfig.contains("host")) this->dbHost = dbConfig["host"];
-                    if (dbConfig.contains("port")) this->dbPort = dbConfig["port"];
-                    if (dbConfig.contains("user")) this->dbUser = dbConfig["user"];
-                    if (dbConfig.contains("password")) this->dbPassword = dbConfig["password"];
-                    if (dbConfig.contains("schema")) this->dbSchema = dbConfig["schema"];
-                    if (dbConfig.contains("ssl_mode")) {
-                        std::string sslModeStr = dbConfig["ssl_mode"];
-                        if (sslModeStr == "DISABLED") this->dbSSLMode = SSLMode::DISABLED;
-                        else if (sslModeStr == "REQUIRED") this->dbSSLMode = SSLMode::REQUIRED;
-                        else if (sslModeStr == "VERIFY_CA") this->dbSSLMode = SSLMode::VERIFY_CA;
-                        else if (sslModeStr == "VERIFY_IDENTITY") this->dbSSLMode = SSLMode::VERIFY_IDENTITY;
-                        else this->dbSSLMode = SSLMode::REQUIRED;
-                    }
-                    if (dbConfig.contains("create_tables")) this->createTables = dbConfig["create_tables"];
-                }
-
-                std::cout << "Configuration loaded from " << configPath << std::endl;
-            } else {
-                std::cout << "Configuration file not found, using defaults" << std::endl;
-            }
-        }
 
         // Initialize database if not in offline mode
         if (!this->dbHost.empty() && this->dbPort > 0) {

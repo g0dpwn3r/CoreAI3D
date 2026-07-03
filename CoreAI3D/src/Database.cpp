@@ -421,17 +421,8 @@ void Database::createTables() {
                        "FOREIGN KEY (user_id) REFERENCES " + dbSchema + ".users(id) ON DELETE CASCADE"
                        ")").execute();
 
-        // Create api_keys table for API key management
-        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".api_keys ("
-                       "key VARCHAR(64) PRIMARY KEY,"
-                       "user_id BIGINT NOT NULL,"
-                       "description TEXT,"
-                       "is_active BOOLEAN DEFAULT TRUE,"
-                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                       "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-                       "INDEX idx_user_active (user_id, is_active),"
-                       "FOREIGN KEY (user_id) REFERENCES " + dbSchema + ".users(id) ON DELETE CASCADE"
-                       ")").execute();
+        // api_keys table is created lazily by saveAPIKey() with the correct schema.
+        // See the CREATE TABLE IF NOT EXISTS in saveAPIKey().
 
         std::cout << "Created main database tables in schema " << dbSchema << std::endl;
         createPredictionResultsTable();
