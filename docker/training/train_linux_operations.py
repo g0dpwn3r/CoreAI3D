@@ -349,9 +349,19 @@ class LinuxOperationTrainer:
         """Run comprehensive Linux operations training"""
         logger.info("Starting comprehensive Linux operations training")
 
-        # Get all available scenarios
-        scenario_files = list(self.training_dir.glob("*_operations.json"))
-        scenario_names = [f.stem.replace('_operations', '') for f in scenario_files]
+        # Get all available scenarios (exclude result/config files)
+        _EXCLUDED_FILES = {
+            "comprehensive_training_results.json",
+            "system_metrics.json",
+        }
+        _EXCLUDED_SUFFIXES = ("_results.json",)
+
+        scenario_files = [
+            f for f in self.training_dir.glob("*.json")
+            if f.name not in _EXCLUDED_FILES
+            and not any(f.name.endswith(s) for s in _EXCLUDED_SUFFIXES)
+        ]
+        scenario_names = [f.stem for f in scenario_files]
 
         training_results = {
             "training_session_id": f"session_{int(time.time())}",
@@ -366,6 +376,12 @@ class LinuxOperationTrainer:
 
         for scenario_name in scenario_names:
             scenario_result = await self.execute_training_scenario(scenario_name)
+
+            # Handle error cases (e.g., scenario file not found)
+            if "error" in scenario_result:
+                logger.warning(f"Skipping scenario '{scenario_name}': {scenario_result['error']}")
+                continue
+
             training_results["scenarios"].append(scenario_result)
 
             total_success += scenario_result["success_count"]

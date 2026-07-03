@@ -15,7 +15,6 @@ services:
     # on the internal skynet network. Remove this block if you need host access.
     expose:
       - "33060"  # X Plugin (mysqlx)
-      - "3306"   # classic MySQL protocol
     volumes:
         - mysql_data:/var/lib/mysql
     restart: unless-stopped
