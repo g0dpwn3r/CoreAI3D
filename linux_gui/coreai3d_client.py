@@ -788,6 +788,10 @@ class CoreAI3DClient:
         """Stop current training session"""
         return await self.post('/training/stop')
 
+    async def get_training_status(self) -> APIResponse:
+        """Get current training session status"""
+        return await self.get('/training/status')
+
     async def load_model(self, model_identifier: str, model_type: Optional[str] = None) -> APIResponse:
         """Load a model by dataset ID or name"""
         data = {

@@ -176,7 +176,7 @@ class SandboxManager(QObject):
         try:
             # Docker uses command-line options and container configurations
             self.sandbox_config = {
-                'container_name': self.sandbox_name,
+                'container_name': config.get('sandbox_name', self.sandbox_name),
                 'image': config.get('image', 'kali:latest'),
                 'host_folder': config.get('host_folder', '/tmp'),
                 'startup_command': config.get('startup_command', 'tail -f /dev/null'),
@@ -278,13 +278,40 @@ class SandboxManager(QObject):
                 logger.error("No sandbox config available")
                 return False
 
+            container_name = self.sandbox_config['container_name']
+
+            # Check if a container with the same name already exists
+            result = subprocess.run(
+                ['docker', 'ps', '-a', '--filter', f'name={container_name}', '--format', '{{.Names}}'],
+                capture_output=True,
+                text=True
+            )
+
+            if container_name in result.stdout:
+                logger.info(f"Container {container_name} already exists, attempting to start it")
+                start_result = subprocess.run(
+                    ['docker', 'start', container_name],
+                    capture_output=True,
+                    text=True
+                )
+                if start_result.returncode == 0:
+                    time.sleep(2)
+                    return True
+                else:
+                    logger.warning(f"Failed to start existing container, removing it: {start_result.stderr}")
+                    subprocess.run(
+                        ['docker', 'rm', '-f', container_name],
+                        capture_output=True,
+                        text=True
+                    )
+
             # Pull the image if needed
             self._pull_image()
 
             # Start the container
             cmd = [
                 'docker', 'run',
-                '--name', self.sandbox_config['container_name'],
+                '--name', container_name,
                 '--rm'  # Remove container when stopped
             ]
 
@@ -293,13 +320,20 @@ class SandboxManager(QObject):
                 cmd.append('--network')
                 cmd.append('none')
 
-            # Add privileged option (opposite of drop_rights)
-            if not self.sandbox_config.get('privileged', False):
+            # Add privileged/user option: privileged maps to root, non-privileged to 1000:1000
+            if self.sandbox_config.get('privileged', False):
+                cmd.append('--privileged')
+                cmd.append('--user')
+                cmd.append('0:0')  # root
+            else:
                 cmd.append('--user')
                 cmd.append('1000:1000')  # Non-root user
-            elif self.sandbox_config.get('drop_rights', True):
-                cmd.append('--user')
-                cmd.append('1000:1000')  # Non-root user
+
+            # Add host folder mount
+            host_folder = self.sandbox_config.get('host_folder')
+            if host_folder and os.path.exists(host_folder):
+                cmd.append('-v')
+                cmd.append(f'{host_folder}:{host_folder}')
 
             # Add detach
             if self.sandbox_config.get('detach', True):
@@ -321,12 +355,12 @@ class SandboxManager(QObject):
 
             # Check if container is running
             result = subprocess.run(
-                ['docker', 'ps', '--filter', f'name={self.sandbox_config["container_name"]}', '--format', '{{.Names}}'],
+                ['docker', 'ps', '--filter', f'name={container_name}', '--format', '{{.Names}}'],
                 capture_output=True,
                 text=True
             )
 
-            return self.sandbox_config['container_name'] in result.stdout
+            return container_name in result.stdout
 
         except Exception as e:
             logger.error(f"Error starting Docker container: {str(e)}")
@@ -368,10 +402,12 @@ class SandboxManager(QObject):
                 logger.warning("No sandbox config available for termination")
                 return False
 
+            container_name = self.sandbox_config['container_name']
+
             # Stop the container
             try:
                 subprocess.run(
-                    ['docker', 'stop', self.sandbox_config['container_name']],
+                    ['docker', 'stop', container_name],
                     capture_output=True,
                     timeout=30,
                     text=True
@@ -381,13 +417,25 @@ class SandboxManager(QObject):
                 # Force kill if needed
                 try:
                     subprocess.run(
-                        ['docker', 'kill', self.sandbox_config['container_name']],
+                        ['docker', 'kill', container_name],
                         capture_output=True,
                         timeout=10,
                         text=True
                     )
                 except subprocess.TimeoutExpired:
                     success = False
+
+            # Remove container explicitly in case --rm did not auto-remove
+            try:
+                subprocess.run(
+                    ['docker', 'rm', '-f', container_name],
+                    capture_output=True,
+                    timeout=10,
+                    text=True
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("Docker container remove timed out")
+                success = False
 
             # Clean up the subprocess if still running
             if self.sandbox_process and self.sandbox_process.poll() is None:
@@ -540,7 +588,7 @@ class TrainingDataManager(QObject):
 
             # Calculate dataset sizes for this file if not provided
             if file_sizes is None:
-                file_sizes = self.calculate_dataset_sizes(dest_path, self.datasets[dataset_name]['data_type'])
+                file_sizes = {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
 
             # Update dataset metadata
             file_info = {
@@ -1148,7 +1196,7 @@ class ModelDiscoveryService(QObject):
                     'search': query,
                     'limit': 100,  # HF API maximum limit per request
                     'sort': 'downloads',
-                    'direction': -1
+                    'direction': '-1'
                 }
 
                 if model_type != "all":
@@ -1512,54 +1560,6 @@ class CodeDebugger(QObject):
             test_result = TestResult(
                 test_id=f"automation_{task_type}_{int(time.time())}",
                 test_type="system_automation",
-                success=False,
-                duration=duration,
-                message=str(e)
-            )
-
-            self.test_history.append(test_result)
-            self.test_completed.emit(test_result)
-
-            return test_result
-
-    async def run_system_automation_test(self, task_type: str, parameters: Dict[str, Any]) -> TestResult:
-        """Run system automation test"""
-        start_time = time.time()
-
-        try:
-            # Call automation API
-            result = await self.client.automate_task({
-                'taskType': task_type,
-                'parameters': parameters
-            })
-
-            success = result.success
-
-            if success:
-                message = f"System automation completed: {task_type}"
-            else:
-                message = f"System automation failed: {task_type}"
-
-            total_duration = time.time() - start_time
-            test_result = TestResult(
-                test_id=f"automation_{task_type}_{int(time.time())}",
-                test_type="automation",
-                success=success,
-                duration=total_duration,
-                message=message,
-                data=result.data if success else {}
-            )
-
-            self.test_history.append(test_result)
-            self.test_completed.emit(test_result)
-
-            return test_result
-
-        except Exception as e:
-            duration = time.time() - start_time
-            test_result = TestResult(
-                test_id=f"automation_{task_type}_{int(time.time())}",
-                test_type="automation",
                 success=False,
                 duration=duration,
                 message=str(e)
@@ -2981,11 +2981,55 @@ class CoreAI3DDashboard(QMainWindow):
             self.status_bar.showMessage("Command execution error")
             QMessageBox.warning(self, "Error", f"Failed to execute command: {str(e)}")
 
+    def _run_compose_command(self, service: str, command: Optional[List[str]] = None,
+                             action: str = "exec") -> Tuple[bool, str]:
+        """Run a docker compose command for a Linux Sandbox service.
+
+        Args:
+            service: docker-compose service name (e.g. ubuntu-sandbox).
+            command: list of command + args for exec/run; ignored for up/stop.
+            action: one of 'exec', 'up', 'stop'.
+        Returns:
+            (success, output_or_error_message)
+        """
+        try:
+            if action == "up":
+                cmd = ['docker', 'compose', 'up', '-d', service]
+            elif action == "stop":
+                cmd = ['docker', 'compose', 'stop', service]
+            elif action == "exec":
+                cmd = ['docker', 'compose', 'exec', '-T', service] + (command or [])
+            else:
+                return False, f"Unknown compose action: {action}"
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if result.stderr.strip():
+                    output += "\n" + result.stderr.strip()
+                return True, output
+            else:
+                error = result.stderr.strip() or result.stdout.strip() or "docker compose command failed"
+                return False, error
+
+        except subprocess.TimeoutExpired:
+            return False, "docker compose command timed out"
+        except FileNotFoundError:
+            return False, "docker compose not found"
+        except Exception as e:
+            return False, f"docker compose error: {str(e)}"
+
     async def _execute_linux_command_async(self, container: str, command: str):
         """Async part of Linux command execution"""
-        # Execute command directly in sandbox manager instead of API call
+        # Run the command inside the selected docker-compose service container
         success, output = await asyncio.get_event_loop().run_in_executor(
-            None, self.sandbox_manager.execute_command, command
+            None, self._run_compose_command, container, ['/bin/sh', '-c', command], 'exec'
         )
 
         # Create result object similar to API response
@@ -3044,24 +3088,18 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _start_linux_container_async(self, container: str):
         """Async part of container start"""
-        # Use sandbox manager directly instead of API call
-        config = {
-            'image': container,  # Use container name as image
-            'startup_command': 'tail -f /dev/null',
-            'networking': 'enable',
-            'privileged': False
-        }
-        success = await asyncio.get_event_loop().run_in_executor(
-            None, self.sandbox_manager.start_sandbox, config
+        # Start the docker-compose service corresponding to the selected container
+        success, output = await asyncio.get_event_loop().run_in_executor(
+            None, self._run_compose_command, container, None, 'up'
         )
 
         # Create result object similar to API response
         class StartResult:
-            def __init__(self, success, container):
+            def __init__(self, success, container, output):
                 self.success = success
-                self.data = {'container': container} if success else {'error': 'Failed to start container'}
+                self.data = {'container': container, 'output': output} if success else {'error': output}
 
-        return StartResult(success, container)
+        return StartResult(success, container, output)
 
     def _handle_start_container_result_direct(self, result):
         """Handle container start result directly"""
@@ -3094,18 +3132,18 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _stop_linux_container_async(self, container: str):
         """Async part of container stop"""
-        # Use sandbox manager directly instead of API call
-        success = await asyncio.get_event_loop().run_in_executor(
-            None, self.sandbox_manager.stop_sandbox
+        # Stop the docker-compose service corresponding to the selected container
+        success, output = await asyncio.get_event_loop().run_in_executor(
+            None, self._run_compose_command, container, None, 'stop'
         )
 
         # Create result object similar to API response
         class StopResult:
-            def __init__(self, success, container):
+            def __init__(self, success, container, output):
                 self.success = success
-                self.data = {'container': container} if success else {'error': 'Failed to stop container'}
+                self.data = {'container': container, 'output': output} if success else {'error': output}
 
-        return StopResult(success, container)
+        return StopResult(success, container, output)
 
     def _handle_stop_container_result_direct(self, result):
         """Handle container stop result directly"""
@@ -3150,8 +3188,7 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _run_linux_training_async(self, container: str, scenario: str):
         """Async part of Linux training"""
-        # Use sandbox manager directly instead of API call
-        # For training scenarios, we'll execute appropriate commands in the container
+        # Run training scenario commands inside the selected docker-compose service container
         training_commands = {
             "File System Operations": "ls -la / && echo 'File system operations completed'",
             "Process Management": "ps aux | head -10 && echo 'Process management completed'",
@@ -3160,7 +3197,7 @@ class CoreAI3DDashboard(QMainWindow):
             "Text Processing": "echo 'Hello World' | grep Hello && echo 'Text processing completed'",
             "Permissions and Security": "id && echo 'Permissions check completed'",
             "System Monitoring": "uptime && echo 'System monitoring completed'",
-            "Scripting and Automation": "echo '#!/bin/bash\necho \"Automation script\"' > test.sh && chmod +x test.sh && ./test.sh && echo 'Scripting completed'",
+            "Scripting and Automation": "echo '#!/bin/bash\\necho \"Automation script\"' > test.sh && chmod +x test.sh && ./test.sh && echo 'Scripting completed'",
             "hacking-white": "echo 'White hat hacking simulation - authorized testing only' && echo 'Simulation completed'",
             "hacking-gray": "echo 'Gray hat hacking simulation - educational purposes only' && echo 'Simulation completed'",
             "hacking-black": "echo 'Black hat hacking simulation - illegal activities not permitted' && echo 'Simulation cancelled'"
@@ -3168,7 +3205,7 @@ class CoreAI3DDashboard(QMainWindow):
 
         command = training_commands.get(scenario, f"echo 'Unknown scenario: {scenario}'")
         success, output = await asyncio.get_event_loop().run_in_executor(
-            None, self.sandbox_manager.execute_command, command
+            None, self._run_compose_command, container, ['/bin/sh', '-c', command], 'exec'
         )
 
         # Create result object similar to API response
@@ -3217,14 +3254,43 @@ class CoreAI3DDashboard(QMainWindow):
 
     async def _generate_training_report_async(self, container: str):
         """Async part of training report generation"""
-        async with self.global_async_lock:
-            result = await self.client.generate_training_report(container)
-            return result
+        # Collect container status and last training output for a local report
+        success, output = await asyncio.get_event_loop().run_in_executor(
+            None, self._run_compose_command, container,
+            ['/bin/sh', '-c', "echo '=== Container Info ===' && uname -a && echo '' && echo '=== Uptime ===' && uptime && echo '' && echo '=== Disk Usage ===' && df -h / 2>/dev/null || true"],
+            'exec'
+        )
 
-    def _handle_training_report_result(self, task):
-        """Handle training report result"""
+        last_training = self.training_results.toPlainText().strip() or "No training scenario has been run yet."
+
+        report_lines = [
+            f"Training Report for {container}",
+            f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "=== Last Training Scenario Output ===",
+            last_training,
+            "",
+        ]
+
+        if success:
+            report_lines.append("=== Container Diagnostics ===")
+            report_lines.append(output)
+        else:
+            report_lines.append(f"=== Container Diagnostics ===")
+            report_lines.append(f"Could not collect container diagnostics: {output}")
+
+        report = "\n".join(report_lines)
+
+        class ReportResult:
+            def __init__(self, success, report):
+                self.success = success
+                self.data = {'report': report, 'container': container}
+
+        return ReportResult(True, report)
+
+    def _handle_training_report_result_direct(self, result):
+        """Handle training report result directly"""
         try:
-            result = task.result()
             if result.success:
                 self.training_results.setPlainText(result.data.get('report', 'Report generated'))
                 self.status_bar.showMessage("Training report generated")
@@ -3600,81 +3666,6 @@ def {self._extract_function_name(description)}('''
 
         return base_template
 
-    def browse_predict_input_file(self):
-        """Browse for prediction input file"""
-        import logging
-        logging.info("DEBUG: browse_predict_input_file method called")
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Input File",
-            "", "All Files (*.*)"
-        )
-        if file_path:
-            self.predict_file_path_edit.setText(file_path)
-
-    async def run_prediction(self):
-        """Run prediction on input file"""
-        import logging
-        logging.info("DEBUG: run_prediction method called")
-        file_path = self.predict_file_path_edit.text().strip()
-        
-        if not file_path:
-            QMessageBox.warning(self, "Input Required", "Please select an input file first")
-            return
-        
-    def clear_prediction_results(self):
-        """Clear prediction results"""
-        self.predict_results_text.clear()
-    async def load_model(self):
-        """Load model for prediction"""
-        import logging
-        logging.info("DEBUG: load_model method called")
-        model_path = self.model_path_edit.text().strip()
-        
-        if not model_path:
-            QMessageBox.warning(self, "Model Required", "Please select a model file first")
-            return
-        
-    def clear_load_results(self):
-        """Clear load model results"""
-        self.load_results_text.clear()
-        self.model_path_edit.clear()
-    def download_fasttext_embeddings(self):
-        """Download FastText embeddings"""
-        import logging
-        logging.info("DEBUG: download_fasttext_embeddings method called")
-    async def refresh_neural_data(self):
-        """Refresh neural data display"""
-        import logging
-        logging.info("DEBUG: refresh_neural_data method called")
-        try:
-            # Add neural data refresh logic here
-            QMessageBox.information(self, "Refresh Started", "Refreshing neural data...")
-        except Exception as e:
-            QMessageBox.critical(self, "Refresh Error", f"Error refreshing neural data: {str(e)}")
-        try:
-            # Add FastText downloading logic here
-            QMessageBox.information(self, "Download Started", "Downloading FastText embeddings...")
-        except Exception as e:
-            QMessageBox.critical(self, "Download Error", f"Error downloading FastText: {str(e)}")
-        try:
-            # Add model loading logic here
-            QMessageBox.information(self, "Model Loading", f"Loading model: {model_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Error loading model: {str(e)}")
-        self.predict_file_path_edit.clear()
-        try:
-            # Add prediction logic here
-            QMessageBox.information(self, "Prediction Started", f"Running prediction on: {file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Prediction Error", f"Error running prediction: {str(e)}")
-        logging.info("DEBUG: browse_predict_input_file method called")
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Input File",
-            "", "All Files (*.*)"
-        )
-        if file_path:
-            self.predict_file_path_edit.setText(file_path)
-
     def _handle_load_dataset_result_direct(self, result, data_file=None):
         """Handle dataset loading result directly"""
         try:
@@ -3803,113 +3794,6 @@ Generated as {complexity.lower()} level implementation
 
 class {class_name}:
     """{description}"""
-
-        try:
-            self.training_progress.setVisible(False)
-            if result.success:
-                data = result.data
-
-                # Compute input_size and output_size from dataset data instead of backend response
-                computed_sizes = {'inputsize': 'N/A', 'outputsize': 'N/A', 'samplesize': 'N/A'}
-
-                if data_file and os.path.exists(data_file):
-                    # Calculate sizes based on file analysis
-                    computed_sizes = self.calculate_dataset_sizes(data_file)
-
-                # Update the data dict with computed values
-                if computed_sizes['inputsize'] != 'N/A':
-                    data['input_size'] = computed_sizes['inputsize']
-                if computed_sizes['outputsize'] != 'N/A':
-                    data['output_size'] = computed_sizes['outputsize']
-                if computed_sizes['samplesize'] != 'N/A':
-                    data['samples'] = computed_sizes['samplesize']
-
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loaded successfully")
-                self.training_log.appendPlainText(f"  - Samples: {data.get('samples', 'N/A')}")
-                self.training_log.appendPlainText(f"  - Input size: {data.get('input_size', 'N/A')}")
-                self.training_log.appendPlainText(f"  - Output size: {data.get('output_size', 'N/A')}")
-                self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
-
-
-            else:
-                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
-                QMessageBox.warning(self, "Dataset Loading Failed", error_msg)
-        except Exception as e:
-            self.training_progress.setVisible(False)
-            self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
-            QMessageBox.warning(self, "Dataset Loading Error", str(e))
-
-        task_id = f"training_{id(asyncio.current_task())}"
-
-        # Use global async lock to prevent concurrent operations
-        async with self.global_async_lock:
-            try:
-                # Check if training already in progress (double-check with lock)
-                if self.training_in_progress:
-                    QMessageBox.warning(self, "Training in Progress",
-                                      "Training is already running. Please wait for it to complete or stop it first.")
-                    return
-
-                # Register task
-                with self.task_lock:
-                    if task_id in self.active_tasks:
-                        logger.warning(f"Training task {task_id} already active")
-                        return
-                    self.active_tasks.add(task_id)
-
-                # Track the current task for cancellation
-                self.current_async_task = asyncio.current_task()
-                async with self.task_cleanup_lock:
-                    self.pending_tasks.add(self.current_async_task)
-
-                self.training_in_progress = True
-
-                if not self.client:
-                    if not self.initialize_client():
-                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
-                        return
-
-                # Check if dataset is loaded first
-                if not hasattr(self, 'current_dataset_loaded') or not self.current_dataset_loaded:
-                    QMessageBox.warning(self, "No Dataset Loaded",
-                                      "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button")
-                    return
-
-                # Show progress with actual range
-                self.training_progress.setVisible(True)
-                self.training_progress.setRange(0, 100)
-                self.training_progress.setValue(0)
-
-                # Log training start
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Starting training with configuration:")
-                self.training_log.appendPlainText(json.dumps(self.learning_config, indent=2))
-
-                # Start training directly with qasync
-                result = await self._start_training_async()
-                self._handle_training_result_direct(result)
-
-            except asyncio.CancelledError:
-                logger.info("Training cancelled")
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training cancelled")
-                raise  # Re-raise to ensure proper cleanup
-            except Exception as e:
-                self.training_progress.setVisible(False)
-                self.training_progress.setValue(0)  # Reset progress on error
-                self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
-                QMessageBox.warning(self, "Training Error", str(e))
-            finally:
-                self.training_in_progress = False
-                self.training_progress.setVisible(False)
-
-                # Clean up task
-                with self.task_lock:
-                    self.active_tasks.discard(task_id)
-
-                # Remove from pending tasks
-                async with self.task_cleanup_lock:
-                    self.pending_tasks.discard(self.current_async_task)
-                    self.current_async_task = None
 
     def __init__('''
 
@@ -5376,15 +5260,6 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"Error updating system metrics: {str(e)}")
 
-    def calculate_health_score(self, cpu: float, memory: float, disk: float) -> int:
-        """Calculate overall system health score"""
-        # Simple health calculation (can be made more sophisticated)
-        cpu_score = max(0, 100 - cpu)
-        memory_score = max(0, 100 - memory)
-        disk_score = max(0, 100 - disk)
-
-        return int((cpu_score + memory_score + disk_score) / 3)
-
     def check_system_health(self):
         """Perform periodic system health check"""
         if not self.client:
@@ -6715,7 +6590,8 @@ if __name__ == "__main__":
 
         try:
             # Send message directly with qasync
-            asyncio.create_task(self._send_chat_message_async(message))
+            task = asyncio.create_task(self._send_chat_message_async(message))
+            task.add_done_callback(self._handle_chat_message_result)
 
         except Exception as e:
             logger.error(f"Exception in send_chat_message: {str(e)}")
@@ -6909,24 +6785,6 @@ if __name__ == "__main__":
             self.discover_models_async()
         except ValueError:
             logger.error("Invalid page size")
-
-    def search_models(self):
-        """Search models based on input criteria"""
-        try:
-            # Reset to first page when searching
-            self.current_page = 1
-            self.discover_models_async()
-        except Exception as e:
-            logger.error(f"Error searching models: {str(e)}")
-
-    def refresh_models(self):
-        """Refresh the model list"""
-        try:
-            self.current_page = 1
-            self.discover_models_async()
-        except Exception as e:
-            logger.error(f"Error refreshing models: {str(e)}")
-            QMessageBox.warning(self, "Refresh Error", f"Failed to refresh models: {str(e)}")
 
     def load_sample_models(self):
         """Load sample models as fallback when API discovery fails"""
@@ -7807,6 +7665,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 # Mark dataset as loaded if successful
                 if result.success:
                     self.current_dataset_loaded = True
+                    self.current_dataset_name = dataset_name
 
             except asyncio.CancelledError:
                 logger.info("Dataset loading cancelled")
@@ -7827,6 +7686,17 @@ capabilities, training data, performance metrics, and usage instructions."""
                     self.pending_tasks.discard(self.current_async_task)
                     self.current_async_task = None
 
+    def _convert_to_container_path(self, host_path: str) -> str:
+        """Convert host file path to container-internal path expected by backend"""
+        if not host_path:
+            return host_path
+        # Backend container mounts host /app/training_data as /training_data
+        if host_path.startswith('/app/training_data/'):
+            return host_path.replace('/app/training_data/', '/training_data/', 1)
+        if host_path.startswith('/app/'):
+            return host_path[4:]
+        return host_path
+
     async def _load_dataset_async(self, data_file: str, dataset_name: str):
         """Async part of dataset loading"""
         # Validate parameters before calling API
@@ -7845,11 +7715,14 @@ capabilities, training data, performance metrics, and usage instructions."""
         # Determine file format for appropriate API call
         file_ext = os.path.splitext(data_file.lower())[1]
 
+        # Convert host path to container-internal path expected by backend
+        container_path = self._convert_to_container_path(data_file)
+
         # Call appropriate API endpoint based on file format
         if file_ext == '.csv':
             # Use existing CSV loading logic
             return await self.client.load_dataset(
-                filename=data_file,
+                filename=container_path,
                 output_size=output_size,
                 has_header=has_header,
                 contains_text=contains_text,
@@ -7860,7 +7733,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         elif file_ext in ['.json', '.xml', '.txt']:
             # For text-based formats, use generic data loading
             return await self.client.load_dataset(
-                filename=data_file,
+                filename=container_path,
                 output_size=output_size,
                 has_header=has_header,
                 contains_text=contains_text,
@@ -7871,7 +7744,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         elif file_ext in ['.pdf', '.docx', '.doc']:
             # For document formats, use document processing
             return await self.client.load_dataset(
-                filename=data_file,
+                filename=container_path,
                 output_size=output_size,
                 has_header=False,  # Documents typically don't have headers
                 contains_text=True,  # Documents contain text
@@ -7882,7 +7755,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
             # For image formats, use vision processing
             return await self.client.load_dataset(
-                filename=data_file,
+                filename=container_path,
                 output_size=output_size,
                 has_header=False,
                 contains_text=False,
@@ -7893,7 +7766,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac']:
             # For media formats, use audio/video processing
             return await self.client.load_dataset(
-                filename=data_file,
+                filename=container_path,
                 output_size=output_size,
                 has_header=False,
                 contains_text=False,
@@ -7904,7 +7777,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         else:
             # Fallback for unknown formats
             return await self.client.load_dataset(
-                filename=data_file,
+                filename=container_path,
                 output_size=output_size,
                 has_header=has_header,
                 contains_text=contains_text,
@@ -8335,9 +8208,20 @@ capabilities, training data, performance metrics, and usage instructions."""
 
     async def _start_training_async(self):
         """Async part of training start"""
-        # Note: We don't use the global lock here since we're already inside it
-        # Call training with consolidated configuration
-        result = await self.client.start_training(self.learning_config)
+        # Ensure required training configuration keys are present with sensible defaults
+        training_config = dict(self.learning_config)
+        training_config.setdefault('dataset_name', getattr(self, 'current_dataset_name', 'default_dataset'))
+        training_config.setdefault('learning_rate', self.learning_rate)
+        training_config.setdefault('epochs', self.epochs)
+        training_config.setdefault('layers', training_config.get('hidden_layers', self.layers))
+        training_config.setdefault('neurons', training_config.get('neurons_per_layer', self.neurons))
+        training_config.setdefault('batch_size', 32)
+        training_config.setdefault('optimizer', 'adam')
+        training_config.setdefault('activation', 'relu')
+        training_config.setdefault('min_range', self.norm_min)
+        training_config.setdefault('max_range', self.norm_max)
+
+        result = await self.client.start_training(training_config)
         return result
 
     def _handle_training_result(self, task):
@@ -8576,12 +8460,17 @@ capabilities, training data, performance metrics, and usage instructions."""
                 if result.success:
                     self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Upload successful, loading dataset...")
 
+                    # Use the server-returned file path if available, otherwise fall back to local path
+                    uploaded_path = result.data.get('file_path', file_path) if result.data else file_path
+                    container_path = self._convert_to_container_path(uploaded_path)
+
                     # Load the uploaded dataset
-                    load_result = await self._load_dataset_async(file_path, dataset_name)
+                    load_result = await self._load_dataset_async(container_path, dataset_name)
                     self._handle_load_dataset_result_direct(load_result, file_path)
 
                     if load_result.success:
                         self.current_dataset_loaded = True
+                        self.current_dataset_name = dataset_name
                         self.training_button.setEnabled(True)
 
             except asyncio.CancelledError:
@@ -9611,63 +9500,6 @@ capabilities, training data, performance metrics, and usage instructions."""
 
         self.activity_canvas.draw()
 
-    # Training parameter change handlers
-    def on_norm_max_changed(self, value):
-        """Handle normalization max value change"""
-        self.norm_max = value
-        self.learning_config['normalization_max'] = value
-
-    def on_neurons_changed(self, value):
-        """Handle neurons value change"""
-        self.neurons = value
-        self.learning_config['neurons_per_layer'] = value
-
-    def on_samples_changed(self, value):
-        """Handle samples value change"""
-        self.samples = value
-        self.learning_config['training_samples'] = value
-
-    def on_epochs_changed(self, value):
-        """Handle epochs value change"""
-        self.epochs = value
-        self.learning_config['epochs'] = value
-
-    def on_layers_changed(self, value):
-        """Handle layers value change"""
-        self.layers = value
-        self.learning_config['hidden_layers'] = value
-
-    def on_learning_rate_changed(self, value):
-        """Handle learning rate value change"""
-        self.learning_rate = value
-        self.learning_config['learning_rate'] = value
-
-    def cancel_all_tasks(self):
-        """Cancel all pending async tasks"""
-        try:
-            async def cancel_tasks():
-                async with self.task_cleanup_lock:
-                    tasks_to_cancel = list(self.pending_tasks)
-                    self.pending_tasks.clear()
-
-                    for task in tasks_to_cancel:
-                        if task and not task.done():
-                            task.cancel()
-                            try:
-                                await task
-                            except asyncio.CancelledError:
-                                pass
-
-            # Schedule task cancellation in the event loop
-            if asyncio.get_event_loop().is_running():
-                asyncio.create_task(cancel_tasks())
-            else:
-                # If event loop is not running, we can't cancel async tasks
-                logger.warning("Event loop not running, cannot cancel async tasks")
-
-        except Exception as e:
-            logger.error(f"Error cancelling tasks: {str(e)}")
-
     def _setup_websocket_connection(self):
         """Setup WebSocket connection to CoreAI3D server"""
         try:
@@ -9772,6 +9604,12 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 logger.debug(f"Prediction progress: {percentage}% - {status_text}")
 
+            elif message_type == 'chat_response':
+                content = data.get('content', '')
+                if content:
+                    self.chat_history.append(f"AI: {content}")
+                logger.debug(f"Chat response received: {content[:100] if content else ''}")
+
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse WebSocket message: {str(e)}")
         except Exception as e:
@@ -9788,67 +9626,6 @@ capabilities, training data, performance metrics, and usage instructions."""
         logger.info(f"WebSocket connection closed: {close_status_code} - {close_msg}")
         if hasattr(self, 'status_bar'):
             self.status_bar.showMessage("WebSocket connection closed")
-
-    def _on_websocket_open(self, ws):
-        """Handle WebSocket connection open"""
-        logger.info("WebSocket connection established successfully")
-        if hasattr(self, 'status_bar'):
-            self.status_bar.showMessage("WebSocket connected to CoreAI3D")
-
-    def closeEvent(self, event):
-        """Handle application close event with proper async cleanup"""
-        try:
-            logger.info("Starting application shutdown sequence")
-
-            # Cancel all active tasks first
-            self.cancel_all_tasks()
-
-            # Stop health check timer to prevent new tasks during shutdown
-            if hasattr(self, 'health_timer') and self.health_timer.isActive():
-                self.health_timer.stop()
-                logger.debug("Health check timer stopped during shutdown")
-
-            # Stop training if running (using global async lock)
-            async def stop_training_on_shutdown():
-                async with self.global_async_lock:
-                    if self.training_in_progress:
-                        logger.info("Stopping training during shutdown")
-                        self.training_in_progress = False
-
-            # Schedule training stop in event loop
-            if asyncio.get_event_loop().is_running():
-                asyncio.create_task(stop_training_on_shutdown())
-
-            # Stop sandbox if running
-            if hasattr(self, 'sandbox_manager') and self.sandbox_manager.is_running:
-                logger.info("Stopping sandbox manager")
-                self.sandbox_manager.stop_sandbox()
-
-            # Close client connection using the existing qasync event loop
-            if hasattr(self, 'client_initialized') and self.client_initialized and self.client:
-                logger.info("Closing client connection")
-                try:
-                    # Use the existing qasync event loop instead of creating a new one
-                    if hasattr(self.client, 'close'):
-                        # Schedule the close operation in the current event loop
-                        async def close_client():
-                            await self.client.close()
-
-                        # Use qasync-compatible approach for closing client
-                        # Schedule the close operation using asyncio.create_task() for qasync compatibility
-                        asyncio.create_task(close_client())
-                except Exception as e:
-                    logger.error(f"Error closing client: {str(e)}")
-
-            # Save configuration
-            self._save_config()
-
-            logger.info("CoreAI3D Dashboard closed successfully")
-            event.accept()
-
-        except Exception as e:
-            logger.error(f"Error during shutdown: {str(e)}")
-            event.accept()
 
 def main():
     """Main application entry point"""

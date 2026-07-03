@@ -166,7 +166,7 @@ yarn-error.log*
 
 # Training data (massive PDF collections)
 linux_gui/training_data/
-training_data/
+training_data
 
 # Model files (large binary models)
 /models/
