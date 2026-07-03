@@ -19,17 +19,13 @@ services:
         - mysql_data:/var/lib/mysql
     restart: unless-stopped
     networks:
-      skynet:
-        # Stable, predictable address so coreai3d can also reach the DB at
-        # 172.29.0.5 if DNS resolution ever flakes. The "mysql" hostname still
-        # works as the primary, Docker-DNS-resolved address.
-        ipv4_address: 172.29.0.5
+      - skynet
     # Wait until MySQL is actually accepting connections before dependents start.
     # start_period covers the first-run data directory initialization.
     healthcheck:
       # Use the same MYSQL_ROOT_PASSWORD value set above so rotating the password
       # can't silently break the healthcheck (which would block dependents forever).
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 5s
       timeout: 5s
       retries: 10
