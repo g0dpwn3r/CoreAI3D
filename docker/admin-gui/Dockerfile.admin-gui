@@ -1,6 +1,7 @@
 FROM lscr.io/linuxserver/webtop:ubuntu-xfce
 
-# Install Python 3.10 from deadsnakes PPA
+# Install Python 3.10 from deadsnakes PPA alongside system Python
+# DO NOT change the default python3 - this breaks Selkies streaming
 RUN apt-get update && \
     apt-get install -y software-properties-common && \
     add-apt-repository -y ppa:deadsnakes/ppa && \
@@ -8,11 +9,20 @@ RUN apt-get update && \
     apt-get install -y \
         python3.10 \
         python3.10-venv \
-        python3.10-dev && \
+        python3.10-dev \
+        python3.10-distutils \
+        curl && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    # Install pip for Python 3.10 specifically (don't override system pip)
+    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 && \
+    # Create symlinks for Python 3.10 (but don't override python3)
+    ln -sf /usr/bin/python3.10 /usr/local/bin/python3.10 && \
+    ln -sf /usr/local/lib/python3.10/dist-packages/pip /usr/local/bin/pip3.10 || true
 
-# Set up Python 3.10 as an alternative
-# Registreer Python 3.10 en stel deze direct in als de standaard python3
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 100 \
-    && update-alternatives --set python3 /usr/bin/python3.10
+# Python 3.10 is now available as:
+# - python3.10
+# - pip3.10
+# 
+# DO NOT run: update-alternatives --set python3 /usr/bin/python3.10
+# This would break Selkies streaming in the webtop base image

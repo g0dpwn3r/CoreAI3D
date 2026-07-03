@@ -63,8 +63,36 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Verify Node.js installation
 RUN node --version && npm --version
 
+# Install Python packages for AI operations
+RUN python3 -m pip install --upgrade pip && \
+    pip3 install \
+        requests aiohttp websockets \
+        psutil docker \
+        opencv-python-headless \
+        numpy pandas scipy \
+        scikit-learn \
+        pillow \
+        pytesseract \
+        SpeechRecognition \
+        pyttsx3 \
+        beautifulsoup4 \
+        selenium \
+        playwright
+
+# Install Node.js packages for web automation
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_SKIP_DOWNLOAD=true
+RUN npm install -g --unsafe-perm \
+        cheerio \
+        axios \
+        ws
+
+# Create sandbox user
+RUN useradd -m -s /bin/bash sandbox
+
 # Create workspace directory
-WORKDIR /workspace
+RUN mkdir -p /workspace /training_data && \
+    chown -R sandbox:sandbox /workspace /training_data
 
 # Switch to sandbox user
 USER sandbox
@@ -75,6 +103,9 @@ ENV PATH="/home/sandbox/.local/bin:${PATH}"
 ENV SANDBOX_TYPE=windows
 ENV WINEPREFIX="/home/sandbox/.wine"
 ENV DISPLAY=:99
+
+# Set working directory
+WORKDIR /workspace
 
 # Default command - start a bash shell in the sandbox
 CMD ["/bin/bash", "-c", "echo 'CoreAI3D Windows Compatibility Sandbox Ready (Wine-based)'; exec /bin/bash"]
