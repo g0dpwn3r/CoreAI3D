@@ -13,6 +13,6 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Set up Python 3.10 as an alternative
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 2 && \
-    update-alternatives --config python3
+# Registreer Python 3.10 en stel deze direct in als de standaard python3
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 100 \
+    && update-alternatives --set python3 /usr/bin/python3.10
