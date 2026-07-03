@@ -48,8 +48,7 @@ RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
     dnf install -y nodejs && \
     dnf clean all
 # Create sandbox user
-RUN yum install -y passwd && \
-    useradd -m -s /bin/bash sandbox && \
+RUN useradd -m -s /bin/bash sandbox && \
     echo "sandbox:sandbox" | passwd --stdin sandbox && \
     usermod -aG wheel sandbox
 
