@@ -51,56 +51,19 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    nodejs \
-    npm \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Initialize Wine prefix (creates the .wine directory structure)
-RUN wineboot --init
+# Install Node.js 20.x from NodeSource (modern version required for puppeteer)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install winetricks for additional Windows components
-RUN wget -O /usr/local/bin/winetricks https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks \
-    && chmod +x /usr/local/bin/winetricks
+# Verify Node.js installation
+RUN node --version && npm --version
 
-# Create sandbox user
-RUN useradd -m -s /bin/bash sandbox && \
-    echo "sandbox:sandbox" | chpasswd && \
-    usermod -aG sudo sandbox
-
-# Create workspace directories (mimicking Windows paths)
-RUN mkdir -p /workspace /training_data /windows_workspace/c \
-    && chown -R sandbox:sandbox /workspace /training_data /windows_workspace
-
-# Install Python packages for AI operations (Linux native Python)
-RUN pip3 install --upgrade pip && \
-    pip3 install \
-    requests aiohttp websockets \
-    psutil docker \
-    opencv-python-headless \
-    numpy pandas scipy \
-    scikit-learn \
-    pillow \
-    pytesseract \
-    SpeechRecognition \
-    pyttsx3 \
-    beautifulsoup4 \
-    selenium
-
-# Install Node.js packages for web automation
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_SKIP_DOWNLOAD=true
-RUN npm install -g --unsafe-perm \
-    puppeteer \
-    cheerio \
-    axios \
-    ws
-
-# Copy training scripts
-COPY docker/training/train_windows_operations.py /usr/local/bin/
-RUN chmod +x /usr/local/bin/train_windows_operations.py
-
-# Set working directory
+# Create workspace directory
 WORKDIR /workspace
 
 # Switch to sandbox user
