@@ -93,8 +93,15 @@ bool APIServer::initialize(const std::string& configPath,
         this->dbSSLMode = dbSSLMode;
         this->createTables = createTables;
 
-        // Set working directory to project root
-        std::filesystem::path projectRoot = "/home/carlon/code/CoreAI3D";
+        // Set working directory
+        // Prefer COREAI3D_WORK_DIR env var (set by Docker); fall back to current working directory.
+        std::filesystem::path projectRoot;
+        const char* envWorkDir = std::getenv("COREAI3D_WORK_DIR");
+        if (envWorkDir && envWorkDir[0] != '\0') {
+            projectRoot = envWorkDir;
+        } else {
+            projectRoot = std::filesystem::current_path();
+        }
         try {
             if (!std::filesystem::exists(projectRoot)) {
                 std::cerr << "Working directory " << projectRoot << " does not exist; creating it..." << std::endl;

@@ -38,10 +38,10 @@ int main(int argc, char* argv[]) {
     std::string loadModelId = "";
     std::string outputCsvFile;
     std::string apiPort = "8080";
-    std::string dbHost = "0.0.0.0";
+    std::string dbHost = "localhost";
     std::string dbUser = "root";
     std::string dbPassword = "password";
-    std::string dbPort = "3306";
+    std::string dbPort = "33060";
     std::string dbSchema = "coreai_db";
     bool hasHeader = false;
     bool containsText = false;
@@ -487,9 +487,9 @@ int main(int argc, char* argv[]) {
     try { apiPort_val = std::stoi(apiPort); }
     catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for api-port. Defaulting to 8080.\n"; apiPort_val = 8080; }
 
-    int dbPort_val = 3306;
+    int dbPort_val = 33060;
     try { dbPort_val = std::stoi(dbPort); }
-    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for db-port. Defaulting to 3306.\n"; dbPort_val = 3306; }
+    catch (const std::exception& e) { std::cerr << "ERROR: Invalid value for db-port. Defaulting to 33060.\n"; dbPort_val = 33060; }
 
     int windowSize_val = 1;
     try { windowSize_val = std::stoi(windowSize); }
@@ -703,8 +703,16 @@ int main(int argc, char* argv[]) {
             APIServer apiServer("CoreAI3D_API", "0.0.0.0", apiPort_val);
             if (verbose) {
                 std::cout << "DIAGNOSTIC: Calling APIServer initialize() with config.json...\n";
+                std::cout << "DIAGNOSTIC: DB host='" << dbHost << "', port=" << dbPort_val
+                          << ", user='" << dbUser << "', schema='" << dbSchema << "'\n";
             }
-            if (!apiServer.initialize("config.json")) {
+#ifdef USE_MYSQL
+            if (!apiServer.initialize("config.json", dbHost, (unsigned int)dbPort_val,
+                                       dbUser, dbPassword, dbSchema, ssl, createTables)) {
+#else
+            if (!apiServer.initialize("config.json", dbHost, (unsigned int)dbPort_val,
+                                       dbUser, dbPassword, dbSchema)) {
+#endif
                 std::cerr << "Failed to initialize API server\n";
                 return 1;
             }

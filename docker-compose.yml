@@ -11,9 +11,11 @@ services:
       - "--mysqlx=ON"
       - "--mysqlx-bind-address=0.0.0.0"
       - "--mysqlx-port=33060"
-    ports:
-      - "33060:33060" # X Plugin
-      - "33061:3306"   # classic protocol
+    # No host port bindings — all containers reach MySQL via Docker DNS ("mysql")
+    # on the internal skynet network. Remove this block if you need host access.
+    expose:
+      - "33060"  # X Plugin (mysqlx)
+      - "3306"   # classic MySQL protocol
     volumes:
         - mysql_data:/var/lib/mysql
     restart: unless-stopped
