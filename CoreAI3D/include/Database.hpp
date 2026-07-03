@@ -133,6 +133,7 @@ public:
     std::vector<std::pair<std::string, std::string>> getAPIKeys();
 
     // Chat history management methods
+    void ensureChatSessionExists(int sessionId, const std::string& sessionName = "");
     void saveChatMessage(int sessionId, const std::string& speaker, const std::string& message);
     void saveChatMessage(int sessionId, const std::string& role,
                           const std::string& content, const std::string& messageType,

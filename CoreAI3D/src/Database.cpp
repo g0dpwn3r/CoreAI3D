@@ -1186,7 +1186,38 @@ std::vector<std::pair<std::string, std::string>> Database::getAPIKeys() {
 };
 
 // Chat history management methods
+void Database::ensureChatSessionExists(int sessionId, const std::string& sessionName) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        // Check if session exists
+        auto result = session->sql("SELECT COUNT(*) FROM " + dbSchema + ".chat_sessions WHERE id = ?")
+                        .bind(sessionId)
+                        .execute();
+        auto row = result.fetchOne();
+        
+        if (row[0].get<int>() == 0) {
+            // Create the session if it doesn't exist
+            std::string name = sessionName.empty() ? "session_" + std::to_string(sessionId) : sessionName;
+            session->sql("INSERT INTO " + dbSchema + ".chat_sessions (id, session_name, user_id, model_version, status) "
+                        "VALUES (?, ?, 'anonymous', 'v1', 'active')")
+                    .bind(sessionId)
+                    .bind(name)
+                    .execute();
+            std::cout << "Created chat session " << sessionId << " (" << name << ")" << std::endl;
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error ensuring chat session exists: " << ex.what() << std::endl;
+        throw;
+    }
+#else
+    // Stub implementation
+    std::cout << "Database stub: ensureChatSessionExists(" << sessionId << ")" << std::endl;
+#endif
+};
+
 void Database::saveChatMessage(int sessionId, const std::string& speaker, const std::string& message) {
+    ensureChatSessionExists(sessionId);
     ensureConnection();
 #ifdef USE_MYSQL
     try {
@@ -1214,6 +1245,7 @@ void Database::saveChatMessage(int sessionId, const std::string& speaker, const 
 // Enhanced chat message method with additional metadata
 void Database::saveChatMessage(int sessionId, const std::string& role, const std::string& content,
                               const std::string& messageType, float confidence, const std::string& metadata) {
+    ensureChatSessionExists(sessionId);
     ensureConnection();
 #ifdef USE_MYSQL
     try {

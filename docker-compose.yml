@@ -313,10 +313,11 @@ services:
     volumes:
       - .:/app
       - webtop_desktop_config:/config 
+      - ./docker/admin-gui/custom-cont-init.d:/config/custom-cont-init.d:ro  # Install Python 3.10
     ports:
       - "3001:3001"
     restart: unless-stopped
-    networks:          # <--- ADD THIS LINE
+    networks:
       - skynet
 volumes:
     mysql_data:
