@@ -4868,10 +4868,12 @@ if __name__ == "__main__":
     async def _initialize_client_async(self):
         """Async client initialization"""
         try:
-            # Double-check guard
             if hasattr(self, 'client_initialized') and self.client_initialized:
                 logger.info("Client already initialized (async check), skipping")
                 self._client_initializing = False
+                return
+            if hasattr(self, '_client_initializing') and not self._client_initializing:
+                logger.info("Client initialization not flagged as in-progress (async check), skipping")
                 return
             logger.info("Starting client initialization...")
             logger.info(f"API URL: {self.config.api_url}")
@@ -9871,8 +9873,7 @@ def main():
             def init_client():
                 try:
                     logger.info("Running async client initialization...")
-                    # Schedule the coroutine in the existing event loop
-                    asyncio.create_task(dashboard._initialize_client_async())
+                    dashboard.initialize_client()
                     logger.info("Client initialization scheduled successfully")
                 except Exception as e:
                     logger.error(f"Client initialization scheduling failed: {str(e)}")

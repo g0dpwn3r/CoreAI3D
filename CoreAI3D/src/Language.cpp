@@ -124,11 +124,18 @@ std::string Language::answer(std::vector<float>& textEmbedding) {
         std::cerr << "Error: CoreAI is not initialized in Language::answer. Cannot perform forward pass." << std::endl;
         return "Core: I don't have enough offline data to respond to that.";
     }
-    std::vector<std::vector<float>> model_input_reshaped = reshape(data, embeddingDim);
-    std::vector<std::vector<float>> model_prediction = core->forward(model_input_reshaped);
-    if (model_prediction.empty() || model_prediction[0].empty()) {
-        return "Core: I don't have enough offline data to respond to that.";
-    }
+    try {
+        std::vector<std::vector<float>> model_input_reshaped = reshape(data, embeddingDim);
+        if (model_input_reshaped.empty() || model_input_reshaped[0].size() != (size_t)inputSize) {
+            std::cerr << "Warning: Embedding dimension mismatch - reshaped rows have "
+                      << (model_input_reshaped.empty() ? 0 : model_input_reshaped[0].size())
+                      << " features but CoreAI expects " << inputSize << std::endl;
+            return "Core: I don't have enough offline data to respond to that.";
+        }
+        std::vector<std::vector<float>> model_prediction = core->forward(model_input_reshaped);
+        if (model_prediction.empty() || model_prediction[0].empty()) {
+            return "Core: I don't have enough offline data to respond to that.";
+        }
     std::vector<float>& output = model_prediction[0];
 
     float maxVal = *std::max_element(output.begin(), output.end());
@@ -185,6 +192,10 @@ std::string Language::answer(std::vector<float>& textEmbedding) {
     }
     else {
         return "Core: I don't have enough offline data to respond to that.";
+    }
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Neural network forward pass failed: " << e.what() << std::endl;
+        return "Core: I received your message but encountered an issue processing it. Let me try a different approach.";
     }
 }
 int Language::chat() {
@@ -773,10 +784,23 @@ std::string Language::respond(const std::string& message) {
     std::string lowerMsg = message;
     std::transform(lowerMsg.begin(), lowerMsg.end(), lowerMsg.begin(), ::tolower);
     std::string response;
-    if (lowerMsg == "hi" || lowerMsg.find("hello") != std::string::npos ||
-        lowerMsg.find("hi ") != std::string::npos || lowerMsg.find("hey") != std::string::npos ||
-        lowerMsg.find("greetings") != std::string::npos || lowerMsg.find("good morning") != std::string::npos ||
-        lowerMsg.find("good evening") != std::string::npos || lowerMsg.find("good afternoon") != std::string::npos) {
+    bool isLikelyGreeting = false;
+    if (lowerMsg == "hi" || lowerMsg == "hello" || lowerMsg == "hey") {
+        isLikelyGreeting = true;
+    } else if (lowerMsg.length() < 50) {
+        if (lowerMsg.find("hello") == 0 || lowerMsg.find("hi ") == 0 ||
+            lowerMsg.find("hey") == 0 || lowerMsg.find("greetings") == 0 ||
+            lowerMsg.find("good morning") == 0 || lowerMsg.find("good evening") == 0 ||
+            lowerMsg.find("good afternoon") == 0) {
+            bool hasTechTerms = lowerMsg.find("how") != std::string::npos ||
+                               lowerMsg.find("what") != std::string::npos ||
+                               lowerMsg.find("code") != std::string::npos ||
+                               lowerMsg.find("program") != std::string::npos ||
+                               lowerMsg.find("write") != std::string::npos;
+            isLikelyGreeting = !hasTechTerms;
+        }
+    }
+    if (isLikelyGreeting) {
         response = "Hello! I'm CoreAI3D, your AI assistant. I can help you with cybersecurity, programming, mathematics, science, and much more. What would you like to know?";
         learnFromExchange(message, response);
         return response;
@@ -812,6 +836,162 @@ std::string Language::respond(const std::string& message) {
                    "- Science and general knowledge\n"
                    "- Creative writing and brainstorming\n"
                    "Just ask me anything and I'll do my best to help!";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("c++") != std::string::npos && lowerMsg.find("hello") != std::string::npos) {
+        response = "Here's a C++ Hello World program:\n\n"
+                   "#include <iostream>\n"
+                   "\n"
+                   "int main() {\n"
+                   "    std::cout << \"Hello, World!\" << std::endl;\n"
+                   "    return 0;\n"
+                   "}\n\n"
+                   "To compile: g++ hello.cpp -o hello\n"
+                   "To run: ./hello\n\n"
+                   "Would you like me to explain the code or show you more examples?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("c++") != std::string::npos && (lowerMsg.find("example") != std::string::npos || lowerMsg.find("code") != std::string::npos)) {
+        response = "Here's a C++ example demonstrating key concepts:\n\n"
+                   "#include <iostream>\n"
+                   "#include <vector>\n"
+                   "#include <string>\n"
+                   "\n"
+                   "int add(int a, int b);\n"
+                   "\n"
+                   "class MyClass {\n"
+                   "private:\n"
+                   "    std::string name;\n"
+                   "public:\n"
+                   "    MyClass(std::string n) : name(n) {}\n"
+                   "    void greet() const {\n"
+                   "        std::cout << \"Hello, \" << name << \"!\" << std::endl;\n"
+                   "    }\n"
+                   "};\n"
+                   "\n"
+                   "int main() {\n"
+                   "    MyClass obj(\"World\");\n"
+                   "    obj.greet();\n"
+                   "    \n"
+                   "    std::vector<int> numbers = {1, 2, 3, 4, 5};\n"
+                   "    for (int n : numbers) {\n"
+                   "        std::cout << n << \" \";\n"
+                   "    }\n"
+                   "    std::cout << std::endl;\n"
+                   "    \n"
+                   "    std::cout << \"Sum: \" << add(10, 20) << std::endl;\n"
+                   "    return 0;\n"
+                   "}\n"
+                   "\n"
+                   "int add(int a, int b) {\n"
+                   "    return a + b;\n"
+                   "}\n\n"
+                   "This demonstrates: RAII, STL containers, function prototypes, const correctness, and range-based for loops.";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("c++") != std::string::npos && lowerMsg.find("prototype") != std::string::npos) {
+        response = "C++ Function Prototypes:\n\n"
+                   "A function prototype declares a function before its definition:\n\n"
+                   "int add(int a, int b);\n"
+                   "void displayMessage(const std::string& msg);\n\n"
+                   "int add(int a, int b) {\n"
+                   "    return a + b;\n"
+                   "}\n"
+                   "void displayMessage(const std::string& msg) {\n"
+                   "    std::cout << msg << std::endl;\n"
+                   "}\n\n"
+                   "Prototypes allow:\n"
+                   "1. Forward declaration before main()\n"
+                   "2. Separating interface from implementation\n"
+                   "3. Function overloading\n"
+                   "4. Better code organization\n\n"
+                   "Would you like to see more examples or learn about function overloading?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("python") != std::string::npos && lowerMsg.find("hello") != std::string::npos) {
+        response = "Here's a Python Hello World program:\n\n"
+                   "print(\"Hello, World!\")\n\n"
+                   "A more complete example:\n\n"
+                   "def greet(name: str) -> str:\n"
+                   "    return f\"Hello, {name}!\"\n\n"
+                   "if __name__ == \"__main__\":\n"
+                   "    message = greet(\"World\")\n"
+                   "    print(message)\n\n"
+                   "To run: python hello.py\n\n"
+                   "Would you like me to explain the code or show you more examples?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("python") != std::string::npos && (lowerMsg.find("example") != std::string::npos || lowerMsg.find("code") != std::string::npos)) {
+        response = "Here's a Python example demonstrating key concepts:\n\n"
+                   "from dataclasses import dataclass\n"
+                   "from typing import List\n\n"
+                   "@dataclass\n"
+                   "class Student:\n"
+                   "    name: str\n"
+                   "    grades: List[float]\n\n"
+                   "    @property\n"
+                   "    def average(self) -> float:\n"
+                   "        return sum(self.grades) / len(self.grades) if self.grades else 0.0\n\n"
+                   "    def add_grade(self, grade: float) -> None:\n"
+                   "        self.grades.append(grade)\n\n"
+                   "def main():\n"
+                   "    students = [\n"
+                   "        Student(\"Alice\", [90.0, 85.0, 92.0]),\n"
+                   "        Student(\"Bob\", [78.0, 88.0, 95.0]),\n"
+                   "    ]\n"
+                   "    for s in students:\n"
+                   "        print(f\"{s.name}: average = {s.average:.1f}\")\n\n"
+                   "if __name__ == \"__main__\":\n"
+                   "    main()\n\n"
+                   "This demonstrates: dataclasses, type hints, properties, and f-strings.";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("sql") != std::string::npos && (lowerMsg.find("example") != std::string::npos || lowerMsg.find("query") != std::string::npos)) {
+        response = "Here are SQL query examples:\n\n"
+                   "-- Create a table\n"
+                   "CREATE TABLE users (\n"
+                   "    id SERIAL PRIMARY KEY,\n"
+                   "    name VARCHAR(100) NOT NULL,\n"
+                   "    email VARCHAR(255) UNIQUE NOT NULL,\n"
+                   "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n"
+                   ");\n\n"
+                   "-- Insert data\n"
+                   "INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com');\n\n"
+                   "-- Query with JOIN\n"
+                   "SELECT u.name, COUNT(o.id) AS order_count\n"
+                   "FROM users u\n"
+                   "LEFT JOIN orders o ON u.id = o.user_id\n"
+                   "GROUP BY u.name\n"
+                   "HAVING COUNT(o.id) > 5\n"
+                   "ORDER BY order_count DESC;\n\n"
+                   "Would you like more SQL examples for a specific database?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if ((lowerMsg.find("encrypt") != std::string::npos || lowerMsg.find("decrypt") != std::string::npos) &&
+        (lowerMsg.find("example") != std::string::npos || lowerMsg.find("code") != std::string::npos)) {
+        response = "Here's a Python encryption example using the cryptography library:\n\n"
+                   "from cryptography.fernet import Fernet\n\n"
+                   "def generate_key():\n"
+                   "    return Fernet.generate_key()\n\n"
+                   "def encrypt_message(message: str, key: bytes) -> bytes:\n"
+                   "    f = Fernet(key)\n"
+                   "    return f.encrypt(message.encode())\n\n"
+                   "def decrypt_message(encrypted: bytes, key: bytes) -> str:\n"
+                   "    f = Fernet(key)\n"
+                   "    return f.decrypt(encrypted).decode()\n\n"
+                   "key = generate_key()\n"
+                   "encrypted = encrypt_message(\"Secret message\", key)\n"
+                   "decrypted = decrypt_message(encrypted, key)\n"
+                   "print(f\"Decrypted: {decrypted}\")\n\n"
+                   "Install with: pip install cryptography\n"
+                   "IMPORTANT: Never hardcode keys. Use environment variables or a secrets manager.";
         learnFromExchange(message, response);
         return response;
     }
@@ -1065,7 +1245,12 @@ std::string Language::respond(const std::string& message) {
     std::vector<float> textEmbedding = encodeText(message);
     std::string classification = "";
     if (!textEmbedding.empty() && core) {
-        classification = answer(textEmbedding);
+        try {
+            classification = answer(textEmbedding);
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Classification failed: " << e.what() << std::endl;
+            classification = "";
+        }
     }
     if (lowerMsg.find("how") != std::string::npos && lowerMsg.find("to") != std::string::npos) {
         std::string topic = "the topic you mentioned";
