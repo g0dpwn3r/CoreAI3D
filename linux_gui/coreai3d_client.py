@@ -346,7 +346,7 @@ class CoreAI3DClient:
         message_type = data.get('type', 'unknown')
         logger.info(f"Received WebSocket message: type={message_type}, data={data}")
 
-        # Call registered handlers
+        # Call registered handlers (single invocation for each message type)
         if message_type in self.message_handlers:
             for handler in self.message_handlers[message_type]:
                 try:
@@ -354,17 +354,8 @@ class CoreAI3DClient:
                 except Exception as e:
                     logger.error(f"Error in message handler for {message_type}: {e}")
 
-        # Built-in message handling
-        if message_type == 'chat_response':
-            logger.info(f"Chat response received: {data.get('content', '')}")
-            # Emit chat response to any registered handlers
-            if 'chat_response' in self.message_handlers:
-                for handler in self.message_handlers['chat_response']:
-                    try:
-                        handler(data)
-                    except Exception as e:
-                        logger.error(f"Error in chat response handler: {e}")
-        elif message_type == 'stream_data':
+        # Built-in message handling for logging
+        if message_type == 'stream_data':
             logger.debug(f"Stream data: {data.get('stream_type', '')}")
         elif message_type == 'error':
             logger.error(f"API Error: {data.get('message', '')}")

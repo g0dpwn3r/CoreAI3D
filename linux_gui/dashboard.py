@@ -1770,6 +1770,10 @@ class CoreAI3DDashboard(QMainWindow):
         # Connect chat signal to handler
         self.chat_response_received.connect(self._on_chat_response_received)
 
+        # Deduplication state for chat responses (HTTP + WS may both deliver)
+        self._chat_response_lock = threading.Lock()
+        self._shown_chat_response_keys = set()
+
         # Initialize training argument variables - consolidated learning settings
         self.norm_min = -1.0
         self.norm_max = 1.0
@@ -1909,38 +1913,6 @@ class CoreAI3DDashboard(QMainWindow):
 
         logger.info(f"API key validation complete: length={len(api_key)}, configured={bool(api_key)}")
         return api_key
-
-    async def _initialize_client_async(self):
-        """Async method to initialize the CoreAI3D client"""
-        try:
-            logger.info("Initializing CoreAI3D client...")
-
-            # Create client instance
-            self.client = CoreAI3DClient({
-                'base_url': self.config.api_url,
-                'ws_url': self.config.ws_url,
-                'api_key': self.config.api_key
-            })
-
-            # Register chat response handler
-            self.chat_response_handler = self._handle_chat_response
-            self.client.register_chat_handler(self.chat_response_handler)
-            logger.info("Chat response handler registered successfully")
-
-            # Create debugger
-            self.debugger = CodeDebugger(self.client)
-
-            # Register error handler
-            self.client.register_error_handler(self._handle_chat_error)
-            logger.info("Chat error handler registered successfully")
-
-            logger.info("CoreAI3D client initialized successfully")
-            self.client_initialized = True
-
-        except Exception as e:
-            logger.error(f"Failed to initialize client: {str(e)}")
-            self.client_initialized = False
-            raise
 
     def _save_config(self):
         """Save configuration to settings"""
@@ -4743,21 +4715,18 @@ if __name__ == "__main__":
             logger.info(f"WS URL: {self.config.ws_url}")
             logger.info(f"API Key configured: {bool(self.config.api_key)}")
 
-            # Allow initialization even without API key for offline mode
             if not self.config.api_url:
                 logger.warning("API URL not configured - client will work in offline mode")
-                self.config.api_url = "http://coreai3d:8080/api/v1"  # Set default
+                self.config.api_url = "http://coreai3d:8080/api/v1"
 
             if not self.config.api_key:
                 logger.warning("API key not configured - using empty key (may cause authentication failures)")
-                self.config.api_key = ""  # Allow empty key
+                self.config.api_key = ""
 
             logger.info("Creating CoreAI3DClient instance...")
-            # Ensure API key is properly validated before passing to client
             api_key = self.config.api_key if self.config.api_key else ""
             logger.info(f"Passing API key to client: configured={bool(api_key)}, length={len(api_key)}")
 
-            # Additional validation before client creation
             if not api_key:
                 logger.warning("No API key configured - client will work in offline mode only")
             elif len(api_key) < 10:
@@ -4770,15 +4739,25 @@ if __name__ == "__main__":
                 'timeout': self.config.connection_timeout,
                 'max_connections': self.config.max_connections,
                 'retry_attempts': self.config.retry_attempts,
-                'debug': True  # Enable debug logging
+                'debug': True
             })
 
             logger.info("CoreAI3DClient instance created successfully")
 
-            # Register chat response handler
             self.chat_response_handler = self._handle_chat_response
             self.client.on('chat_response', self.chat_response_handler)
+            try:
+                self.client.on('error', self._handle_chat_error_ws)
+            except Exception as e:
+                logger.warning(f"Failed to register chat error handler: {e}")
             logger.info("Chat response handler registered")
+
+            logger.info("Connecting CoreAI3D client (HTTP + WebSocket)...")
+            try:
+                await self.client.connect()
+                logger.info("CoreAI3D client connected successfully")
+            except Exception as conn_err:
+                logger.warning(f"Client connect() raised: {conn_err} — HTTP path will still be available")
 
             logger.info("Creating CodeDebugger...")
             self.debugger = CodeDebugger(self.client)
@@ -4790,12 +4769,12 @@ if __name__ == "__main__":
         except ImportError as e:
             logger.error(f"Import error during client initialization: {str(e)}")
             logger.error("Make sure coreai3d_client.py is in the same directory or PYTHONPATH")
-            raise  # Re-raise to let caller handle
+            raise
         except Exception as e:
             logger.error(f"Failed to initialize client: {str(e)}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            raise  # Re-raise to let caller handle
+            raise
 
     # Event handlers
     def on_dataset_selected(self, item: QListWidgetItem):
@@ -6611,38 +6590,65 @@ if __name__ == "__main__":
         """Handle chat message result"""
         try:
             result = task.result()
-            if result.success:
-                # HTTP request succeeded, but actual response comes via WebSocket
-                # The response will be handled by the registered chat response handler
-                pass
-            else:
-                error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
+            if result.success and result.data:
+                response = result.data.get('response') or result.data.get('content') or result.data.get('message', '')
+                if response:
+                    import hashlib
+                    key = (response, hashlib.md5(response.encode('utf-8', errors='ignore')).hexdigest())
+                    already_shown = key in self._shown_chat_response_keys
+                    if not already_shown:
+                        self._shown_chat_response_keys.add(key)
+                        QTimer.singleShot(0, lambda r=response: self.chat_history.append(f"AI: {r}"))
+                    logger.info(f"HTTP chat response handled (shown={not already_shown}): {response[:80]}")
+            elif not result.success:
+                error_msg = result.message or (result.data.get('error') if isinstance(result.data, dict) else None) or 'Unknown error'
                 logger.error(f"HTTP request failed: {error_msg}")
-                self.chat_history.append(f"Error: {error_msg}")
+                QTimer.singleShot(0, lambda e=error_msg: self.chat_history.append(f"Error: {e}"))
         except Exception as e:
             logger.error(f"Exception in chat message handler: {str(e)}")
-            self.chat_history.append(f"Error: {str(e)}")
+            QTimer.singleShot(0, lambda err=str(e): self.chat_history.append(f"Error: {err}"))
 
     def _handle_chat_response(self, data: Dict[str, Any]):
         """Handle chat response from WebSocket"""
         logger.info(f"Handling chat response: {data}")
-        content = data.get('content', '')
+        content = (data.get('content') or data.get('message') or
+                   data.get('response') or data.get('reply') or '')
         if content:
-            logger.info(f"Emitting chat response signal: {content}")
-            self.chat_response_received.emit(content)
+            import hashlib
+            with self._chat_response_lock:
+                key = (content, hashlib.md5(content.encode('utf-8', errors='ignore')).hexdigest())
+                if key not in self._shown_chat_response_keys:
+                    self._shown_chat_response_keys.add(key)
+                    logger.info(f"Emitting chat response signal (new): {content[:80]}")
+                    self.chat_response_received.emit(content)
+                else:
+                    logger.info(f"Chat response already shown via HTTP, skipping WS duplicate: {content[:80]}")
         else:
             logger.warning("Received chat response with empty content")
 
     def _on_chat_response_received(self, response: str):
         """Handle chat response signal and update UI"""
         logger.info(f"Chat response received via signal: {response}")
+        import hashlib
+        with self._chat_response_lock:
+            key = (response, hashlib.md5(response.encode('utf-8', errors='ignore')).hexdigest())
+            if key in self._shown_chat_response_keys:
+                logger.debug(f"Signal-path chat response already shown, skipping: {response[:80]}")
+                return
+            self._shown_chat_response_keys.add(key)
         # Use QTimer to ensure UI update happens in main thread
-        QTimer.singleShot(0, lambda: self.chat_history.append(f"AI: {response}"))
+        QTimer.singleShot(0, lambda r=response: self.chat_history.append(f"AI: {r}"))
 
     def _handle_chat_error(self, error_msg: str):
         """Handle chat error"""
         logger.error(f"Chat error: {error_msg}")
-        self.chat_history.append(f"Error: {error_msg}")
+        QTimer.singleShot(0, lambda e=error_msg: self.chat_history.append(f"Error: {e}"))
+
+    def _handle_chat_error_ws(self, error_msg):
+        """Handle chat error from WebSocket 'error' event"""
+        if isinstance(error_msg, dict):
+            error_msg = error_msg.get('message') or error_msg.get('error') or str(error_msg)
+        self._handle_chat_error(str(error_msg))
 
     def clear_chat_history(self):
         """Clear chat history"""
@@ -9605,9 +9611,18 @@ capabilities, training data, performance metrics, and usage instructions."""
                 logger.debug(f"Prediction progress: {percentage}% - {status_text}")
 
             elif message_type == 'chat_response':
-                content = data.get('content', '')
+                content = (data.get('content') or data.get('message') or
+                           data.get('response') or data.get('reply') or '')
                 if content:
-                    self.chat_history.append(f"AI: {content}")
+                    import hashlib
+                    with self._chat_response_lock:
+                        key = (content, hashlib.md5(content.encode('utf-8', errors='ignore')).hexdigest())
+                        if key not in self._shown_chat_response_keys:
+                            self._shown_chat_response_keys.add(key)
+                            QTimer.singleShot(0, lambda c=content: self.chat_history.append(f"AI: {c}"))
+                            logger.info(f"WebSocket chat response shown: {content[:80]}")
+                        else:
+                            logger.debug(f"WebSocket chat response deduplicated: {content[:80]}")
                 logger.debug(f"Chat response received: {content[:100] if content else ''}")
 
         except json.JSONDecodeError as e:
