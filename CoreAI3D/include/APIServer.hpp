@@ -135,7 +135,8 @@ public:
                    const std::string& dbPassword = "password",
                    const std::string& dbSchema = "coreai_db",
                    SSLMode dbSSLMode = SSLMode::REQUIRED,
-                   bool createTables = false);
+                   bool createTables = false,
+                   bool verbose = false);
     bool start();
     void stop();
     bool isServerRunning() const { return isRunning; }

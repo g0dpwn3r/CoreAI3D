@@ -205,12 +205,12 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --db-schema <name>\n";
             std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
             std::cout << "    Example: --db-schema ai_models\n\n";
-            std::cout << "  --create-table\n";
+            std::cout << "  --create-table, --create-tables\n";
             std::cout << "    Automatically create required database tables during initialization.\n";
             std::cout << "    Use this when setting up the database for the first time.\n";
-            std::cout << "    Usage: --create-table\n";
+            std::cout << "    Usage: --create-tables\n";
             std::cout << "    Dependencies: Requires database connection and appropriate permissions\n";
-            std::cout << "    Example: ./CoreAI3D --create-table --db-host localhost\n\n";
+            std::cout << "    Example: ./CoreAI3D --create-tables --db-host localhost\n\n";
             std::cout << "NEURAL NETWORK OPTIONS:\n";
             std::cout << "  --layers, -l <number>\n";
             std::cout << "    Set the number of hidden layers in the neural network.\n";
@@ -708,10 +708,10 @@ int main(int argc, char* argv[]) {
             }
 #ifdef USE_MYSQL
             if (!apiServer.initialize("config.json", dbHost, (unsigned int)dbPort_val,
-                                       dbUser, dbPassword, dbSchema, ssl, createTables)) {
+                                       dbUser, dbPassword, dbSchema, ssl, createTables, verbose)) {
 #else
             if (!apiServer.initialize("config.json", dbHost, (unsigned int)dbPort_val,
-                                       dbUser, dbPassword, dbSchema)) {
+                                       dbUser, dbPassword, dbSchema, SSLMode::REQUIRED, false, verbose)) {
 #endif
                 std::cerr << "Failed to initialize API server\n";
                 return 1;

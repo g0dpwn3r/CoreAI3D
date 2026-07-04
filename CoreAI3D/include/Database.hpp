@@ -27,7 +27,7 @@ public:
     // Constructor uses MySQL X DevAPI Session on port 33060 by default
     Database(const std::string& host, unsigned int port, const std::string& user,
              const std::string& password, const std::string& schemaName,
-             SSLMode ssl, bool createTables = false);
+             SSLMode ssl, bool createTables = false, bool verbose = false);
 
     void createTables();
 
@@ -166,6 +166,7 @@ private:
     std::string dbPassword;
     std::string dbSchema;
     SSLMode sslMode;
+    bool verbose;
 
 #ifdef USE_MYSQL
     std::unique_ptr<mysqlx::Session> session;

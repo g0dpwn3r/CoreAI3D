@@ -248,6 +248,27 @@ public:
     bool loadAudioDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim);
     bool trainOnAudioDataset(const std::string& datasetPath, int epochs = 10);
 
+    // New methods for learning from 3D model content
+    bool loadFrom3DModelFile(const std::string& modelPath, int maxSeqLen, int embeddingDim);
+    bool trainOn3DModelContent(const std::string& modelPath, int epochs = 10);
+    bool analyze3DModelContent(const std::string& modelPath);
+    std::vector<float> extract3DModelFeatures(const std::string& modelPath);
+    std::vector<std::vector<float>> extract3DModelFeaturesBatch(const std::vector<std::string>& modelPaths, int frameSamplingRate = 10);
+    bool loadFrom3DModelDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim);
+    bool trainOn3DModelDataset(const std::string& datasetPath, int epochs = 10);
+
+    // New methods for learning from music content
+    bool loadFromMusicFile(const std::string& musicPath, int maxSeqLen, int embeddingDim);
+    bool trainOnMusicContent(const std::string& musicPath, int epochs = 10);
+    bool analyzeMusicContent(const std::string& musicPath);
+    std::vector<float> extractMusicFeatures(const std::string& musicPath, int temporalWindow = 5);
+    std::vector<std::vector<float>> extractMusicFeaturesBatch(const std::vector<std::string>& musicPaths, int sampleRate = 44100);
+    bool loadFromMusicDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim);
+    bool trainOnMusicDataset(const std::string& datasetPath, int epochs = 10);
+    std::string classifyMusicGenre(const std::string& musicPath);
+    float detectMusicTempo(const std::string& musicPath);
+    float detectMusicEnergy(const std::string& musicPath);
+
     // Database integration for file datasets
     bool saveFileDataset(int& datasetId, const std::string& datasetName, const std::string& fileType);
 

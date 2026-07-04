@@ -14,16 +14,16 @@ Language::Language(std::string& embedingFile, int& embeddingDim, std::string& db
 #ifdef USE_MYSQL
     if (!dbHost.empty() && dbHost != "offline") {
         try {
-            std::cout << "DEBUG: Initializing database connection in Language constructor..." << std::endl;
+            if (trainer && trainer->verbose) { std::cout << "DEBUG: Initializing database connection in Language constructor..." << std::endl; }
             database = std::make_unique<Database>(dbHost, static_cast<unsigned int>(dbPort), dbUser, dbPassword, dbSchema, SSLMode::REQUIRED, true);
-            std::cout << "DEBUG: Database connection initialized successfully in Language constructor" << std::endl;
+            if (trainer && trainer->verbose) { std::cout << "DEBUG: Database connection initialized successfully in Language constructor" << std::endl; }
         } catch (const std::exception& ex) {
-            std::cerr << "DEBUG: Database initialization failed in Language constructor: " << ex.what() << std::endl;
+            if (trainer && trainer->verbose) { std::cerr << "DEBUG: Database initialization failed in Language constructor: " << ex.what() << std::endl; }
             // Don't throw - allow Language to work in offline mode
             database = nullptr;
         }
     } else {
-        std::cout << "DEBUG: Running in offline mode - skipping database initialization" << std::endl;
+        if (trainer && trainer->verbose) { std::cout << "DEBUG: Running in offline mode - skipping database initialization" << std::endl; }
         database = nullptr;
     }
 #endif
@@ -199,14 +199,14 @@ int Language::chat() {
             chatHistory = database->loadChatHistory(sessionId);
             modelState = database->loadLatestModelState(sessionId);
         } catch (const std::exception& ex) {
-            std::cerr << "DEBUG: Failed to load chat history/model state from database: " << ex.what() << std::endl;
+            if (trainer && trainer->verbose) { std::cerr << "DEBUG: Failed to load chat history/model state from database: " << ex.what() << std::endl; }
             // Continue with empty history/state
         }
     } else {
-        std::cout << "DEBUG: Database not available - starting chat with empty history" << std::endl;
+        if (trainer && trainer->verbose) { std::cout << "DEBUG: Database not available - starting chat with empty history" << std::endl; }
     }
 #else
-    std::cout << "DEBUG: MySQL support is disabled - starting chat with empty history" << std::endl;
+    if (trainer && trainer->verbose) { std::cout << "DEBUG: MySQL support is disabled - starting chat with empty history" << std::endl; }
 #endif
 
     // Load model state if available
@@ -293,7 +293,7 @@ int Language::chat() {
 
                     database->saveModelState(sessionId, jsonData);
                 } catch (const std::exception& ex) {
-                    std::cerr << "DEBUG: Failed to save final chat history/model state to database: " << ex.what() << std::endl;
+                    if (trainer && trainer->verbose) { std::cerr << "DEBUG: Failed to save final chat history/model state to database: " << ex.what() << std::endl; }
                 }
             }
 #endif
@@ -328,8 +328,10 @@ int Language::chat() {
         // Load real embeddings from file instead of generating dummy ones
         this->embeddingsByLang = this->loadWordEmbeddingsFromFile(embedingFile, embeddingDim);
         if (this->embeddingsByLang.empty()) {
-            std::cerr << "[!] Warning: No embeddings loaded from file '" << embedingFile
-                << "'. Falling back to dummy embeddings." << std::endl;
+            if (trainer && trainer->verbose) {
+                std::cerr << "[!] Warning: No embeddings loaded from file '" << embedingFile
+                    << "'. Falling back to dummy embeddings." << std::endl;
+            }
             this->embeddingsByLang = Language::createEmbeddingsByLang(embeddingDim);
         } else {
             if (trainer && trainer->verbose) {
@@ -393,7 +395,7 @@ int Language::chat() {
                 database->saveChatMessage(sessionId, "User", inputText);
                 database->saveChatMessage(sessionId, "AI", aiResponse);
             } catch (const std::exception& ex) {
-                std::cerr << "DEBUG: Failed to save chat messages to database: " << ex.what() << std::endl;
+                if (trainer && trainer->verbose) { std::cerr << "DEBUG: Failed to save chat messages to database: " << ex.what() << std::endl; }
             }
         }
 #endif
@@ -427,7 +429,7 @@ int Language::chat() {
 
                 database->saveModelState(sessionId, jsonData);
             } catch (const std::exception& ex) {
-                std::cerr << "DEBUG: Failed to save model state to database: " << ex.what() << std::endl;
+                if (trainer && trainer->verbose) { std::cerr << "DEBUG: Failed to save model state to database: " << ex.what() << std::endl; }
             }
 #endif
         }

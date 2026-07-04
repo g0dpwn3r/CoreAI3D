@@ -28,6 +28,8 @@
 - network topology should be working
 - change the dashboard to include all learing settings like learning rate, batch size, epochs learing-rate, etc. in one place
 - Remove DEBUG merssages with a -v flag to show them and not being able to use them in the release verison of this program
+- add thinking prompt to linux_gui
+- add phrashing and generate prompts letter for letter word for word
 
 ## v2.1 - Testing and Optimization
 - Add matrix multiplication Moosbauwer poole algorithm

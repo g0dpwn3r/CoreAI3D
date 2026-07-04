@@ -78,7 +78,8 @@ bool APIServer::initialize(const std::string& configPath,
                           const std::string& dbPassword,
                           const std::string& dbSchema,
                           SSLMode dbSSLMode,
-                          bool createTables) {
+                          bool createTables,
+                          bool verbose) {
     try {
         if (isInitialized) {
             return true;
@@ -174,7 +175,7 @@ bool APIServer::initialize(const std::string& configPath,
         if (!this->dbHost.empty() && this->dbPort > 0) {
             try {
                 database = std::make_unique<Database>(this->dbHost, this->dbPort, this->dbUser,
-                                                     this->dbPassword, this->dbSchema, this->dbSSLMode, this->createTables);
+                                                     this->dbPassword, this->dbSchema, this->dbSSLMode, this->createTables, verbose);
                 std::cout << "Database connection initialized" << std::endl;
                 
                 // Initialize auth manager after database

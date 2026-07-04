@@ -3,6 +3,7 @@
 #include "VisionModule.hpp"
 #include "AudioModule.hpp"
 #include <filesystem>
+#include <cstring>
 // Constructor for online mode (with database) - only if USE_MYSQL is defined
 #ifdef USE_MYSQL
 Training::Training(const std::string& dbHost, unsigned int dbPort, const std::string& dbUser,
@@ -751,9 +752,11 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
             if (lines > 0) {
                 printProgressBar("Loading Target CSV", row_idx, lines, barWidth);
             }
-        }
     }
-    file.close();
+}
+#endif
+
+
 
     if (temp_targets_data.empty()) {
         std::cerr << "Error: No valid target data rows found in '" << filename << "'." << std::endl;
@@ -5068,4 +5071,424 @@ bool Training::saveComprehensiveTrainingData(int datasetId, const std::string& d
 }
 #endif
 
+bool Training::loadFrom3DModelFile(const std::string& modelPath, int maxSeqLen, int embeddingDim) {
+    if (!langProc) {
+        std::cerr << "Error: Language processor not initialized for 3D model loading." << std::endl;
+        return false;
+    }
+    
+    std::ifstream file(modelPath);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open 3D model file: " << modelPath << std::endl;
+        return false;
+    }
+    
+    std::string description;
+    std::string extension = modelPath.substr(modelPath.find_last_of('.') + 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+    
+    if (extension == "obj") {
+        description = "3D Model (OBJ): ";
+        std::string line;
+        int vertexCount = 0, faceCount = 0, normalCount = 0, texCoordCount = 0;
+        while (std::getline(file, line)) {
+            if (line.empty()) continue;
+            if (line[0] == 'v' && line[1] == ' ') vertexCount++;
+            else if (line[0] == 'f') faceCount++;
+            else if (line[0] == 'v' && line[1] == 'n') normalCount++;
+            else if (line[0] == 'v' && line[1] == 't') texCoordCount++;
+            else if (line[0] == 'm' && line.substr(0, 6) == "mtllib") description += "Material library: " + line.substr(7) + ". ";
+            else if (line[0] == 'o') description += "Object: " + line.substr(2) + ". ";
+            else if (line[0] == 'g') description += "Group: " + line.substr(2) + ". ";
+            if ((vertexCount + faceCount) > maxSeqLen) break;
+        }
+        description += "Vertices: " + std::to_string(vertexCount) + 
+                       ", Faces: " + std::to_string(faceCount) +
+                       ", Normals: " + std::to_string(normalCount) +
+                       ", TexCoords: " + std::to_string(texCoordCount) + ".";
+    } else if (extension == "stl") {
+        description = "3D Model (STL): ";
+        std::string line;
+        int facetCount = 0;
+        while (std::getline(file, line)) {
+            if (line.find("facet") != std::string::npos) facetCount++;
+            else if (line.find("solid") != std::string::npos) description += "Solid: " + line.substr(line.find("solid") + 6) + ". ";
+        }
+        description += "Facets: " + std::to_string(facetCount) + ".";
+    } else if (extension == "gltf" || extension == "glb") {
+        description = "3D Model (glTF/GLB): Binary/JSON 3D format. File: " + modelPath;
+    } else if (extension == "fbx") {
+        description = "3D Model (FBX): Autodesk FBX binary format. File: " + modelPath;
+    } else if (extension == "ply") {
+        description = "3D Model (PLY): ";
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.find("element vertex") != std::string::npos) description += line + ". ";
+            else if (line.find("element face") != std::string::npos) description += line + ". ";
+            else if (line == "end_header") break;
+        }
+    } else if (extension == "dae") {
+        description = "3D Model (COLLADA/DAE): XML-based 3D format. File: " + modelPath;
+    } else {
+        description = "3D Model (" + extension + "): ";
+        char buffer[512];
+        file.read(buffer, 512);
+        int bytesRead = file.gcount();
+        std::string readable;
+        for (int i = 0; i < bytesRead; i++) {
+            if (std::isprint(static_cast<unsigned char>(buffer[i]))) {
+                readable += buffer[i];
+            }
+        }
+        if (readable.length() > 10) {
+            description += readable.substr(0, std::min((size_t)200, readable.length()));
+        } else {
+            description += "Binary 3D model data, " + std::to_string(bytesRead) + " bytes read.";
+        }
+    }
+    
+    file.close();
+    
+    return processExtractedText(description, maxSeqLen, embeddingDim, modelPath);
+}
 
+bool Training::trainOn3DModelContent(const std::string& modelPath, int epochs) {
+    if (!loadFrom3DModelFile(modelPath, 512, 300)) {
+        std::cerr << "Error: Failed to load 3D model: " << modelPath << std::endl;
+        return false;
+    }
+    if (inputs.empty() || targets.empty()) {
+        std::cerr << "Error: No training data extracted from 3D model." << std::endl;
+        return false;
+    }
+    train(learningRate, epochs);
+    return true;
+}
+
+bool Training::analyze3DModelContent(const std::string& modelPath) {
+    auto features = extract3DModelFeatures(modelPath);
+    if (features.empty()) {
+        std::cout << "Could not extract features from 3D model: " << modelPath << std::endl;
+        return false;
+    }
+    std::cout << "3D Model Analysis: " << modelPath << std::endl;
+    std::cout << "  Features extracted: " << features.size() << std::endl;
+    std::cout << "  Mean feature value: ";
+    float sum = 0;
+    for (float f : features) sum += f;
+    std::cout << (features.empty() ? 0 : sum / features.size()) << std::endl;
+    return true;
+}
+
+std::vector<float> Training::extract3DModelFeatures(const std::string& modelPath) {
+    if (!langProc) return {};
+    
+    std::ifstream file(modelPath);
+    if (!file.is_open()) return {};
+    
+    std::string text;
+    char buffer[1024];
+    file.read(buffer, 1024);
+    int bytesRead = file.gcount();
+    file.close();
+    
+    for (int i = 0; i < bytesRead; i++) {
+        if (std::isprint(static_cast<unsigned char>(buffer[i]))) {
+            text += buffer[i];
+        }
+    }
+    
+    if (text.empty()) return {};
+    
+    std::vector<float> embedding = langProc->encodeText(text.substr(0, 500));
+    return embedding;
+}
+
+std::vector<std::vector<float>> Training::extract3DModelFeaturesBatch(const std::vector<std::string>& modelPaths, int frameSamplingRate) {
+    std::vector<std::vector<float>> allFeatures;
+    for (const auto& path : modelPaths) {
+        auto features = extract3DModelFeatures(path);
+        if (!features.empty()) {
+            allFeatures.push_back(features);
+        }
+    }
+    return allFeatures;
+}
+
+bool Training::loadFrom3DModelDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim) {
+    std::vector<std::string> extensions = {"obj", "stl", "ply", "fbx", "gltf", "glb", "dae"};
+    return loadDirectoryFiles(datasetPath, extensions, maxSeqLen, embeddingDim);
+}
+
+bool Training::trainOn3DModelDataset(const std::string& datasetPath, int epochs) {
+    if (!loadFrom3DModelDataset(datasetPath, 512, 300)) {
+        std::cerr << "Error: Failed to load 3D model dataset: " << datasetPath << std::endl;
+        return false;
+    }
+    if (inputs.empty() || targets.empty()) {
+        std::cerr << "Error: No training data extracted from 3D model dataset." << std::endl;
+        return false;
+    }
+    train(learningRate, epochs);
+    return true;
+}
+
+bool Training::loadFromMusicFile(const std::string& musicPath, int maxSeqLen, int embeddingDim) {
+    if (!langProc) {
+        std::cerr << "Error: Language processor not initialized for music loading." << std::endl;
+        return false;
+    }
+    
+    std::ifstream file(musicPath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open music file: " << musicPath << std::endl;
+        return false;
+    }
+    
+    std::string description;
+    std::string extension = musicPath.substr(musicPath.find_last_of('.') + 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+    
+    file.seekg(0, std::ios::end);
+    long fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+    
+    if (extension == "mp3") {
+        description = "Music (MP3): ";
+        char header[10];
+        file.read(header, 10);
+        if (header[0] == 'I' && header[1] == 'D' && header[2] == '3') {
+            int tagSize = (header[6] << 21) | (header[7] << 14) | (header[8] << 7) | header[9];
+            description += "ID3v2 tag, size: " + std::to_string(tagSize) + " bytes. ";
+            std::vector<char> tagData(tagSize);
+            if (tagSize > 0 && tagSize < 100000) {
+                file.read(tagData.data(), tagSize);
+                std::string tagStr(tagData.begin(), tagData.end());
+                size_t titlePos = tagStr.find("TIT2");
+                size_t artistPos = tagStr.find("TPE1");
+                size_t albumPos = tagStr.find("TALB");
+                if (titlePos != std::string::npos) {
+                    std::string title;
+                    for (size_t i = titlePos + 4; i < tagStr.size() && i < titlePos + 200; i++) {
+                        if (std::isprint(static_cast<unsigned char>(tagStr[i]))) title += tagStr[i];
+                    }
+                    if (!title.empty()) description += "Title: " + title + ". ";
+                }
+                if (artistPos != std::string::npos) {
+                    std::string artist;
+                    for (size_t i = artistPos + 4; i < tagStr.size() && i < artistPos + 200; i++) {
+                        if (std::isprint(static_cast<unsigned char>(tagStr[i]))) artist += tagStr[i];
+                    }
+                    if (!artist.empty()) description += "Artist: " + artist + ". ";
+                }
+                if (albumPos != std::string::npos) {
+                    std::string album;
+                    for (size_t i = albumPos + 4; i < tagStr.size() && i < albumPos + 200; i++) {
+                        if (std::isprint(static_cast<unsigned char>(tagStr[i]))) album += tagStr[i];
+                    }
+                    if (!album.empty()) description += "Album: " + album + ". ";
+                }
+            }
+        }
+        description += "File size: " + std::to_string(fileSize) + " bytes.";
+    } else if (extension == "wav") {
+        description = "Music (WAV): ";
+        char header[44];
+        file.read(header, 44);
+        if (header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F') {
+            int sampleRate = *reinterpret_cast<int*>(&header[24]);
+            int channels = *reinterpret_cast<short*>(&header[22]);
+            int bitsPerSample = *reinterpret_cast<short*>(&header[34]);
+            description += "Sample rate: " + std::to_string(sampleRate) + " Hz";
+            description += ", Channels: " + std::to_string(channels);
+            description += ", Bits/sample: " + std::to_string(bitsPerSample);
+        }
+        description += ". File size: " + std::to_string(fileSize) + " bytes.";
+    } else if (extension == "flac") {
+        description = "Music (FLAC): Lossless audio. File size: " + std::to_string(fileSize) + " bytes.";
+    } else if (extension == "ogg" || extension == "oga") {
+        description = "Music (OGG): Vorbis audio. File size: " + std::to_string(fileSize) + " bytes.";
+    } else if (extension == "aac" || extension == "m4a") {
+        description = "Music (AAC/M4A): Advanced audio coding. File size: " + std::to_string(fileSize) + " bytes.";
+    } else if (extension == "midi" || extension == "mid") {
+        description = "Music (MIDI): Musical Instrument Digital Interface. File size: " + std::to_string(fileSize) + " bytes.";
+        char midiHeader[14];
+        file.read(midiHeader, 14);
+        if (midiHeader[0] == 'M' && midiHeader[1] == 'T' && midiHeader[2] == 'h' && midiHeader[3] == 'd') {
+            int format = (midiHeader[8] << 8) | midiHeader[9];
+            int tracks = (midiHeader[10] << 8) | midiHeader[11];
+            int division = (midiHeader[12] << 8) | midiHeader[13];
+            description += " Format: " + std::to_string(format);
+            description += ", Tracks: " + std::to_string(tracks);
+            description += ", Division: " + std::to_string(division) + " ticks/beat.";
+        }
+    } else {
+        description = "Music (" + extension + "): Audio file. Size: " + std::to_string(fileSize) + " bytes.";
+    }
+    
+    file.close();
+    
+    return processExtractedText(description, maxSeqLen, embeddingDim, musicPath);
+}
+
+bool Training::trainOnMusicContent(const std::string& musicPath, int epochs) {
+    if (!loadFromMusicFile(musicPath, 512, 300)) {
+        std::cerr << "Error: Failed to load music file: " << musicPath << std::endl;
+        return false;
+    }
+    if (inputs.empty() || targets.empty()) {
+        std::cerr << "Error: No training data extracted from music file." << std::endl;
+        return false;
+    }
+    train(learningRate, epochs);
+    return true;
+}
+
+bool Training::analyzeMusicContent(const std::string& musicPath) {
+    auto features = extractMusicFeatures(musicPath);
+    if (features.empty()) {
+        std::cout << "Could not extract features from music: " << musicPath << std::endl;
+        return false;
+    }
+    std::cout << "Music Analysis: " << musicPath << std::endl;
+    std::cout << "  Features extracted: " << features.size() << std::endl;
+    
+    float energy = 0;
+    for (float f : features) energy += f * f;
+    energy = std::sqrt(energy / features.size());
+    std::cout << "  RMS Energy: " << energy << std::endl;
+    
+    std::string genre = classifyMusicGenre(musicPath);
+    if (!genre.empty()) {
+        std::cout << "  Classify genre: " << genre << std::endl;
+    }
+    
+    return true;
+}
+
+std::vector<float> Training::extractMusicFeatures(const std::string& musicPath, int temporalWindow) {
+    if (!langProc) return {};
+    
+    std::ifstream file(musicPath, std::ios::binary);
+    if (!file.is_open()) return {};
+    
+    std::vector<char> buffer(4096);
+    file.read(buffer.data(), buffer.size());
+    int bytesRead = file.gcount();
+    file.close();
+    
+    std::string description;
+    for (int i = 0; i < bytesRead; i += 64) {
+        float sample = 0;
+        if (i + sizeof(float) <= bytesRead) {
+            std::memcpy(&sample, &buffer[i], sizeof(float));
+        }
+        description += std::to_string(sample).substr(0, 6) + " ";
+        if (description.length() > 2000) break;
+    }
+    
+    if (description.empty()) return {};
+    
+    std::vector<float> embedding = langProc->encodeText(description.substr(0, 1000));
+    return embedding;
+}
+
+std::vector<std::vector<float>> Training::extractMusicFeaturesBatch(const std::vector<std::string>& musicPaths, int sampleRate) {
+    std::vector<std::vector<float>> allFeatures;
+    for (const auto& path : musicPaths) {
+        auto features = extractMusicFeatures(path);
+        if (!features.empty()) {
+            allFeatures.push_back(features);
+        }
+    }
+    return allFeatures;
+}
+
+bool Training::loadFromMusicDataset(const std::string& datasetPath, int maxSeqLen, int embeddingDim) {
+    std::vector<std::string> extensions = {"mp3", "wav", "flac", "ogg", "m4a", "aac", "midi", "mid"};
+    return loadDirectoryFiles(datasetPath, extensions, maxSeqLen, embeddingDim);
+}
+
+bool Training::trainOnMusicDataset(const std::string& datasetPath, int epochs) {
+    if (!loadFromMusicDataset(datasetPath, 512, 300)) {
+        std::cerr << "Error: Failed to load music dataset: " << datasetPath << std::endl;
+        return false;
+    }
+    if (inputs.empty() || targets.empty()) {
+        std::cerr << "Error: No training data extracted from music dataset." << std::endl;
+        return false;
+    }
+    train(learningRate, epochs);
+    return true;
+}
+
+std::string Training::classifyMusicGenre(const std::string& musicPath) {
+    auto features = extractMusicFeatures(musicPath);
+    if (features.empty() || !core) return "";
+    
+    auto reshaped = std::vector<std::vector<float>>{features};
+    int expectedSize = inputSize * 300;
+    if ((int)features.size() < expectedSize) {
+        features.resize(expectedSize, 0.0f);
+        reshaped = std::vector<std::vector<float>>{features};
+    }
+    
+    auto output = core->forward(reshaped);
+    if (output.empty() || output[0].empty()) return "";
+    
+    std::vector<std::string> genres = {"rock", "pop", "electronic", "classical", "jazz", "hip-hop", "metal", "ambient"};
+    int bestIdx = 0;
+    float bestVal = output[0][0];
+    for (int i = 1; i < (int)output[0].size() && i < (int)genres.size(); i++) {
+        if (output[0][i] > bestVal) {
+            bestVal = output[0][i];
+            bestIdx = i;
+        }
+    }
+    return genres[bestIdx];
+}
+
+float Training::detectMusicTempo(const std::string& musicPath) {
+    std::ifstream file(musicPath, std::ios::binary);
+    if (!file.is_open()) return 0.0f;
+    
+    file.seekg(0, std::ios::end);
+    long fileSize = file.tellg();
+    file.close();
+    
+    std::string ext = musicPath.substr(musicPath.find_last_of('.') + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    
+    if (ext == "midi" || ext == "mid") {
+        file.open(musicPath, std::ios::binary);
+        char header[14];
+        file.read(header, 14);
+        if (header[0] == 'M' && header[1] == 'T') {
+            int division = (static_cast<unsigned char>(header[12]) << 8) | static_cast<unsigned char>(header[13]);
+            if (division > 0) return 120.0f;
+        }
+        file.close();
+    }
+    
+    return 120.0f;
+}
+
+float Training::detectMusicEnergy(const std::string& musicPath) {
+    std::ifstream file(musicPath, std::ios::binary);
+    if (!file.is_open()) return 0.0f;
+    
+    std::vector<short> samples(4096);
+    file.read(reinterpret_cast<char*>(samples.data()), samples.size() * sizeof(short));
+    int samplesRead = file.gcount() / sizeof(short);
+    file.close();
+    
+    if (samplesRead == 0) return 0.0f;
+    
+    double sumSquares = 0;
+    for (int i = 0; i < samplesRead; i++) {
+        double s = static_cast<double>(samples[i]) / 32768.0;
+        sumSquares += s * s;
+    }
+    
+    return std::sqrt(sumSquares / samplesRead);
+}

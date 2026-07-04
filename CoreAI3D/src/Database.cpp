@@ -3,38 +3,40 @@
 // Constructor
 Database::Database(const std::string& host, unsigned int port,
     const std::string& user, const std::string& password,
-    const std::string& schemaName, SSLMode ssl, bool createTables)
+    const std::string& schemaName, SSLMode ssl, bool createTables, bool verbose)
     : dbHost(host), dbPort(port), dbUser(user), dbPassword(password),
-      dbSchema(schemaName), sslMode(ssl)
+      dbSchema(schemaName), sslMode(ssl), verbose(verbose)
 {
 #ifdef USE_MYSQL
     try {
-        std::cout << "DEBUG: Starting database initialization..." << std::endl;
-        std::cout << "DEBUG: Connection parameters - Host: " << host << ", Port: " << port
-                  << ", User: " << user << ", Schema: " << schemaName << std::endl;
+        if (verbose) { std::cout << "DEBUG: Starting database initialization..." << std::endl; }
+        if (verbose) {
+            std::cout << "DEBUG: Connection parameters - Host: " << host << ", Port: " << port
+                      << ", User: " << user << ", Schema: " << schemaName << std::endl;
+        }
 
         // Convert SSLMode enum to mysqlx::SSLMode
         mysqlx::SSLMode mysqlSslMode;
         switch (sslMode) {
             case SSLMode::DISABLED:
                 mysqlSslMode = mysqlx::SSLMode::DISABLED;
-                std::cout << "DEBUG: SSL mode set to DISABLED" << std::endl;
+                if (verbose) { std::cout << "DEBUG: SSL mode set to DISABLED" << std::endl; }
                 break;
             case SSLMode::REQUIRED:
                 mysqlSslMode = mysqlx::SSLMode::REQUIRED;
-                std::cout << "DEBUG: SSL mode set to REQUIRED" << std::endl;
+                if (verbose) { std::cout << "DEBUG: SSL mode set to REQUIRED" << std::endl; }
                 break;
             case SSLMode::VERIFY_CA:
                 mysqlSslMode = mysqlx::SSLMode::VERIFY_CA;
-                std::cout << "DEBUG: SSL mode set to VERIFY_CA" << std::endl;
+                if (verbose) { std::cout << "DEBUG: SSL mode set to VERIFY_CA" << std::endl; }
                 break;
             case SSLMode::VERIFY_IDENTITY:
                 mysqlSslMode = mysqlx::SSLMode::VERIFY_IDENTITY;
-                std::cout << "DEBUG: SSL mode set to VERIFY_IDENTITY" << std::endl;
+                if (verbose) { std::cout << "DEBUG: SSL mode set to VERIFY_IDENTITY" << std::endl; }
                 break;
             default:
                 mysqlSslMode = mysqlx::SSLMode::REQUIRED;
-                std::cout << "DEBUG: SSL mode defaulted to REQUIRED" << std::endl;
+                if (verbose) { std::cout << "DEBUG: SSL mode defaulted to REQUIRED" << std::endl; }
                 break;
         }
 
@@ -43,7 +45,7 @@ Database::Database(const std::string& host, unsigned int port,
         // its startup when we attempt this, producing a transient
         // "Connection refused" (CDK Error: generic:111). Retry a few times before
         // giving up so we survive the container startup race condition.
-        std::cout << "DEBUG: Attempting temporary connection to create database..." << std::endl;
+        if (verbose) { std::cout << "DEBUG: Attempting temporary connection to create database..." << std::endl; }
         {
             const int maxRetries = 30;
             const auto retryDelay = std::chrono::seconds(2);
@@ -67,15 +69,15 @@ Database::Database(const std::string& host, unsigned int port,
                     );
                     tempSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
                     mysqlx::Session tempSession(tempSettings);
-                    std::cout << "DEBUG: Temporary session created successfully" << std::endl;
+                    if (verbose) { std::cout << "DEBUG: Temporary session created successfully" << std::endl; }
 
                     std::string createDbQuery = "CREATE DATABASE IF NOT EXISTS " + schemaName;
-                    std::cout << "DEBUG: Executing query: " << createDbQuery << std::endl;
+                    if (verbose) { std::cout << "DEBUG: Executing query: " << createDbQuery << std::endl; }
                     tempSession.sql(createDbQuery).execute();
-                    std::cout << "DEBUG: Database creation query executed successfully" << std::endl;
+                    if (verbose) { std::cout << "DEBUG: Database creation query executed successfully" << std::endl; }
 
                     tempSession.close();
-                    std::cout << "DEBUG: Temporary session closed" << std::endl;
+                    if (verbose) { std::cout << "DEBUG: Temporary session closed" << std::endl; }
                     tempConnected = true;
                 } catch (const std::exception& tempEx) {
                     // mysqlx::Error derives from std::exception, so both are handled here.
@@ -83,21 +85,23 @@ Database::Database(const std::string& host, unsigned int port,
                     if (errorMsg.find("Broken pipe") != std::string::npos ||
                         errorMsg.find("unexpected message") != std::string::npos) {
                         // Recoverable handshake glitch; let the main connection retry.
-                        std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl;
-                        std::cerr << "DEBUG: Trying to continue with main connection attempt..." << std::endl;
+                        if (verbose) { std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl; }
+                        if (verbose) { std::cerr << "DEBUG: Trying to continue with main connection attempt..." << std::endl; }
                         tempConnected = true;
                     } else if (isTransientConnError(errorMsg)) {
                         // MySQL not ready yet - wait and retry.
-                        std::cerr << "DEBUG: MySQL not ready yet (attempt " << attempt << "/" << maxRetries
-                                  << "): " << errorMsg << ". Retrying in "
-                                  << retryDelay.count() << "s..." << std::endl;
+                        if (verbose) {
+                            std::cerr << "DEBUG: MySQL not ready yet (attempt " << attempt << "/" << maxRetries
+                                      << "): " << errorMsg << ". Retrying in "
+                                      << retryDelay.count() << "s..." << std::endl;
+                        }
                         if (attempt == maxRetries) {
                             throw std::runtime_error("Failed to create temporary database session after "
                                 + std::to_string(maxRetries) + " attempts: " + errorMsg);
                         }
                         std::this_thread::sleep_for(retryDelay);
                     } else {
-                        std::cerr << "DEBUG: Temporary session creation failed: " << errorMsg << std::endl;
+                        if (verbose) { std::cerr << "DEBUG: Temporary session creation failed: " << errorMsg << std::endl; }
                         throw std::runtime_error("Failed to create temporary database session: " + errorMsg);
                     };
                 };
@@ -105,7 +109,7 @@ Database::Database(const std::string& host, unsigned int port,
         };
 
         // Now establish connection to the specific schema
-        std::cout << "DEBUG: Attempting main connection to schema..." << std::endl;
+        if (verbose) { std::cout << "DEBUG: Attempting main connection to schema..." << std::endl; }
         try {
             mysqlx::SessionSettings mainSettings(
                 mysqlx::SessionOption::HOST, host,
@@ -116,15 +120,15 @@ Database::Database(const std::string& host, unsigned int port,
             );
             mainSettings.set(mysqlx::SessionOption::SSL_MODE, mysqlSslMode);
             session = std::make_unique<mysqlx::Session>(mainSettings);
-            std::cout << "DEBUG: Main session created successfully" << std::endl;
+            if (verbose) { std::cout << "DEBUG: Main session created successfully" << std::endl; }
             std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
         } catch (const mysqlx::Error& mysqlEx) {
             // Handle MySQL-specific errors more gracefully
             std::string errorMsg = mysqlEx.what();
             if (errorMsg.find("Broken pipe") != std::string::npos ||
                 errorMsg.find("unexpected message") != std::string::npos) {
-                std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl;
-                std::cerr << "DEBUG: Trying alternative connection method..." << std::endl;
+                if (verbose) { std::cerr << "DEBUG: Connection issue detected (" << errorMsg << "). This may be due to network issues or MySQL server configuration." << std::endl; }
+                if (verbose) { std::cerr << "DEBUG: Trying alternative connection method..." << std::endl; }
 
                 // Try connecting without specifying schema first, then switch
                 try {
@@ -138,26 +142,26 @@ Database::Database(const std::string& host, unsigned int port,
                     mysqlx::Session tempSession(altSettings);
                     tempSession.sql("USE " + schemaName).execute();
                     session = std::make_unique<mysqlx::Session>(altSettings);
-                    std::cout << "DEBUG: Alternative connection method successful" << std::endl;
+                    if (verbose) { std::cout << "DEBUG: Alternative connection method successful" << std::endl; }
                     std::cout << "Database connection established successfully to " << host << ":" << port << "/" << schemaName << std::endl;
                 } catch (const std::exception& altEx) {
-                    std::cerr << "DEBUG: Alternative connection method also failed: " << altEx.what() << std::endl;
+                    if (verbose) { std::cerr << "DEBUG: Alternative connection method also failed: " << altEx.what() << std::endl; }
                     throw std::runtime_error("Failed to create main database session: " + errorMsg);
                 };
             } else {
-                std::cerr << "DEBUG: Main session creation failed: " << errorMsg << std::endl;
+                if (verbose) { std::cerr << "DEBUG: Main session creation failed: " << errorMsg << std::endl; }
                 throw std::runtime_error("Failed to create main database session: " + errorMsg);
             };
         } catch (const std::exception& sessionEx) {
-            std::cerr << "DEBUG: Main session creation failed: " << sessionEx.what() << std::endl;
+            if (verbose) { std::cerr << "DEBUG: Main session creation failed: " << sessionEx.what() << std::endl; }
             throw std::runtime_error("Failed to create main database session: " + std::string(sessionEx.what()));
         };
 
         // Create tables if they don't exist and createTables is true
         if (createTables) {
-            std::cout << "DEBUG: Creating database tables..." << std::endl;
+            if (verbose) { std::cout << "DEBUG: Creating database tables..." << std::endl; }
             this->createTables();
-            std::cout << "DEBUG: Database tables created successfully" << std::endl;
+            if (verbose) { std::cout << "DEBUG: Database tables created successfully" << std::endl; }
         };
     } catch (const std::exception& ex) {
         std::cerr << "Database initialization error: " << ex.what() << std::endl;
