@@ -6591,7 +6591,11 @@ if __name__ == "__main__":
         try:
             result = task.result()
             if result.success and result.data:
-                response = result.data.get('response') or result.data.get('content') or result.data.get('message', '')
+                inner_data = result.data.get('data', result.data) if isinstance(result.data, dict) else result.data
+                if isinstance(inner_data, dict):
+                    response = inner_data.get('response') or inner_data.get('content') or inner_data.get('message', '')
+                else:
+                    response = ''
                 if response:
                     import hashlib
                     key = (response, hashlib.md5(response.encode('utf-8', errors='ignore')).hexdigest())
