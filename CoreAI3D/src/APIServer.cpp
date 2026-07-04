@@ -1613,9 +1613,17 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                 #endif
             }
 
-            // For now, return a simple echo response
-            // TODO: Integrate with Language class for actual AI chat processing
-            std::string responseMessage = "Echo: " + message;
+            std::string responseMessage;
+            if (trainingModule) {
+                Language* lang = trainingModule->getLanguage();
+                if (lang) {
+                    responseMessage = lang->respond(message);
+                } else {
+                    responseMessage = "I'm still initializing my language processing capabilities. Please try again in a moment.";
+                }
+            } else {
+                responseMessage = "I'm currently unable to process your request. The AI training module is not available.";
+            }
 
             // Save AI response to database if available
             if (database && !sessionId.empty()) {
@@ -1627,7 +1635,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                         {"clientId", clientId},
                         {"messageType", "text"},
                         {"timestamp", getTimestampString()},
-                        {"response_type", "echo"}
+                        {"response_type", "ai_generated"}
                     }).dump();
 
                     database->saveChatMessage(sessionIdInt, role, responseMessage, "text", confidence, metadata);
@@ -3729,6 +3737,12 @@ void APIServer::setTrainingModule(std::unique_ptr<Training> training) {
 
 void APIServer::setPredictModule(std::unique_ptr<Predict> predict) {
     predictModule = std::move(predict);
+}
+
+void APIServer::setLanguageProcessor(Language* lang) {
+    if (orchestrator) {
+        orchestrator->setLanguageProcessor(lang);
+    }
 }
 
 json APIServer::handleDatasetAPI(const std::string& action, const json& parameters, const std::string& method) {

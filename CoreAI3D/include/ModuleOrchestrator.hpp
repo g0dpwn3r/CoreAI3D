@@ -27,6 +27,7 @@ class AudioModule;
 class SystemModule;
 class WebModule;
 class MathModule;
+class Language;
 
 struct ModuleInfo {
     std::string name;
@@ -99,6 +100,8 @@ private:
     std::map<std::string, std::string> interModuleChannels;
     std::map<std::string, std::function<void(const std::string&)>> eventHandlers;
     std::map<std::string, std::vector<std::string>> moduleDependencies;
+
+    Language* languageProcessor = nullptr;
 
 protected:
     // Core orchestration functions
@@ -220,6 +223,7 @@ public:
 
     // Chat message processing
     json processChatMessage(const json& chatData);
+    void setLanguageProcessor(Language* lang);
 
     // Learning and adaptation
     bool learnFromTaskResults(const std::vector<OrchestrationTask>& completedTasks);

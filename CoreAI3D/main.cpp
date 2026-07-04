@@ -739,8 +739,11 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
+            Language* chatLanguage = trainer->getLanguage();
+
             // Set training module for neural API endpoints
             apiServer.setTrainingModule(std::move(trainer));
+            apiServer.setLanguageProcessor(chatLanguage);
 
             // Initialize and set predict module for prediction API endpoints
             std::cout << "[API MODE] Initializing Predict module...\n";

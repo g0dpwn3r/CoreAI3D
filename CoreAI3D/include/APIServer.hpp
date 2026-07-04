@@ -159,6 +159,7 @@ public:
     bool addMathModule(const std::string& name, std::unique_ptr<MathModule> module);
     void setTrainingModule(std::unique_ptr<Training> training);
     void setPredictModule(std::unique_ptr<Predict> predict);
+    void setLanguageProcessor(Language* lang);
 
     // Database configuration getters
     const std::string& getDBHost() const { return dbHost; }

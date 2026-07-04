@@ -1,4 +1,5 @@
 #include "ModuleOrchestrator.hpp"
+#include "Language.hpp"
 #include <algorithm>
 #include <iostream>
 #include <sstream>
@@ -793,37 +794,37 @@ json ModuleOrchestrator::processChatMessage(const json& chatData) {
             return errorResponse;
         }
 
-        // For now, use simple pattern matching for responses
-        // TODO: Integrate with Language module for proper AI responses
         std::string response;
-        std::string lowerMessage = message;
-        std::transform(lowerMessage.begin(), lowerMessage.end(), lowerMessage.begin(), ::tolower);
-
-        if (lowerMessage.find("hello") != std::string::npos ||
-            lowerMessage.find("hi") != std::string::npos ||
-            lowerMessage.find("hey") != std::string::npos) {
-            response = "Hello! I'm CoreAI3D, your AI assistant. How can I help you today?";
-        }
-        else if (lowerMessage.find("how are you") != std::string::npos ||
-                 lowerMessage.find("how do you do") != std::string::npos) {
-            response = "I'm functioning optimally! I'm here to help you with various AI tasks and system operations.";
-        }
-        else if (lowerMessage.find("what can you do") != std::string::npos ||
-                 lowerMessage.find("help") != std::string::npos) {
-            response = "I can help you with:\n• Vision processing (image analysis, object detection)\n• Audio processing (speech recognition, analysis)\n• System automation and monitoring\n• Web operations and data retrieval\n• Mathematical calculations\n• Neural network training and prediction\n• And much more!";
-        }
-        else if (lowerMessage.find("status") != std::string::npos ||
-                 lowerMessage.find("system") != std::string::npos) {
-            response = "System Status:\n• Orchestrator: " + orchestratorName + "\n• Active Tasks: " + std::to_string(activeTasks.size()) + "\n• Available Modules: " + std::to_string(getAvailableModules().size()) + "\n• System Health: " + (isSystemHealthy() ? "Good" : "Needs Attention");
-        }
-        else if (lowerMessage.find("bye") != std::string::npos ||
-                 lowerMessage.find("goodbye") != std::string::npos ||
-                 lowerMessage.find("exit") != std::string::npos) {
-            response = "Goodbye! Feel free to come back anytime if you need assistance.";
-        }
-        else {
-            // Default response with some intelligence
-            response = "I understand you're asking about: \"" + message + "\". I'm still learning, but I'm here to help! Could you be more specific about what you'd like me to assist you with?";
+        if (languageProcessor) {
+            response = languageProcessor->respond(message);
+        } else {
+            std::string lowerMessage = message;
+            std::transform(lowerMessage.begin(), lowerMessage.end(), lowerMessage.begin(), ::tolower);
+            if (lowerMessage.find("hello") != std::string::npos ||
+                lowerMessage.find("hi") != std::string::npos ||
+                lowerMessage.find("hey") != std::string::npos) {
+                response = "Hello! I'm CoreAI3D, your AI assistant. How can I help you today?";
+            }
+            else if (lowerMessage.find("how are you") != std::string::npos ||
+                     lowerMessage.find("how do you do") != std::string::npos) {
+                response = "I'm functioning optimally! I'm here to help you with various AI tasks and system operations.";
+            }
+            else if (lowerMessage.find("what can you do") != std::string::npos ||
+                     lowerMessage.find("help") != std::string::npos) {
+                response = "I can help you with:\n- Vision processing (image analysis, object detection)\n- Audio processing (speech recognition, analysis)\n- System automation and monitoring\n- Web operations and data retrieval\n- Mathematical calculations\n- Neural network training and prediction\n- And much more!";
+            }
+            else if (lowerMessage.find("status") != std::string::npos ||
+                     lowerMessage.find("system") != std::string::npos) {
+                response = "System Status:\n- Orchestrator: " + orchestratorName + "\n- Active Tasks: " + std::to_string(activeTasks.size()) + "\n- Available Modules: " + std::to_string(getAvailableModules().size()) + "\n- System Health: " + (isSystemHealthy() ? "Good" : "Needs Attention");
+            }
+            else if (lowerMessage.find("bye") != std::string::npos ||
+                     lowerMessage.find("goodbye") != std::string::npos ||
+                     lowerMessage.find("exit") != std::string::npos) {
+                response = "Goodbye! Feel free to come back anytime if you need assistance.";
+            }
+            else {
+                response = "I understand you're asking about: \"" + message + "\". I'm still learning, but I'm here to help! Could you be more specific about what you'd like me to assist you with?";
+            }
         }
 
         json result = {
@@ -846,6 +847,10 @@ json ModuleOrchestrator::processChatMessage(const json& chatData) {
         };
         return errorResponse;
     }
+}
+
+void ModuleOrchestrator::setLanguageProcessor(Language* lang) {
+    languageProcessor = lang;
 }
 
 // Learning and adaptation

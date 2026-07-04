@@ -1807,6 +1807,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.current_async_task: Optional[asyncio.Task] = None
         self.async_task_queue: List[asyncio.Task] = []
         self.task_serialization_lock = threading.Lock()
+        self.training_lock = asyncio.Lock()
 
         # Connection test synchronization
         self.connection_test_running = False
@@ -1852,6 +1853,7 @@ class CoreAI3DDashboard(QMainWindow):
 
         # Defer client initialization until event loop is running
         self.client_initialized = False
+        self._client_initializing = False
         # Set the API key from user input
         self.config.api_key = "2956a13167"
 
@@ -4646,6 +4648,14 @@ if __name__ == "__main__":
     def initialize_client(self):
         """Initialize CoreAI3D client - schedules async initialization"""
         try:
+            # Guard against multiple initializations
+            if hasattr(self, 'client_initialized') and self.client_initialized:
+                logger.info("Client already initialized, skipping")
+                return True
+            if hasattr(self, '_client_initializing') and self._client_initializing:
+                logger.info("Client initialization already in progress, skipping")
+                return True
+            self._client_initializing = True
             logger.info("Scheduling client initialization...")
             # Schedule the async initialization properly within the qasync event loop
             task = asyncio.create_task(self._initialize_client_async())
@@ -4656,10 +4666,12 @@ if __name__ == "__main__":
             return True
         except RuntimeError:
             # No running event loop yet, defer until event loop is available
+            self._client_initializing = False
             logger.warning("No running event loop, deferring client initialization")
             # This will be called again by the QTimer.singleShot in main()
             return False
         except Exception as e:
+            self._client_initializing = False
             logger.error(f"Failed to schedule client initialization: {str(e)}")
             return False
 
@@ -4710,6 +4722,11 @@ if __name__ == "__main__":
     async def _initialize_client_async(self):
         """Async client initialization"""
         try:
+            # Double-check guard
+            if hasattr(self, 'client_initialized') and self.client_initialized:
+                logger.info("Client already initialized (async check), skipping")
+                self._client_initializing = False
+                return
             logger.info("Starting client initialization...")
             logger.info(f"API URL: {self.config.api_url}")
             logger.info(f"WS URL: {self.config.ws_url}")
@@ -4765,12 +4782,15 @@ if __name__ == "__main__":
             logger.info("CoreAI3D client initialized successfully")
 
             self.client_initialized = True
+            self._client_initializing = False
 
         except ImportError as e:
+            self._client_initializing = False
             logger.error(f"Import error during client initialization: {str(e)}")
             logger.error("Make sure coreai3d_client.py is in the same directory or PYTHONPATH")
             raise
         except Exception as e:
+            self._client_initializing = False
             logger.error(f"Failed to initialize client: {str(e)}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")

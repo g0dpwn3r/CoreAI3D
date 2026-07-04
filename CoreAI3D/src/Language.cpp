@@ -729,3 +729,427 @@ void Language::learnFromConversation(const std::string& conversation) {
     }
 }
 
+void Language::learnFromExchange(const std::string& userInput, const std::string& aiResponse) {
+    conversationMemory.emplace_back(userInput, aiResponse);
+    if (conversationMemory.size() > 1000) {
+        conversationMemory.erase(conversationMemory.begin());
+    }
+    std::vector<std::string> tokens = tokenize(userInput);
+    std::string lowerInput = userInput;
+    std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::tolower);
+    std::vector<std::string> keywords;
+    for (const auto& token : tokens) {
+        std::string lowerToken = token;
+        std::transform(lowerToken.begin(), lowerToken.end(), lowerToken.begin(), ::tolower);
+        std::string cleaned;
+        for (char c : lowerToken) {
+            if (std::isalnum(static_cast<unsigned char>(c))) {
+                cleaned += c;
+            }
+        }
+        if (cleaned.length() > 3) {
+            keywords.push_back(cleaned);
+        }
+    }
+    for (const auto& keyword : keywords) {
+        if (knowledgeBase.find(keyword) == knowledgeBase.end()) {
+            knowledgeBase[keyword] = aiResponse;
+        }
+    }
+}
+
+std::string Language::respond(const std::string& message) {
+    std::lock_guard<std::mutex> lock(respondMutex);
+    if (!embeddingsLoaded || embeddingsByLang.empty()) {
+        embeddingsByLang = loadWordEmbeddingsFromFile(embedingFile, embeddingDim);
+        if (embeddingsByLang.empty()) {
+            embeddingsByLang = createEmbeddingsByLang(embeddingDim);
+        }
+        embeddingsLoaded = true;
+    }
+    currentLang = detectLanguage(message);
+    std::string lowerMsg = message;
+    std::transform(lowerMsg.begin(), lowerMsg.end(), lowerMsg.begin(), ::tolower);
+    std::string response;
+    if (lowerMsg == "hi" || lowerMsg.find("hello") != std::string::npos ||
+        lowerMsg.find("hi ") != std::string::npos || lowerMsg.find("hey") != std::string::npos ||
+        lowerMsg.find("greetings") != std::string::npos || lowerMsg.find("good morning") != std::string::npos ||
+        lowerMsg.find("good evening") != std::string::npos || lowerMsg.find("good afternoon") != std::string::npos) {
+        response = "Hello! I'm CoreAI3D, your AI assistant. I can help you with cybersecurity, programming, mathematics, science, and much more. What would you like to know?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("bye") != std::string::npos || lowerMsg.find("goodbye") != std::string::npos ||
+        lowerMsg.find("see you") != std::string::npos || lowerMsg.find("see ya") != std::string::npos) {
+        response = "Goodbye! Feel free to come back anytime you need help. I'm always here to assist you.";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("thank") != std::string::npos || lowerMsg.find("thanks") != std::string::npos) {
+        response = "You're welcome! I'm glad I could help. Is there anything else you'd like to know?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("how are you") != std::string::npos || lowerMsg.find("how do you do") != std::string::npos) {
+        response = "I'm doing great, thank you for asking! As an AI powered by custom neural networks, I'm always ready to help. What can I assist you with today?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("your name") != std::string::npos || lowerMsg.find("who are you") != std::string::npos) {
+        response = "I'm CoreAI3D, an advanced AI system built with custom neural networks for text classification and response generation. I specialize in cybersecurity, programming, mathematics, and general knowledge. I learn and improve with every conversation!";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("what can you do") != std::string::npos || (lowerMsg.find("help me") != std::string::npos && lowerMsg.length() < 20)) {
+        response = "I can help you with many things:\n"
+                   "- Cybersecurity advice and best practices\n"
+                   "- Programming help (Python, C++, web development, algorithms)\n"
+                   "- Mathematics and statistics\n"
+                   "- AI and machine learning concepts\n"
+                   "- System administration and networking\n"
+                   "- Science and general knowledge\n"
+                   "- Creative writing and brainstorming\n"
+                   "Just ask me anything and I'll do my best to help!";
+        learnFromExchange(message, response);
+        return response;
+    }
+    struct TopicEntry {
+        std::vector<std::string> keywords;
+        std::string response;
+    };
+    std::vector<TopicEntry> topicBank = {
+        {{"cybersecurity", "cyber", "hack", "security"},
+         "Cybersecurity is the practice of protecting systems, networks, and data from digital attacks. Key areas include:\n"
+         "- Network Security: Firewalls, IDS/IPS, VPNs, network segmentation\n"
+         "- Application Security: Secure coding, input validation, OWASP Top 10\n"
+         "- Cryptography: Encryption (AES-256, RSA), hashing (SHA-256, bcrypt), digital signatures\n"
+         "- Identity Management: MFA, SSO, zero-trust architecture, RBAC\n"
+         "- Incident Response: Detection, containment, eradication, recovery\n"
+         "- Compliance: GDPR, HIPAA, PCI-DSS, SOC2 frameworks\n"
+         "Would you like me to go deeper into any of these areas?"},
+        {{"password", "credential", "authentication"},
+         "Password security best practices:\n"
+         "- Use passwords of at least 12+ characters with mixed case, numbers, and symbols\n"
+         "- Use a reputable password manager (Bitwarden, 1Password, KeePass)\n"
+         "- Enable multi-factor authentication (MFA) wherever possible\n"
+         "- Never reuse passwords across different services\n"
+         "- Consider passkeys/passwordless authentication for new implementations\n"
+         "- Rotate credentials regularly and after any suspected breach\n"
+         "- Use hashing algorithms like bcrypt, Argon2, or scrypt for storing passwords (never MD5 or SHA1 alone)"},
+        {{"encrypt", "encryption", "aes", "rsa", "cipher"},
+         "Encryption is fundamental to data security:\n"
+         "- Symmetric: AES-256 (fast, good for bulk data), ChaCha20 (mobile-friendly)\n"
+         "- Asymmetric: RSA (2048+ bits), Elliptic Curve (ECDSA, Ed25519 - faster, smaller keys)\n"
+         "- Hashing: SHA-256 for integrity, bcrypt/Argon2 for passwords\n"
+         "- TLS 1.2+ for data in transit, AES-256 for data at rest\n"
+         "- Key management is critical - use HSMs or cloud KMS for production\n"
+         "- Quantum-resistant algorithms (CRYSTALS-Kyber, CRYSTALS-Dilithium) are emerging"},
+        {{"firewall", "network security", "ids", "ips"},
+         "Network security architecture essentials:\n"
+         "- Firewalls: Stateful inspection, next-gen (NGFW) with IPS, web application firewalls (WAF)\n"
+         "- IDS/IPS: Snort, Suricata, OSSEC for intrusion detection\n"
+         "- Network segmentation: DMZ, VLANs, microsegmentation for zero-trust\n"
+         "- VPNs: WireGuard (modern, fast), OpenVPN (mature), IPsec\n"
+         "- Monitoring: SIEM systems (Splunk, Elastic Security), network traffic analysis\n"
+         "- DNS security: DNSSEC, DNS filtering, DoH/DoT"},
+        {{"phish", "social engineering", "spam"},
+         "Phishing and social engineering defense:\n"
+         "- Verify sender email addresses carefully - check for subtle misspellings\n"
+         "- Don't click suspicious links - hover to preview URLs before clicking\n"
+         "- Be wary of urgent requests that pressure immediate action\n"
+         "- Use email filtering (SPF, DKIM, DMARC) for inbound protection\n"
+         "- Train users regularly on social engineering tactics\n"
+         "- Verify requests through secondary channels (phone, in-person)\n"
+         "- Implement URL sandboxing and attachment scanning"},
+        {{"malware", "virus", "trojan", "ransomware", "ransom"},
+         "Malware protection strategies:\n"
+         "- Keep all software updated with latest security patches\n"
+         "- Use reputable antivirus/anti-malware (Windows Defender is adequate for most users)\n"
+         "- Implement application whitelisting in enterprise environments\n"
+         "- Ransomware defense: regular offline backups, immutable storage, backup testing\n"
+         "- Behavioral analysis and endpoint detection (EDR) for advanced threats\n"
+         "- User education on avoiding malicious downloads and attachments\n"
+         "- Network segmentation to limit lateral movement"},
+        {{"python", "pip", "django", "flask", "pytorch", "numpy"},
+         "Python programming insights:\n"
+         "- Excellent for data science (NumPy, Pandas, Matplotlib), ML (PyTorch, TensorFlow), web (Django, Flask, FastAPI)\n"
+         "- Use virtual environments (venv, conda) to manage dependencies\n"
+         "- Type hints (typing module) improve code quality and IDE support\n"
+         "- List comprehensions and generator expressions for Pythonic code\n"
+         "- Popular testing: pytest, unittest\n"
+         "- Package distribution: PyPI, poetry, pipenv\n"
+         "- Python 3.11+ offers significant performance improvements"},
+        {{"c++", "cpp", "memory", "pointer", "stl", "template"},
+         "C++ programming best practices:\n"
+         "- Use RAII and smart pointers (unique_ptr, shared_ptr) over raw pointers\n"
+         "- Prefer STL containers (vector, map, unordered_map) and algorithms\n"
+         "- Use const correctness throughout your codebase\n"
+         "- Modern C++ (17/20/23): std::optional, std::variant, std::filesystem, concepts, ranges\n"
+         "- Memory management: understand stack vs heap, use value semantics where possible\n"
+         "- Build systems: CMake (industry standard), Meson, Bazel\n"
+         "- Static analysis: clang-tidy, cppcheck for catching bugs early"},
+        {{"algorithm", "data structure", "sort", "search", "complexity", "big o"},
+         "Core algorithms and data structures:\n"
+         "- Arrays, linked lists, stacks, queues, hash tables, trees, graphs\n"
+         "- Sorting: QuickSort (O(n log n) avg), MergeSort (stable), TimSort (used in practice)\n"
+         "- Searching: Binary search (O(log n)), BFS, DFS for graphs\n"
+         "- Dynamic programming for optimization problems\n"
+         "- Space/time complexity analysis using Big-O notation\n"
+         "- Balanced trees (AVL, Red-Black) for O(log n) operations\n"
+         "- Hash maps for O(1) average lookup"},
+        {{"web", "html", "css", "javascript", "react", "node", "api", "http", "rest"},
+         "Web development overview:\n"
+         "- Frontend: HTML5/CSS3/JavaScript, modern frameworks (React, Vue, Svelte, Angular)\n"
+         "- Backend: Node.js, Python (Django/Flask/FastAPI), Go, Rust, PHP\n"
+         "- APIs: REST (JSON over HTTP), GraphQL for flexible queries, gRPC for high performance\n"
+         "- Databases: PostgreSQL, MySQL (relational), MongoDB, Redis (NoSQL)\n"
+         "- DevOps: Docker, Kubernetes, CI/CD pipelines, cloud services\n"
+         "- Security: HTTPS, CORS, input sanitization, rate limiting, JWT for auth\n"
+         "- Performance: lazy loading, caching (CDN, Redis), code splitting"},
+        {{"neural network", "deep learning", "machine learning", "ai", "ml", "training", "model"},
+         "AI and Machine Learning fundamentals:\n"
+         "- Neural networks: input layer, hidden layers, output layer with activation functions\n"
+         "- Training: forward pass, loss function, backpropagation, gradient descent\n"
+         "- Types: CNN (images), RNN/LSTM (sequences), Transformer (language/vision)\n"
+         "- Key concepts: overfitting/underfitting, regularization, dropout, batch normalization\n"
+         "- Transfer learning allows using pretrained models for new tasks efficiently\n"
+         "- Frameworks: PyTorch, TensorFlow, JAX for research; scikit-learn for classical ML\n"
+         "- CoreAI3D uses a custom neural network with word embeddings for text classification!"},
+        {{"math", "calculus", "algebra", "statistics", "probability", "equation"},
+         "Mathematics assistance:\n"
+         "- Algebra: linear equations, polynomials, matrices, eigenvalues\n"
+         "- Calculus: limits, derivatives, integrals, differential equations\n"
+         "- Linear algebra: vector spaces, linear transformations, SVD, PCA\n"
+         "- Statistics: mean/median/mode, standard deviation, hypothesis testing, regression\n"
+         "- Probability: distributions (normal, binomial, Poisson), Bayes' theorem\n"
+         "- Discrete math: combinatorics, graph theory, number theory\n"
+         "- Numerical methods: Newton's method, Monte Carlo simulation"},
+        {{"database", "sql", "mysql", "postgres", "nosql", "query", "table"},
+         "Database management insights:\n"
+         "- SQL databases: PostgreSQL (feature-rich), MySQL (widely used), SQLite (embedded)\n"
+         "- NoSQL: MongoDB (document), Redis (key-value), Cassandra (wide-column), Neo4j (graph)\n"
+         "- Indexing: B-tree, hash, composite indexes for query optimization\n"
+         "- Normalization: 1NF through 3NF (or BCNF) to reduce data redundancy\n"
+         "- Transactions: ACID properties (Atomicity, Consistency, Isolation, Durability)\n"
+         "- Performance: query optimization, connection pooling, read replicas, sharding\n"
+         "- Backup strategies: full, incremental, point-in-time recovery"},
+        {{"linux", "unix", "bash", "shell", "command", "terminal", "admin", "sysadmin"},
+         "System administration and Linux:\n"
+         "- Package management: apt (Debian/Ubuntu), yum/dnf (RHEL/Fedora), pacman (Arch)\n"
+         "- Process management: ps, top/htop, kill, systemd, cron jobs\n"
+         "- File permissions: chmod, chown, ACLs, setuid/setgid\n"
+         "- Networking: ip, ss, netstat, iptables/nftables, tcpdump\n"
+         "- Log analysis: journalctl, /var/log, logrotate, central logging\n"
+         "- Security: SELinux/AppArmor, fail2ban, unattended-upgrades, hardening guides\n"
+         "- Automation: Bash scripts, Ansible, Terraform for infrastructure as code"},
+        {{"network", "tcp", "ip", "dns", "http", "protocol", "packet"},
+         "Computer networking concepts:\n"
+         "- OSI model: Physical, Data Link, Network, Transport, Session, Presentation, Application\n"
+         "- TCP/IP: reliable connection-oriented, UDP: fast connectionless\n"
+         "- DNS: domain resolution, record types (A, AAAA, CNAME, MX, TXT)\n"
+         "- HTTP/HTTPS: methods (GET, POST, PUT, DELETE), status codes, TLS handshake\n"
+         "- Subnetting: CIDR notation, private ranges (10.x, 172.16-31.x, 192.168.x)\n"
+         "- Routing: BGP, OSPF for internetwork communication\n"
+         "- Modern: HTTP/2 multiplexing, HTTP/3 over QUIC, IPv6 adoption"},
+        {{"science", "physics", "chemistry", "biology", "experiment"},
+         "Science topics I can help with:\n"
+         "- Physics: mechanics, thermodynamics, electromagnetism, quantum mechanics, relativity\n"
+         "- Chemistry: atomic structure, bonding, reactions, organic/inorganic chemistry\n"
+         "- Biology: cell biology, genetics, evolution, ecology, neuroscience\n"
+         "- Earth science: geology, meteorology, climate science\n"
+         "- Astronomy: stellar evolution, cosmology, exoplanets\n"
+         "- Scientific method: hypothesis, experimentation, peer review, reproducibility"},
+        {{"git", "version control", "commit", "branch", "merge", "repository"},
+         "Git version control essentials:\n"
+         "- Basic workflow: add, commit, push, pull, clone\n"
+         "- Branching: feature branches, gitflow, trunk-based development\n"
+         "- Collaboration: pull requests, code reviews, merge conflicts\n"
+         "- Advanced: rebase vs merge, cherry-pick, stash, reflog\n"
+         "- Best practices: clear commit messages, small focused commits, never force-push shared branches\n"
+         "- Platforms: GitHub, GitLab, Bitbucket for code hosting and CI/CD\n"
+         "- .gitignore for excluding files, tags for versioning releases"},
+        {{"docker", "container", "kubernetes", "k8s", "deploy", "devops"},
+         "Containerization and DevOps:\n"
+         "- Docker: Dockerfile, images, containers, docker-compose for multi-container apps\n"
+         "- Kubernetes: pods, deployments, services, ingress, configmaps, secrets\n"
+         "- CI/CD: GitHub Actions, GitLab CI, Jenkins pipelines\n"
+         "- Infrastructure as Code: Terraform, CloudFormation, Pulumi\n"
+         "- Monitoring: Prometheus, Grafana, ELK stack\n"
+         "- Cloud: AWS, GCP, Azure for scalable infrastructure"},
+        {{"cloud", "aws", "azure", "gcp", "serverless"},
+         "Cloud computing services:\n"
+         "- AWS: EC2 (compute), S3 (storage), Lambda (serverless), RDS (databases)\n"
+         "- Azure: VMs, Blob Storage, Functions, Cosmos DB, Active Directory\n"
+         "- GCP: Compute Engine, Cloud Storage, Cloud Functions, BigQuery\n"
+         "- Serverless benefits: auto-scaling, pay-per-use, no server management\n"
+         "- Best practices: least privilege IAM, encryption at rest/transit, multi-region\n"
+         "- Cost optimization: right-sizing, reserved instances, spot/preemptible instances"},
+        {{"testing", "test", "unit test", "integration", "tdd", "debug"},
+         "Software testing strategies:\n"
+         "- Unit tests: test individual functions in isolation (JUnit, pytest, Jest)\n"
+         "- Integration tests: verify component interactions\n"
+         "- End-to-end tests: simulate user workflows (Cypress, Selenium, Playwright)\n"
+         "- TDD: Red-Green-Refactor cycle for writing tests before code\n"
+         "- Coverage: aim for meaningful coverage, not just percentage\n"
+         "- Performance testing: load testing, stress testing, benchmarking\n"
+         "- CI integration: run tests automatically on every commit"},
+        {{"api", "rest", "graphql", "grpc", "endpoint", "request"},
+         "API design principles:\n"
+         "- REST: Use HTTP verbs correctly, proper status codes, resource-based URLs\n"
+         "- GraphQL: Flexible queries, single endpoint, schema-driven development\n"
+         "- gRPC: Protocol buffers, streaming, high performance for microservices\n"
+         "- Authentication: API keys, OAuth 2.0, JWT tokens\n"
+         "- Documentation: OpenAPI/Swagger, automatic doc generation\n"
+         "- Rate limiting, pagination, caching, versioning for robust APIs\n"
+         "- Error handling: consistent error format, meaningful error messages"},
+        {{"algorithm", "sort", "complexity", "performance", "optimization", "efficient"},
+         "Algorithm optimization:\n"
+         "- Choose the right data structure: hash maps for O(1) lookup, sorted arrays for binary search\n"
+         "- Divide and conquer: break large problems into manageable subproblems\n"
+         "- Memoization and dynamic programming to avoid redundant computation\n"
+         "- Use appropriate sorting: Timsort (general), radix sort (integers), counting sort (small range)\n"
+         "- Profile before optimizing - measure actual bottlenecks\n"
+         "- Cache frequently accessed data, use lazy evaluation"}
+    };
+    auto containsAny = [&](const std::string& text, const std::vector<std::string>& words) {
+        for (const auto& w : words) {
+            if (text.find(w) != std::string::npos) return true;
+        }
+        return false;
+    };
+    for (const auto& topic : topicBank) {
+        if (containsAny(lowerMsg, topic.keywords)) {
+            response = topic.response;
+            learnFromExchange(message, response);
+            return response;
+        }
+    }
+    std::vector<std::string> tokens = tokenize(message);
+    float bestMatchScore = 0.0f;
+    std::string bestMatchResponse;
+    for (const auto& token : tokens) {
+        std::string lowerToken = token;
+        std::transform(lowerToken.begin(), lowerToken.end(), lowerToken.begin(), ::tolower);
+        std::string cleaned;
+        for (char c : lowerToken) {
+            if (std::isalnum(static_cast<unsigned char>(c))) {
+                cleaned += c;
+            }
+        }
+        if (cleaned.length() <= 3) continue;
+        auto it = knowledgeBase.find(cleaned);
+        if (it != knowledgeBase.end()) {
+            float matchScore = 0.0f;
+            for (const auto& t : tokens) {
+                std::string lt = t;
+                std::transform(lt.begin(), lt.end(), lt.begin(), ::tolower);
+                std::string cl;
+                for (char c : lt) { if (std::isalnum(static_cast<unsigned char>(c))) cl += c; }
+                if (knowledgeBase.count(cl) && knowledgeBase[cl] == it->second) {
+                    matchScore += 1.0f;
+                }
+            }
+            if (matchScore > bestMatchScore) {
+                bestMatchScore = matchScore;
+                bestMatchResponse = it->second;
+            }
+        }
+    }
+    if (bestMatchScore >= 2.0f && !bestMatchResponse.empty()) {
+        response = bestMatchResponse;
+        learnFromExchange(message, response);
+        return response;
+    }
+    std::vector<float> textEmbedding = encodeText(message);
+    std::string classification = "";
+    if (!textEmbedding.empty() && core) {
+        classification = answer(textEmbedding);
+    }
+    if (lowerMsg.find("how") != std::string::npos && lowerMsg.find("to") != std::string::npos) {
+        std::string topic = "the topic you mentioned";
+        std::vector<std::string> stopWords = {"how", "to", "the", "a", "an", "is", "are", "do", "does", "i", "you", "we", "they", "it", "my", "your"};
+        for (const auto& token : tokens) {
+            std::string lt = token;
+            std::transform(lt.begin(), lt.end(), lt.begin(), ::tolower);
+            bool isStop = std::find(stopWords.begin(), stopWords.end(), lt) != stopWords.end();
+            if (!isStop && lt.length() > 3) {
+                topic = lt;
+                break;
+            }
+        }
+        response = "To accomplish that with \"" + topic + "\", here's my approach:\n"
+                   "1. First, understand the requirements and break down the problem\n"
+                   "2. Research the best practices and available tools/libraries\n"
+                   "3. Implement a solution incrementally, testing each step\n"
+                   "4. Review and optimize for edge cases and performance\n"
+                   "Could you provide more details about your specific use case? I can give more targeted guidance.";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("what is") != std::string::npos || lowerMsg.find("what are") != std::string::npos ||
+        lowerMsg.find("define") != std::string::npos || lowerMsg.find("explain") != std::string::npos) {
+        response = "That's an interesting question about \"" + message + "\". Let me share what I know:\n"
+                   "I'd need to analyze this topic further to give you a comprehensive answer. "
+                   "Could you specify which aspect you're most interested in? For example:\n"
+                   "- A high-level overview or detailed technical explanation\n"
+                   "- Practical applications or theoretical foundations\n"
+                   "- Comparison with related concepts\n"
+                   "The more specific you are, the more helpful my response will be!";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("why") != std::string::npos) {
+        response = "Great analytical question! Understanding 'why' helps build deeper knowledge.\n"
+                   "For your question about \"" + message + "\", the answer typically involves:\n"
+                   "- Historical context and evolution of the concept\n"
+                   "- Underlying principles and cause-effect relationships\n"
+                   "- Practical implications and real-world applications\n"
+                   "Could you tell me more about the specific context? I can provide a more targeted explanation.";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (lowerMsg.find("advice") != std::string::npos || lowerMsg.find("recommend") != std::string::npos ||
+        lowerMsg.find("should i") != std::string::npos || lowerMsg.find("best") != std::string::npos) {
+        response = "Here's my recommendation regarding \"" + message + "\":\n"
+                   "1. Consider your specific requirements and constraints\n"
+                   "2. Research multiple approaches and their trade-offs\n"
+                   "3. Start with a well-established, proven solution\n"
+                   "4. Iterate and improve based on real-world feedback\n"
+                   "What specific factors matter most to you? I can tailor my advice to your situation.";
+        learnFromExchange(message, response);
+        return response;
+    }
+    if (!classification.empty() && classification.find("Core:") == std::string::npos) {
+        if (classification == "Wisdom" || classification == "Knowledge") {
+            response = "That's a thoughtful question about \"" + message + "\". "
+                       "Based on my analysis, this seems like an area where deeper understanding is valuable. "
+                       "I'd recommend exploring this topic through multiple angles - "
+                       "theoretical foundations, practical applications, and expert perspectives. "
+                       "What specific aspect would you like to explore further?";
+        } else if (classification == "Positive") {
+            response = "That's a great point! Regarding \"" + message + "\", I appreciate the positive angle. "
+                       "Would you like me to expand on any particular aspect or provide additional information?";
+        } else if (classification == "Critical" || classification == "Negative") {
+            response = "I understand you're raising an important concern about \"" + message + "\". "
+                       "Let me help address this: could you provide more context about the specific issue? "
+                       "The more details you share, the better I can assist in finding a solution.";
+        } else {
+            response = "I've processed your message about \"" + message + "\". "
+                       "I'm here to help with a wide range of topics including cybersecurity, programming, "
+                       "mathematics, science, and technology. Could you tell me more specifically what you'd like to know?";
+        }
+    } else {
+        response = "I received your message: \"" + message + "\"\n\n"
+                   "I'm CoreAI3D, an AI assistant powered by a custom neural network. I can discuss:\n"
+                   "- Cybersecurity (passwords, encryption, firewalls, malware, network security)\n"
+                   "- Programming (Python, C++, web development, algorithms, testing)\n"
+                   "- Mathematics (algebra, calculus, statistics, probability)\n"
+                   "- AI/ML (neural networks, deep learning, training)\n"
+                   "- Systems (Linux, databases, networking, cloud)\n"
+                   "- And many more topics!\n\n"
+                   "What would you like to explore?";
+    }
+    learnFromExchange(message, response);
+    return response;
+}
+

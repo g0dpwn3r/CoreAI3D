@@ -5,6 +5,7 @@
 #include "Train.hpp"
 #include "Core.hpp"
 #include "Database.hpp"
+#include <mutex>
 
 class Training;
 class CoreAI;
@@ -32,6 +33,8 @@ public:
     std::vector<float> generateRandomEmbedding();
     std::unordered_map<std::string, std::vector<float>> loadWordEmbeddingsFromFile(const std::string& filepath, int expectedDim);
     int chat();
+    std::string respond(const std::string& message);
+    void learnFromExchange(const std::string& userInput, const std::string& aiResponse);
     std::unordered_map<std::string, std::vector<float>> embeddingsByLang;
 
     std::unordered_map<std::string, std::vector<float>> createEmbeddingsByLang(int embeddingDim);
@@ -54,6 +57,11 @@ private:
     int sslDummy;
     bool createTables;
     std::unordered_map<std::string, std::vector<float>> db;
+
+    std::vector<std::pair<std::string, std::string>> conversationMemory;
+    std::unordered_map<std::string, std::string> knowledgeBase;
+    bool embeddingsLoaded = false;
+    std::mutex respondMutex;
 
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Training> trainer;
