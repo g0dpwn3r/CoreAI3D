@@ -63,6 +63,14 @@ private:
     bool embeddingsLoaded = false;
     std::mutex respondMutex;
 
+    // Personality and emotional learning
+    std::string userName = "";
+    std::unordered_map<std::string, int> emotionFrequency;  // Track emotional themes user brings up
+    std::unordered_map<std::string, int> topicPreferences;  // Track topics user cares about
+    int conversationCount = 0;
+    float happinessScore = 0.5f;  // Rolling average of user's emotional state (0.0 = sad, 1.0 = happy)
+    int humorLevel = 0;  // 0 = neutral, scales with user's humor usage
+
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Training> trainer;
     std::unique_ptr<class Database> database;

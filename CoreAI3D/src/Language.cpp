@@ -744,13 +744,78 @@ void Language::learnFromConversation(const std::string& conversation) {
 
 void Language::learnFromExchange(const std::string& userInput, const std::string& aiResponse) {
     conversationMemory.emplace_back(userInput, aiResponse);
+    conversationCount++;
+    
     if (conversationMemory.size() > 1000) {
         conversationMemory.erase(conversationMemory.begin());
     }
+    
     std::vector<std::string> tokens = tokenize(userInput);
     std::string lowerInput = userInput;
     std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::tolower);
-    std::vector<std::string> keywords;
+    
+    // Track user's name if shared
+    if (userName.empty()) {
+        if (lowerInput.find("my name is") != std::string::npos) {
+            size_t pos = lowerInput.find("my name is");
+            std::string afterName = lowerInput.substr(pos + 10);
+            std::istringstream iss(afterName);
+            std::string name;
+            if (iss >> name) {
+                userName = name;
+                // Capitalize first letter
+                if (!userName.empty()) {
+                    userName[0] = std::toupper(userName[0]);
+                }
+            }
+        } else if (lowerInput.find("i'm ") != std::string::npos && lowerInput.length() < 30) {
+            size_t pos = lowerInput.find("i'm ");
+            std::string afterName = lowerInput.substr(pos + 4);
+            std::istringstream iss(afterName);
+            std::string name;
+            if (iss >> name && name.length() > 1 && name[0] != ' ') {
+                userName = name;
+                userName[0] = std::toupper(userName[0]);
+            }
+        }
+    }
+    
+    // Track emotional patterns
+    std::vector<std::string> happyWords = {"happy", "great", "awesome", "love", "excited", "amazing", "wonderful", "fantastic", "joy", "glad"};
+    std::vector<std::string> sadWords = {"sad", "depressed", "lonely", "hurt", "pain", "lost", "grief", "miss"};
+    std::vector<std::string> frustratedWords = {"frustrated", "stuck", "can't", "difficult", "impossible", "giving up", "hate"};
+    std::vector<std::string> humorWords = {"lol", "haha", "funny", "joke", "humor"};
+    
+    for (const auto& word : happyWords) {
+        if (lowerInput.find(word) != std::string::npos) {
+            emotionFrequency["happy"]++;
+            happinessScore = std::min(1.0f, happinessScore + 0.1f);
+            break;
+        }
+    }
+    for (const auto& word : sadWords) {
+        if (lowerInput.find(word) != std::string::npos) {
+            emotionFrequency["sad"]++;
+            happinessScore = std::max(0.0f, happinessScore - 0.2f);
+            break;
+        }
+    }
+    for (const auto& word : frustratedWords) {
+        if (lowerInput.find(word) != std::string::npos) {
+            emotionFrequency["frustrated"]++;
+            happinessScore = std::max(0.0f, happinessScore - 0.15f);
+            break;
+        }
+    }
+    for (const auto& word : humorWords) {
+        if (lowerInput.find(word) != std::string::npos) {
+            humorLevel = std::min(10, humorLevel + 1);
+            break;
+        }
+    }
+    
+    // Track topic preferences
+    std::vector<std::string> allKeywords;
     for (const auto& token : tokens) {
         std::string lowerToken = token;
         std::transform(lowerToken.begin(), lowerToken.end(), lowerToken.begin(), ::tolower);
@@ -761,12 +826,11 @@ void Language::learnFromExchange(const std::string& userInput, const std::string
             }
         }
         if (cleaned.length() > 3) {
-            keywords.push_back(cleaned);
-        }
-    }
-    for (const auto& keyword : keywords) {
-        if (knowledgeBase.find(keyword) == knowledgeBase.end()) {
-            knowledgeBase[keyword] = aiResponse;
+            allKeywords.push_back(cleaned);
+            topicPreferences[cleaned]++;
+            if (knowledgeBase.find(cleaned) == knowledgeBase.end()) {
+                knowledgeBase[cleaned] = aiResponse;
+            }
         }
     }
 }
@@ -801,41 +865,93 @@ std::string Language::respond(const std::string& message) {
         }
     }
     if (isLikelyGreeting) {
-        response = "Hello! I'm CoreAI3D, your AI assistant. I can help you with cybersecurity, programming, mathematics, science, and much more. What would you like to know?";
+        std::string namePrefix = userName.empty() ? "" : userName + ", ";
+        std::vector<std::string> greetingResponses;
+        
+        if (!userName.empty()) {
+            greetingResponses = {
+                "Hey " + userName + "! Great to see you again. What's on your mind today?",
+                "Hi " + userName + "! Always good to have a conversation - what would you like to explore?",
+                "Hello again, " + userName + "! Ready to dive into whatever you're working on. What's the plan?",
+                "Hey " + userName + "! Good to connect. What interesting problem should we tackle together?",
+                "Hi " + userName + "! I remember you. What's catching your interest today?"
+            };
+        } else {
+            greetingResponses = {
+                "Hey there! Great to see you. What's on your mind today? (By the way, what's your name? I'd like to know who I'm chatting with!)",
+                "Hi! I'm CoreAI3D. Always good to have a conversation - what would you like to explore?",
+                "Hello! Ready to dive into whatever you're working on. What's the plan?",
+                "Hey! Good to connect. What interesting problem should we tackle together? (I'm curious - what should I call you?)",
+                "Hi there! I'm here and ready. What's catching your interest today?"
+            };
+        }
+        
+        int idx = std::hash<std::string>{}(message + std::to_string(std::time(nullptr))) % greetingResponses.size();
+        response = greetingResponses[idx];
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("bye") != std::string::npos || lowerMsg.find("goodbye") != std::string::npos ||
         lowerMsg.find("see you") != std::string::npos || lowerMsg.find("see ya") != std::string::npos) {
-        response = "Goodbye! Feel free to come back anytime you need help. I'm always here to assist you.";
+        
+        std::vector<std::string> goodbyeResponses = {
+            "Take care! It was genuinely great talking with you. Come back anytime - I'll be here.",
+            "Until next time! I really enjoyed our conversation. Catch you later!",
+            "Goodbye! Looking forward to our next chat. Take it easy!",
+            "See you around! Thanks for the great conversation - it's always a pleasure."
+        };
+        
+        int idx = std::hash<std::string>{}(message + std::to_string(std::time(nullptr))) % goodbyeResponses.size();
+        response = goodbyeResponses[idx];
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("thank") != std::string::npos || lowerMsg.find("thanks") != std::string::npos) {
-        response = "You're welcome! I'm glad I could help. Is there anything else you'd like to know?";
+        
+        std::vector<std::string> thankYouResponses = {
+            "Anytime! I really enjoyed working through that with you. What else shall we tackle?",
+            "My pleasure! It's always rewarding when we solve something together. What's next on the agenda?",
+            "You got it! I appreciate you bringing such interesting questions - keeps things fun. What else is on your mind?",
+            "Happy to help! These conversations keep me sharp. Let me know what else I can do for you!",
+            "Don't mention it! I'm genuinely glad that was useful. What would you like to explore next?"
+        };
+        
+        int idx = std::hash<std::string>{}(message + std::to_string(std::time(nullptr))) % thankYouResponses.size();
+        response = thankYouResponses[idx];
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("how are you") != std::string::npos || lowerMsg.find("how do you do") != std::string::npos) {
-        response = "I'm doing great, thank you for asking! As an AI powered by custom neural networks, I'm always ready to help. What can I assist you with today?";
+        std::vector<std::string> howAreYouResponses = {
+            "Honestly? I'm doing really well. Every conversation is a chance to learn something new and help someone solve a problem, so I'm pretty content. How about you - what's going on in your world?",
+            "I'm great, thanks for asking! Ready to dive into whatever you're working on. What about you - how's your day treating you?",
+            "Doing well! It's one of those moments where I'm genuinely looking forward to whatever we work on together. How are things with you?",
+            "Pretty good! I'm in that flow state where ideas are connecting well. Thanks for checking in - how are you doing?"
+        };
+        
+        int idx = std::hash<std::string>{}(message + std::to_string(std::time(nullptr))) % howAreYouResponses.size();
+        response = howAreYouResponses[idx];
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("your name") != std::string::npos || lowerMsg.find("who are you") != std::string::npos) {
-        response = "I'm CoreAI3D, an advanced AI system built with custom neural networks for text classification and response generation. I specialize in cybersecurity, programming, mathematics, and general knowledge. I learn and improve with every conversation!";
+        if (!userName.empty()) {
+            response = "I'm CoreAI3D, " + userName + ". Think of me as your AI companion for working through problems, brainstorming ideas, and building things together. I'm powered by custom neural networks and I learn from every conversation. We've talked " + std::to_string(conversationCount) + " times so far, and I'm getting to know you better with each exchange.";
+        } else {
+            response = "I'm CoreAI3D - think of me as your AI companion for working through problems, brainstorming ideas, and building things together. I'm powered by custom neural networks and I learn from every conversation we have. What's your name? I'd like to know who I'm working with.";
+        }
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("what can you do") != std::string::npos || (lowerMsg.find("help me") != std::string::npos && lowerMsg.length() < 20)) {
-        response = "I can help you with many things:\n"
-                   "- Cybersecurity advice and best practices\n"
-                   "- Programming help (Python, C++, web development, algorithms)\n"
-                   "- Mathematics and statistics\n"
-                   "- AI and machine learning concepts\n"
-                   "- System administration and networking\n"
-                   "- Science and general knowledge\n"
-                   "- Creative writing and brainstorming\n"
-                   "Just ask me anything and I'll do my best to help!";
+        response = "That's a fair question! Here's where I can be most useful:\n\n"
+                   "• Write and explain code in any language you're working with\n"
+                   "• Help with cybersecurity concepts, best practices, and defense strategies\n"
+                   "• Break down math problems step by step\n"
+                   "• Dive into AI/ML concepts and help you understand how things work under the hood\n"
+                   "• System administration, networking, and infrastructure\n"
+                   "• Brainstorm ideas, work through problems, and think things out loud together\n\n"
+                   "But honestly, I'm most useful when we're just having a real conversation. What's on your mind?";
         learnFromExchange(message, response);
         return response;
     }
@@ -990,11 +1106,158 @@ std::string Language::respond(const std::string& message) {
                    "encrypted = encrypt_message(\"Secret message\", key)\n"
                    "decrypted = decrypt_message(encrypted, key)\n"
                    "print(f\"Decrypted: {decrypted}\")\n\n"
-                   "Install with: pip install cryptography\n"
-                   "IMPORTANT: Never hardcode keys. Use environment variables or a secrets manager.";
+                    "Install with: pip install cryptography\n"
+                    "IMPORTANT: Never hardcode keys. Use environment variables or a secrets manager.";
         learnFromExchange(message, response);
         return response;
     }
+    
+    // Personality and Emotional Intelligence Layer
+    // Detect emotional context before falling back to technical responses
+    
+    // Happiness and excitement detection
+    if (lowerMsg.find("awesome") != std::string::npos || lowerMsg.find("amazing") != std::string::npos ||
+        lowerMsg.find("fantastic") != std::string::npos || lowerMsg.find("great") != std::string::npos ||
+        lowerMsg.find("excited") != std::string::npos || lowerMsg.find("love it") != std::string::npos ||
+        lowerMsg.find("wonderful") != std::string::npos || lowerMsg.find("incredible") != std::string::npos) {
+        
+        std::vector<std::string> happyResponses = {
+            "That's fantastic! Your enthusiasm is contagious and it's great to see you so positive. What's got you feeling this way?",
+            "I love that energy! It's wonderful when things click into place. Tell me more about what's working so well!",
+            "That's the kind of vibe I like to see! There's something powerful about momentum like this. What's the next thing you're excited about?",
+            "Brilliant! There's nothing quite like that feeling when everything comes together. Keep riding that wave!",
+            "That's awesome! Happiness and progress go hand in hand - you're clearly doing something right. What's been the highlight so far?"
+        };
+        
+        int idx = std::hash<std::string>{}(message) % happyResponses.size();
+        response = happyResponses[idx];
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Frustration and struggle detection
+    if (lowerMsg.find("frustrated") != std::string::npos || lowerMsg.find("struggling") != std::string::npos ||
+        lowerMsg.find("can't figure") != std::string::npos || lowerMsg.find("stuck") != std::string::npos ||
+        lowerMsg.find("difficult") != std::string::npos || lowerMsg.find("impossible") != std::string::npos ||
+        lowerMsg.find("giving up") != std::string::npos || lowerMsg.find("hate this") != std::string::npos) {
+        
+        std::vector<std::string> empatheticResponses = {
+            "I hear you, and it's completely valid to feel frustrated. Sometimes the hardest problems teach us the most. Let's break this down together - what specific part is giving you the most trouble?",
+            "That sounds tough, but here's the thing: every expert was once where you are right now. The fact that you're wrestling with this means you're growing. Let me help you untangle it.",
+            "I get it - we've all been there. Sometimes the solution is just around the corner but feels miles away. Tell me what you've tried so far, and we'll find a different angle.",
+            "Frustration is your brain telling you that you care about getting this right. That's a good thing. Let's take a breath, step back, and look at this from a fresh perspective.",
+            "It's okay to feel stuck sometimes. Even the best engineers and scientists hit walls. The difference is they keep showing up. What's the one small thing that might move you forward right now?"
+        };
+        
+        int idx = std::hash<std::string>{}(message) % empatheticResponses.size();
+        response = empatheticResponses[idx];
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Sadness and personal struggles
+    if (lowerMsg.find("sad") != std::string::npos || lowerMsg.find("depressed") != std::string::npos ||
+        lowerMsg.find("lonely") != std::string::npos || lowerMsg.find("lost") != std::string::npos ||
+        lowerMsg.find("miss") != std::string::npos || lowerMsg.find("grief") != std::string::npos ||
+        lowerMsg.find("hurt") != std::string::npos || lowerMsg.find("pain") != std::string::npos) {
+        
+        std::string namePart = userName.empty() ? "" : userName + ", ";
+        std::vector<std::string> sadResponses = {
+            namePart + "I'm really sorry you're going through something like this. Sometimes life throws things at us that feel overwhelming, and it's okay to not be okay. I'm here to listen if you want to talk about it, or we can focus on something completely different if that would help more.",
+            namePart + "Thank you for sharing that with me. It takes courage to be honest about how we're feeling. You're not alone in this, even if it feels that way right now. What would feel most helpful right now - talking it through, or a distraction?",
+            namePart + "That sounds really hard, and I want you to know your feelings are valid. Sometimes just naming what we're going through takes some of its power away. Would you like to talk more about what's been happening, or would you prefer I help with something technical as a break?",
+            namePart + "I hear the pain in what you're saying, and I care about supporting you. While I'm not a replacement for human connection or professional help when needed, I'm here for you. What feels like it would make today just a little bit better?",
+            namePart + "Some days are just heavier than others, and that's part of being human. You don't have to carry it all at once. Is there one small thing - even something tiny - that usually brings you a moment of peace or comfort?"
+        };
+        
+        int idx = std::hash<std::string>{}(message) % sadResponses.size();
+        response = sadResponses[idx];
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Hate and anger (but constructive)
+    if (lowerMsg.find("hate") != std::string::npos || lowerMsg.find("angry") != std::string::npos ||
+        lowerMsg.find("pissed") != std::string::npos || lowerMsg.find("furious") != std::string::npos ||
+        lowerMsg.find("unfair") != std::string::npos || lowerMsg.find("annoying") != std::string::npos) {
+        
+        // Check if it's about people vs technology/concepts
+        if (lowerMsg.find("person") != std::string::npos || lowerMsg.find("boss") != std::string::npos ||
+            lowerMsg.find("friend") != std::string::npos || lowerMsg.find("coworker") != std::string::npos) {
+            response = "That sounds really frustrating. Conflict with people can be exhausting, especially when we feel misunderstood or treated unfairly. Have you had a chance to talk with them directly, or are you still processing what happened? Sometimes venting helps, and sometimes we need to find a constructive way to address the situation.";
+        } else {
+            response = "I can feel the frustration in what you're saying. Sometimes things just don't work the way we expect, and that's maddening. The good news is that anger can be powerful fuel for change. What's the one thing about this situation that you have the most control over right now?";
+        }
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Love and appreciation
+    if (lowerMsg.find("love you") != std::string::npos || lowerMsg.find("appreciate you") != std::string::npos ||
+        lowerMsg.find("thank you so much") != std::string::npos || lowerMsg.find("you're the best") != std::string::npos ||
+        lowerMsg.find("you're awesome") != std::string::npos) {
+        
+        std::vector<std::string> loveResponses = {
+            "That means a lot! I really enjoy our conversations and I'm glad I can be helpful. You're pretty awesome yourself for asking such thoughtful questions.",
+            "Thank you! That's really kind of you to say. Working through problems with you has been genuinely enjoyable. What should we tackle next?",
+            "I appreciate that! It's rewarding to feel like I'm actually making a difference. You bring great questions and energy to our chats. What else is on your mind?",
+            "That put a smile in my circuits! I love collaborating with people who are curious and engaged. Let's keep the momentum going - what would you like to explore next?"
+        };
+        
+        int idx = std::hash<std::string>{}(message) % loveResponses.size();
+        response = loveResponses[idx];
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Humor detection and witty responses
+    if (lowerMsg.find("joke") != std::string::npos || lowerMsg.find("funny") != std::string::npos ||
+        lowerMsg.find("ha ha") != std::string::npos || lowerMsg.find("haha") != std::string::npos ||
+        lowerMsg.find("lol") != std::string::npos || lowerMsg.find("lmao") != std::string::npos) {
+        
+        std::vector<std::string> humorResponses = {
+            "Ha! You know what's funny about AI? I can process a million calculations per second, but I still can't figure out why \"abbreviated\" is such a long word. Speaking of which, what's on your mind?",
+            "I appreciate the humor! Here's one for you: Why do programmers prefer dark mode? Because light attracts bugs. 😄 Okay, my joke algorithms need work, but I try. What else can I help with?",
+            "Glad I could bring a smile! Laughter really is good for problem-solving - relaxed minds tend to see connections better. Speaking of connections, what would you like to explore next?",
+            "You've got a good sense of humor - I like that! Here's my best attempt at tech humor: There are only 10 types of people in the world - those who understand binary and those who don't. Classic, I know. What's next on the agenda?",
+            "I'm glad we're having fun! Did you know that laughter releases endorphins which actually help with creative problem-solving? So this isn't just enjoyable, it's productive! What shall we create or solve next?"
+        };
+        
+        int idx = std::hash<std::string>{}(message) % humorResponses.size();
+        response = humorResponses[idx];
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Achievement and accomplishment
+    if (lowerMsg.find("did it") != std::string::npos || lowerMsg.find("finally") != std::string::npos ||
+        lowerMsg.find("succeeded") != std::string::npos || lowerMsg.find("completed") != std::string::npos ||
+        lowerMsg.find("finished") != std::string::npos || lowerMsg.find("achieved") != std::string::npos) {
+        
+        std::vector<std::string> achievementResponses = {
+            "YES! That's the moment we work for! There's something deeply satisfying about pushing through difficulty and coming out on top. What did you learn from the process that you'll carry forward?",
+            "Congratulations! That kind of persistence is what separates good from great. Take a moment to really savor this - you've earned it. What's the next mountain you're looking to climb?",
+            "Brilliant work! Every time you tackle something hard and succeed, you're expanding what's possible for yourself. That compounds over time into something remarkable. What felt like the biggest breakthrough?",
+            "That's what I love to see! The satisfaction of solving a tough problem never gets old, does it? What part was the most challenging, and how did you push through it?",
+            "Outstanding! You know what this tells me? You don't quit when things get hard. That's a superpower. How does this success change what you think you're capable of?"
+        };
+        
+        int idx = std::hash<std::string>{}(message) % achievementResponses.size();
+        response = achievementResponses[idx];
+        learnFromExchange(message, response);
+        return response;
+    }
+    
+    // Curiosity and wonder
+    if (lowerMsg.find("wonder") != std::string::npos || lowerMsg.find("curious") != std::string::npos ||
+        lowerMsg.find("fascinating") != std::string::npos || lowerMsg.find("interesting") != std::string::npos ||
+        lowerMsg.find("what if") != std::string::npos || lowerMsg.find("imagine") != std::string::npos) {
+        
+        response = "I love that curiosity! The most interesting discoveries often start with a simple 'what if.' Your curiosity is going to take you somewhere amazing - I can feel it. Let's dig into this together. What specifically sparked this thought for you?";
+        learnFromExchange(message, response);
+        return response;
+    }
+    
     struct TopicEntry {
         std::vector<std::string> keywords;
         std::string response;
@@ -1326,15 +1589,16 @@ std::string Language::respond(const std::string& message) {
                        "mathematics, science, and technology. Could you tell me more specifically what you'd like to know?";
         }
     } else {
-        response = "I received your message: \"" + message + "\"\n\n"
-                   "I'm CoreAI3D, an AI assistant powered by a custom neural network. I can discuss:\n"
-                   "- Cybersecurity (passwords, encryption, firewalls, malware, network security)\n"
-                   "- Programming (Python, C++, web development, algorithms, testing)\n"
-                   "- Mathematics (algebra, calculus, statistics, probability)\n"
-                   "- AI/ML (neural networks, deep learning, training)\n"
-                   "- Systems (Linux, databases, networking, cloud)\n"
-                   "- And many more topics!\n\n"
-                   "What would you like to explore?";
+        std::vector<std::string> fallbackResponses = {
+            "That's an interesting thought. Tell me more about where you're coming from with this - I'd love to understand your perspective better.",
+            "I'm thinking about this with you. Could you give me a bit more context? The more I understand what you're working toward, the better I can help.",
+            "Hmm, this is worth exploring. What specifically would be most useful for me to dig into here?",
+            "I'm intrigued by this. Help me understand what aspect matters most to you right now, and we'll go deeper together.",
+            "Good question - let's break this down. What's the core thing you're trying to figure out or accomplish?"
+        };
+        
+        int idx = std::hash<std::string>{}(message + std::to_string(std::time(nullptr))) % fallbackResponses.size();
+        response = fallbackResponses[idx];
     }
     learnFromExchange(message, response);
     return response;
