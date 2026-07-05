@@ -71,6 +71,13 @@ private:
     float happinessScore = 0.5f;  // Rolling average of user's emotional state (0.0 = sad, 1.0 = happy)
     int humorLevel = 0;  // 0 = neutral, scales with user's humor usage
 
+    // Web search
+    bool lastResponseUsedWebSearch = false;
+    std::string lastWebSearchQuery = "";
+    std::string webSearch(const std::string& query);
+    std::string summarizeWebResult(const std::string& query, const std::string& rawResult);
+    bool shouldSearchWeb(const std::string& message);
+
     std::unique_ptr<CoreAI> core;
     std::unique_ptr<Training> trainer;
     std::unique_ptr<class Database> database;

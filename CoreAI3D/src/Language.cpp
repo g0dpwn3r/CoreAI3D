@@ -1,4 +1,5 @@
 ﻿#include "Language.hpp"
+#include <cstdio>
 Language::Language(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort,
     std::string& dbUser, std::string& dbPassword,
     std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons, int sessionId)
@@ -781,7 +782,7 @@ void Language::learnFromExchange(const std::string& userInput, const std::string
     }
     
     // Track emotional patterns
-    std::vector<std::string> happyWords = {"happy", "great", "awesome", "love", "excited", "amazing", "wonderful", "fantastic", "joy", "glad"};
+    std::vector<std::string> happyWords = {"happy", "great", "awesome", "love", "excited", "amazing", "wonderful", "fantastic", "joy", "glad", "good", "well", "fine", "okay", "ok", "nice", "pleased"};
     std::vector<std::string> sadWords = {"sad", "depressed", "lonely", "hurt", "pain", "lost", "grief", "miss"};
     std::vector<std::string> frustratedWords = {"frustrated", "stuck", "can't", "difficult", "impossible", "giving up", "hate"};
     std::vector<std::string> humorWords = {"lol", "haha", "funny", "joke", "humor"};
@@ -835,6 +836,166 @@ void Language::learnFromExchange(const std::string& userInput, const std::string
     }
 }
 
+bool Language::shouldSearchWeb(const std::string& message) {
+    std::string lowerMsg = message;
+    std::transform(lowerMsg.begin(), lowerMsg.end(), lowerMsg.begin(), ::tolower);
+    
+    std::vector<std::string> searchTriggers = {
+        "search for", "look up", "google", "find me", "search the web",
+        "latest news", "latest on", "current", "recent", "what's new",
+        "what is newest", "breaking news", "today", "this week",
+        "tell me about the latest", "what happened with", "recently"
+    };
+    
+    for (const auto& trigger : searchTriggers) {
+        if (lowerMsg.find(trigger) != std::string::npos) return true;
+    }
+    
+    if ((lowerMsg.find("what is") != std::string::npos || lowerMsg.find("who is") != std::string::npos || lowerMsg.find("where is") != std::string::npos) &&
+        (lowerMsg.find("right now") != std::string::npos || lowerMsg.find("today") != std::string::npos || lowerMsg.find("currently") != std::string::npos)) {
+        return true;
+    }
+    
+    return false;
+}
+
+std::string Language::webSearch(const std::string& query) {
+    std::string result;
+    
+    try {
+        std::string encodedQuery;
+        for (char c : query) {
+            if (c == ' ') encodedQuery += '+';
+            else if (std::isalnum(static_cast<unsigned char>(c))) encodedQuery += c;
+            else encodedQuery += '%' + std::string("0123456789ABCDEF"[((unsigned char)c >> 4)]) + std::string("0123456789ABCDEF"[((unsigned char)c & 0xF)]);
+        }
+        
+        std::string apiUrl = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + 
+                            encodedQuery + "&srlimit=3&format=json&utf8=";
+        
+        std::string cmd = "curl -s '" + apiUrl + "' 2>/dev/null";
+        
+        FILE* pipe = popen(cmd.c_str(), "r");
+        if (!pipe) return "";
+        
+        char buffer[4096];
+        std::string rawResponse;
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            rawResponse += buffer;
+        }
+        pclose(pipe);
+        
+        std::vector<std::string> titles;
+        size_t pos = 0;
+        while ((pos = rawResponse.find("\"title\":\"", pos)) != std::string::npos) {
+            pos += 9;
+            size_t end = rawResponse.find("\"", pos);
+            if (end != std::string::npos) {
+                std::string title = rawResponse.substr(pos, end - pos);
+                size_t uniPos;
+                while ((uniPos = title.find("\\u")) != std::string::npos) {
+                    title.erase(uniPos, 2);
+                }
+                titles.push_back(title);
+            }
+            if (titles.size() >= 3) break;
+        }
+        
+        if (!titles.empty()) {
+            std::string firstTitle;
+            for (char c : titles[0]) {
+                if (c == ' ') firstTitle += '_';
+                else firstTitle += c;
+            }
+            
+            std::string extractUrl = "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&titles=" +
+                                    firstTitle + "&format=json&utf8=&explaintext=";
+            
+            std::string extractCmd = "curl -s '" + extractUrl + "' 2>/dev/null";
+            
+            FILE* extractPipe = popen(extractCmd.c_str(), "r");
+            if (extractPipe) {
+                char extractBuffer[8192];
+                rawResponse.clear();
+                while (fgets(extractBuffer, sizeof(extractBuffer), extractPipe) != nullptr) {
+                    rawResponse += extractBuffer;
+                }
+                pclose(extractPipe);
+                
+                size_t extractStart = rawResponse.find("\"extract\":\"");
+                if (extractStart != std::string::npos) {
+                    extractStart += 11;
+                    size_t extractEnd = rawResponse.find("\"}", extractStart);
+                    if (extractEnd == std::string::npos) {
+                        extractEnd = rawResponse.find("\",\"", extractStart);
+                    }
+                    if (extractEnd != std::string::npos) {
+                        result = rawResponse.substr(extractStart, extractEnd - extractStart);
+                        size_t pos;
+                        while ((pos = result.find("\\n")) != std::string::npos) result.replace(pos, 2, "\n");
+                        while ((pos = result.find("\\\"")) != std::string::npos) result.replace(pos, 2, "\"");
+                    }
+                }
+            }
+        }
+        
+        if (result.empty() && !titles.empty()) {
+            result = "Wikipedia has information about: " + titles[0];
+            for (size_t i = 1; i < titles.size(); i++) {
+                result += ", " + titles[i];
+            }
+        }
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Web search error: " << e.what() << std::endl;
+    }
+    
+    return result;
+}
+
+std::string Language::summarizeWebResult(const std::string& query, const std::string& rawResult) {
+    if (rawResult.empty()) {
+        return "I tried searching the web for \"" + query + "\" but couldn't find relevant information. Let me try another approach to help you.";
+    }
+    
+    std::string summary = rawResult;
+    
+    size_t firstBreak = summary.find('\n');
+    if (firstBreak != std::string::npos && firstBreak > 200) {
+        summary = summary.substr(0, firstBreak);
+    }
+    
+    if (summary.length() > 600) {
+        summary = summary.substr(0, 597);
+        size_t lastPeriod = summary.rfind('.');
+        if (lastPeriod > 300) {
+            summary = summary.substr(0, lastPeriod + 1);
+        } else {
+            summary += "...";
+        }
+    }
+    
+    std::string conversationalResponse;
+    
+    int variant = conversationCount % 4;
+    
+    switch (variant) {
+        case 0:
+            conversationalResponse = "I looked that up for you. According to Wikipedia:\n\n" + summary + "\n\nWant me to dig deeper into any part of this?";
+            break;
+        case 1:
+            conversationalResponse = "Here's what I found about \"" + query + "\":\n\n" + summary + "\n\nIs there a specific aspect you'd like me to focus on?";
+            break;
+        case 2:
+            conversationalResponse = "I searched for that and here's what came up:\n\n" + summary + "\n\nDoes that answer your question, or would you like me to look at it from a different angle?";
+            break;
+        default:
+            conversationalResponse = "Here's what the web has to say about \"" + query + "\":\n\n" + summary + "\n\nWhat else would you like to explore about this?";
+    }
+    
+    return conversationalResponse;
+}
+
 std::string Language::respond(const std::string& message) {
     std::lock_guard<std::mutex> lock(respondMutex);
     if (!embeddingsLoaded || embeddingsByLang.empty()) {
@@ -849,19 +1010,38 @@ std::string Language::respond(const std::string& message) {
     std::transform(lowerMsg.begin(), lowerMsg.end(), lowerMsg.begin(), ::tolower);
     std::string response;
     bool isLikelyGreeting = false;
-    if (lowerMsg == "hi" || lowerMsg == "hello" || lowerMsg == "hey") {
+    if (lowerMsg == "hi" || lowerMsg == "hello" || lowerMsg == "hey" ||
+        lowerMsg == "helo" || lowerMsg == "hella" || lowerMsg == "hiya" ||
+        (lowerMsg.length() >= 3 && lowerMsg.substr(0, 3) == "hii")) {
         isLikelyGreeting = true;
     } else if (lowerMsg.length() < 50) {
-        if (lowerMsg.find("hello") == 0 || lowerMsg.find("hi ") == 0 ||
+        bool startsWithGreeting = (lowerMsg.find("hello") == 0 || lowerMsg.find("hi ") == 0 ||
             lowerMsg.find("hey") == 0 || lowerMsg.find("greetings") == 0 ||
             lowerMsg.find("good morning") == 0 || lowerMsg.find("good evening") == 0 ||
-            lowerMsg.find("good afternoon") == 0) {
+            lowerMsg.find("good afternoon") == 0 ||
+            lowerMsg.find("helo") == 0 || lowerMsg.find("hella") == 0 ||
+            lowerMsg.find("hiya") == 0 || (lowerMsg.length() >= 3 && lowerMsg.substr(0, 3) == "hii" &&
+                (lowerMsg.length() == 3 || lowerMsg[3] == ' ' || lowerMsg[3] == ',' || lowerMsg[3] == '!')));
+
+        if (startsWithGreeting) {
             bool hasTechTerms = lowerMsg.find("how") != std::string::npos ||
                                lowerMsg.find("what") != std::string::npos ||
                                lowerMsg.find("code") != std::string::npos ||
                                lowerMsg.find("program") != std::string::npos ||
                                lowerMsg.find("write") != std::string::npos;
             isLikelyGreeting = !hasTechTerms;
+        } else if (lowerMsg.length() < 30) {
+            bool hasGreetingWord = (lowerMsg.find("hello") != std::string::npos ||
+                lowerMsg.find("hi ") != std::string::npos || lowerMsg.find("hey") != std::string::npos ||
+                lowerMsg.find("helo") != std::string::npos || lowerMsg.find("hella") != std::string::npos ||
+                lowerMsg.find("hiya") != std::string::npos || lowerMsg.find("greetings") != std::string::npos ||
+                (lowerMsg.find("hii") != std::string::npos));
+            bool hasTechTerms = lowerMsg.find("how") != std::string::npos ||
+                               lowerMsg.find("what") != std::string::npos ||
+                               lowerMsg.find("code") != std::string::npos ||
+                               lowerMsg.find("program") != std::string::npos ||
+                               lowerMsg.find("write") != std::string::npos;
+            isLikelyGreeting = hasGreetingWord && !hasTechTerms;
         }
     }
     if (isLikelyGreeting) {
@@ -1260,201 +1440,219 @@ std::string Language::respond(const std::string& message) {
     
     struct TopicEntry {
         std::vector<std::string> keywords;
-        std::string response;
+        std::vector<std::string> responses;
     };
     std::vector<TopicEntry> topicBank = {
         {{"cybersecurity", "cyber", "hack", "security"},
-         "Cybersecurity is the practice of protecting systems, networks, and data from digital attacks. Key areas include:\n"
-         "- Network Security: Firewalls, IDS/IPS, VPNs, network segmentation\n"
-         "- Application Security: Secure coding, input validation, OWASP Top 10\n"
-         "- Cryptography: Encryption (AES-256, RSA), hashing (SHA-256, bcrypt), digital signatures\n"
-         "- Identity Management: MFA, SSO, zero-trust architecture, RBAC\n"
-         "- Incident Response: Detection, containment, eradication, recovery\n"
-         "- Compliance: GDPR, HIPAA, PCI-DSS, SOC2 frameworks\n"
-         "Would you like me to go deeper into any of these areas?"},
+         {
+             "Cybersecurity is all about protecting digital systems from attacks. The big pillars are network security, application security, and cryptography. What aspect interests you most?",
+             "Protecting systems from digital threats - that's what cybersecurity is about. You've got network defense, app security, encryption, identity management, and incident response all working together. Which area do you want to dig into?",
+             "Cybersecurity is a huge field. The most critical areas are keeping networks secure with firewalls and VPNs, writing secure code, using strong encryption, and having a solid incident response plan. What kind of scenario are you thinking about?",
+             "The cybersecurity landscape changes fast. You're looking at protecting networks from intrusions, securing applications, encrypting data, managing identities, and responding to incidents when things go wrong. What's the context here?"
+         }},
         {{"password", "credential", "authentication"},
-         "Password security best practices:\n"
-         "- Use passwords of at least 12+ characters with mixed case, numbers, and symbols\n"
-         "- Use a reputable password manager (Bitwarden, 1Password, KeePass)\n"
-         "- Enable multi-factor authentication (MFA) wherever possible\n"
-         "- Never reuse passwords across different services\n"
-         "- Consider passkeys/passwordless authentication for new implementations\n"
-         "- Rotate credentials regularly and after any suspected breach\n"
-         "- Use hashing algorithms like bcrypt, Argon2, or scrypt for storing passwords (never MD5 or SHA1 alone)"},
+         {
+             "Passwords are your first line of defense. The key things: use at least 12 characters with mixed types, get a password manager, and turn on MFA everywhere. Want to talk about setting up a good system?",
+             "Here's the thing about passwords - most people reuse them, and that's a huge risk. I'd say grab a password manager like Bitwarden or 1Password, enable MFA wherever possible, and never reuse across services. What's your current setup like?",
+             "If you're thinking about authentication security, the biggest wins are long unique passwords, multi-factor authentication, and something like a password manager so you don't have to remember them all. Are you working on securing an app or your own accounts?",
+             "Password security boils down to a few things: length over complexity, never reusing passwords, and adding a second factor. Passkeys are worth considering too if you're starting fresh. What situation are you dealing with?"
+         }},
         {{"encrypt", "encryption", "aes", "rsa", "cipher"},
-         "Encryption is fundamental to data security:\n"
-         "- Symmetric: AES-256 (fast, good for bulk data), ChaCha20 (mobile-friendly)\n"
-         "- Asymmetric: RSA (2048+ bits), Elliptic Curve (ECDSA, Ed25519 - faster, smaller keys)\n"
-         "- Hashing: SHA-256 for integrity, bcrypt/Argon2 for passwords\n"
-         "- TLS 1.2+ for data in transit, AES-256 for data at rest\n"
-         "- Key management is critical - use HSMs or cloud KMS for production\n"
-         "- Quantum-resistant algorithms (CRYSTALS-Kyber, CRYSTALS-Dilithium) are emerging"},
+         {
+             "Encryption is how we keep data safe whether it's sitting somewhere or traveling across the internet. The main choices are symmetric like AES-256 for speed, or asymmetric like RSA for secure key exchange. What are you trying to protect?",
+             "You know what's interesting about encryption? There's a whole spectrum from symmetric algorithms like AES - super fast for bulk data - to asymmetric ones like RSA that solve the key distribution problem. Which angle are you curious about?",
+             "If you're thinking about encryption, here's the key thing: use AES-256 for data at rest, TLS 1.2+ for data in transit, and be really careful about key management. Are you working on something specific that needs encryption?",
+             "Encryption really comes down to choosing the right tool: AES for speed, RSA or elliptic curve for key exchange, and bcrypt or Argon2 for passwords. Plus key management is just as important as the algorithm itself. What's the use case?"
+         }},
         {{"firewall", "network security", "ids", "ips"},
-         "Network security architecture essentials:\n"
-         "- Firewalls: Stateful inspection, next-gen (NGFW) with IPS, web application firewalls (WAF)\n"
-         "- IDS/IPS: Snort, Suricata, OSSEC for intrusion detection\n"
-         "- Network segmentation: DMZ, VLANs, microsegmentation for zero-trust\n"
-         "- VPNs: WireGuard (modern, fast), OpenVPN (mature), IPsec\n"
-         "- Monitoring: SIEM systems (Splunk, Elastic Security), network traffic analysis\n"
-         "- DNS security: DNSSEC, DNS filtering, DoH/DoT"},
+         {
+             "Network security is all about layers. You've got firewalls at the edge, IDS/IPS watching for threats inside, network segmentation to contain breaches, and monitoring systems like SIEM tying it all together. What's your network setup like?",
+             "I think the most important thing about network security is that no single tool does it alone. Firewalls, intrusion detection, VPNs, and continuous monitoring all work together. Are you building out a security setup or troubleshooting something?",
+             "Here's a good example of network defense in action: firewall at the perimeter, next-gen IPS deeper in, segmentation with VLANs, and something like Snort or Suricata watching traffic. Each layer catches what the others miss. What kind of network are we talking about?",
+             "Firewalls are just the start. You've got next-gen firewalls with built-in IPS, tools like Snort and Suricata for intrusion detection, WireGuard for modern VPNs, and SIEM platforms for monitoring. Want me to go deeper on any of these?"
+         }},
         {{"phish", "social engineering", "spam"},
-         "Phishing and social engineering defense:\n"
-         "- Verify sender email addresses carefully - check for subtle misspellings\n"
-         "- Don't click suspicious links - hover to preview URLs before clicking\n"
-         "- Be wary of urgent requests that pressure immediate action\n"
-         "- Use email filtering (SPF, DKIM, DMARC) for inbound protection\n"
-         "- Train users regularly on social engineering tactics\n"
-         "- Verify requests through secondary channels (phone, in-person)\n"
-         "- Implement URL sandboxing and attachment scanning"},
+         {
+             "Phishing is honestly one of the biggest threats out there. The basics: check sender addresses carefully, hover over links before clicking, and be suspicious of anything that creates urgency. Want to hear about more advanced defense strategies?",
+             "Social engineering attacks work because they exploit human psychology, not technical flaws. The big defenses are email filtering with SPF/DKIM/DMARC, user training, and always verifying requests through a second channel. Are you dealing with a phishing incident?",
+             "If you're thinking about phishing defense, the technical stuff is important - email filtering, URL sandboxing, attachment scanning - but training people to spot the attempts is equally critical. What's the context here?",
+             "Here's the thing about phishing: it's gotten really sophisticated. Beyond the obvious spam, there are targeted spear-phishing attacks that look totally legitimate. The best defense combines technology like DMARC with good old-fashioned skepticism. What prompted the question?"
+         }},
         {{"malware", "virus", "trojan", "ransomware", "ransom"},
-         "Malware protection strategies:\n"
-         "- Keep all software updated with latest security patches\n"
-         "- Use reputable antivirus/anti-malware (Windows Defender is adequate for most users)\n"
-         "- Implement application whitelisting in enterprise environments\n"
-         "- Ransomware defense: regular offline backups, immutable storage, backup testing\n"
-         "- Behavioral analysis and endpoint detection (EDR) for advanced threats\n"
-         "- User education on avoiding malicious downloads and attachments\n"
-         "- Network segmentation to limit lateral movement"},
+         {
+             "Malware defense really comes down to prevention and preparation. Keep everything patched, run good antivirus software, and have offline backups so ransomware can't hold you hostage. Are you dealing with an infection?",
+             "You know what makes ransomware particularly nasty? It's not just about antivirus anymore. The real defense is immutable backups, network segmentation, and endpoint detection that catches behavioral patterns. What's the situation?",
+             "If you're worried about malware, the fundamentals still work: updates, antivirus, and user education. But for ransomware specifically, you need to think about backups you can't delete and network segmentation to stop lateral movement. Want to dig deeper?",
+             "Here's what I always recommend for malware protection: keep software updated, use Windows Defender or similar, and most importantly - have backups you can actually restore from. For the serious stuff, behavioral endpoint detection is the way to go. What are you protecting?"
+         }},
         {{"python", "pip", "django", "flask", "pytorch", "numpy"},
-         "Python programming insights:\n"
-         "- Excellent for data science (NumPy, Pandas, Matplotlib), ML (PyTorch, TensorFlow), web (Django, Flask, FastAPI)\n"
-         "- Use virtual environments (venv, conda) to manage dependencies\n"
-         "- Type hints (typing module) improve code quality and IDE support\n"
-         "- List comprehensions and generator expressions for Pythonic code\n"
-         "- Popular testing: pytest, unittest\n"
-         "- Package distribution: PyPI, poetry, pipenv\n"
-         "- Python 3.11+ offers significant performance improvements"},
+         {
+             "Python's great because it covers so much ground - data science with NumPy and Pandas, web dev with Django or Flask, ML with PyTorch. The key thing most people miss is using virtual environments properly. What are you building?",
+             "If you're getting into Python, I'd say focus on writing clean, Pythonic code - use type hints, list comprehensions, and virtual environments from day one. Are you working on a data project, web app, or something else?",
+             "I think the most powerful thing about Python is how it bridges so many domains. Data science, web development, machine learning - there's a library for basically everything. What aspect of Python interests you most?",
+             "Python is a solid choice for almost anything. The ecosystem is incredible - FastAPI for modern web APIs, PyTorch for ML, pytest for testing. Just make sure you're using virtual environments and type hints early on. What's your project about?"
+         }},
         {{"c++", "cpp", "memory", "pointer", "stl", "template"},
-         "C++ programming best practices:\n"
-         "- Use RAII and smart pointers (unique_ptr, shared_ptr) over raw pointers\n"
-         "- Prefer STL containers (vector, map, unordered_map) and algorithms\n"
-         "- Use const correctness throughout your codebase\n"
-         "- Modern C++ (17/20/23): std::optional, std::variant, std::filesystem, concepts, ranges\n"
-         "- Memory management: understand stack vs heap, use value semantics where possible\n"
-         "- Build systems: CMake (industry standard), Meson, Bazel\n"
-         "- Static analysis: clang-tidy, cppcheck for catching bugs early"},
+         {
+             "Modern C++ is so much nicer than the old days. Smart pointers, STL containers, RAII - if you use them right, memory management almost takes care of itself. Are you working with modern standards or dealing with legacy code?",
+             "The key to C++ is understanding ownership. Once RAII and smart pointers click, most of the pain disappears. Modern C++17/20 has great features like std::optional and std::variant. What are you building?",
+             "If you're thinking about C++, here's my biggest tip: prefer value semantics and STL containers, use const everywhere, and let the compiler help you with static analysis tools. Are you working on something performance-critical?",
+             "C++ has a reputation for being tricky with memory, but modern C++ with smart pointers and RAII makes it much safer. The build system world has settled on CMake too. Are you starting a new project or maintaining an existing one?"
+         }},
         {{"algorithm", "data structure", "sort", "search", "complexity", "big o"},
-         "Core algorithms and data structures:\n"
-         "- Arrays, linked lists, stacks, queues, hash tables, trees, graphs\n"
-         "- Sorting: QuickSort (O(n log n) avg), MergeSort (stable), TimSort (used in practice)\n"
-         "- Searching: Binary search (O(log n)), BFS, DFS for graphs\n"
-         "- Dynamic programming for optimization problems\n"
-         "- Space/time complexity analysis using Big-O notation\n"
-         "- Balanced trees (AVL, Red-Black) for O(log n) operations\n"
-         "- Hash maps for O(1) average lookup"},
+         {
+             "Algorithms and data structures are the foundation of good software. The ones that matter most: hash maps for O(1) lookups, balanced trees for O(log n), and understanding when to use sorting vs. searching. What problem are you trying to solve?",
+             "You know what I find cool about algorithms? It's all about choosing the right data structure for the job. Hash maps, binary search trees, graphs - each one is the optimal tool for different scenarios. Are you studying for interviews or working on something?",
+             "If you're thinking about algorithm complexity, the key things to know are: Big-O gives you the growth rate, sorting is mostly O(n log n) for the good ones, and dynamic programming turns exponential problems into polynomial ones. Want to go through a specific example?",
+             "Here's the practical angle: knowing your data structures directly affects performance. Need fast lookups? Hash map. Need ordered data? Balanced tree. Need to find shortest paths? BFS or Dijkstra's. What are you working on?"
+         }},
         {{"web", "html", "css", "javascript", "react", "node", "api", "http", "rest"},
-         "Web development overview:\n"
-         "- Frontend: HTML5/CSS3/JavaScript, modern frameworks (React, Vue, Svelte, Angular)\n"
-         "- Backend: Node.js, Python (Django/Flask/FastAPI), Go, Rust, PHP\n"
-         "- APIs: REST (JSON over HTTP), GraphQL for flexible queries, gRPC for high performance\n"
-         "- Databases: PostgreSQL, MySQL (relational), MongoDB, Redis (NoSQL)\n"
-         "- DevOps: Docker, Kubernetes, CI/CD pipelines, cloud services\n"
-         "- Security: HTTPS, CORS, input sanitization, rate limiting, JWT for auth\n"
-         "- Performance: lazy loading, caching (CDN, Redis), code splitting"},
+         {
+             "Web development has so many layers - frontend with React or Vue, backend with Node.js or Python, APIs connecting everything. The most important thing is understanding HTTP and REST principles first. What part of web dev are you focused on?",
+             "If you're getting into web development, here's the roadmap: learn HTML/CSS/JS fundamentals, pick a frontend framework, understand backend basics, and learn about APIs. The field moves fast but those foundations stay solid. Are you just starting out or looking to level up?",
+             "I think the most interesting thing about web development today is how much choice you have. React, Vue, Svelte for frontend. Node, Python, Go, even Rust for backend. GraphQL vs REST for APIs. What are you trying to build?",
+             "Web development is a full stack of technologies. Frontend frameworks like React, backend runtimes like Node.js, databases, APIs, Docker, CI/CD. The key is understanding how they all connect. What aspect are you working on right now?"
+         }},
         {{"neural network", "deep learning", "machine learning", "ai", "ml", "training", "model"},
-         "AI and Machine Learning fundamentals:\n"
-         "- Neural networks: input layer, hidden layers, output layer with activation functions\n"
-         "- Training: forward pass, loss function, backpropagation, gradient descent\n"
-         "- Types: CNN (images), RNN/LSTM (sequences), Transformer (language/vision)\n"
-         "- Key concepts: overfitting/underfitting, regularization, dropout, batch normalization\n"
-         "- Transfer learning allows using pretrained models for new tasks efficiently\n"
-         "- Frameworks: PyTorch, TensorFlow, JAX for research; scikit-learn for classical ML\n"
-         "- CoreAI3D uses a custom neural network with word embeddings for text classification!"},
+         {
+             "AI and ML are fascinating fields. The core ideas are pretty intuitive once you get them: neural networks learn patterns, training adjusts weights through backpropagation, and transfer learning lets you stand on the shoulders of pretrained models. What are you trying to build?",
+             "If you're thinking about machine learning, start with the basics: supervised vs. unsupervised learning, neural network architectures, and how training actually works with gradient descent. From there, PyTorch or TensorFlow are great frameworks to learn. Are you working on a project?",
+             "You know what's cool about deep learning? The same basic architecture - neural networks with layers - can handle images, language, audio, and more. Transformers changed the game for language, CNNs for vision. What kind of AI problem are you tackling?",
+             "Machine learning is all about finding patterns in data. Neural networks, decision trees, clustering - different tools for different problems. The exciting part right now is transformer models and how versatile they've become. What's your ML background like?"
+         }},
         {{"math", "calculus", "algebra", "statistics", "probability", "equation"},
-         "Mathematics assistance:\n"
-         "- Algebra: linear equations, polynomials, matrices, eigenvalues\n"
-         "- Calculus: limits, derivatives, integrals, differential equations\n"
-         "- Linear algebra: vector spaces, linear transformations, SVD, PCA\n"
-         "- Statistics: mean/median/mode, standard deviation, hypothesis testing, regression\n"
-         "- Probability: distributions (normal, binomial, Poisson), Bayes' theorem\n"
-         "- Discrete math: combinatorics, graph theory, number theory\n"
-         "- Numerical methods: Newton's method, Monte Carlo simulation"},
+         {
+             "Math is the foundation of everything in CS. Whether it's linear algebra for ML, calculus for optimization, or probability for understanding uncertainty - it all connects. What area of math are you working with?",
+             "Here's my take on math: focus on understanding the concepts, not just the formulas. Linear algebra, probability, and calculus will get you surprisingly far in programming and data science. Are you studying something specific?",
+             "If you're thinking about math, the most useful areas for tech tend to be statistics, linear algebra, and discrete math. But honestly, learning to think mathematically is more important than any specific topic. What's the context?",
+             "You know what I find beautiful about math? Everything connects. Calculus shows up in optimization, linear algebra in machine learning, probability in data analysis. What math topic are you exploring right now?"
+         }},
         {{"database", "sql", "mysql", "postgres", "nosql", "query", "table"},
-         "Database management insights:\n"
-         "- SQL databases: PostgreSQL (feature-rich), MySQL (widely used), SQLite (embedded)\n"
-         "- NoSQL: MongoDB (document), Redis (key-value), Cassandra (wide-column), Neo4j (graph)\n"
-         "- Indexing: B-tree, hash, composite indexes for query optimization\n"
-         "- Normalization: 1NF through 3NF (or BCNF) to reduce data redundancy\n"
-         "- Transactions: ACID properties (Atomicity, Consistency, Isolation, Durability)\n"
-         "- Performance: query optimization, connection pooling, read replicas, sharding\n"
-         "- Backup strategies: full, incremental, point-in-time recovery"},
+         {
+             "Databases are the backbone of most applications. SQL databases like PostgreSQL are great for structured data with relationships, while NoSQL options like MongoDB work well for flexible schemas. The key is understanding your access patterns first. What's your use case?",
+             "If you're thinking about databases, here's the practical angle: PostgreSQL is my go-to for most cases, Redis for caching, and MongoDB when you really need schema flexibility. Indexing and query optimization are where most performance gains come from. Are you designing a schema?",
+             "You know what most people get wrong about databases? They pick the technology before understanding their data model. Start with understanding your queries and relationships, then choose between SQL and NoSQL. What are you building?",
+             "Database design is all about trade-offs. ACID compliance vs. flexibility, normalization vs. read performance, single server vs. distributed. The best choice depends entirely on what you're building. What's the scenario?"
+         }},
         {{"linux", "unix", "bash", "shell", "command", "terminal", "admin", "sysadmin"},
-         "System administration and Linux:\n"
-         "- Package management: apt (Debian/Ubuntu), yum/dnf (RHEL/Fedora), pacman (Arch)\n"
-         "- Process management: ps, top/htop, kill, systemd, cron jobs\n"
-         "- File permissions: chmod, chown, ACLs, setuid/setgid\n"
-         "- Networking: ip, ss, netstat, iptables/nftables, tcpdump\n"
-         "- Log analysis: journalctl, /var/log, logrotate, central logging\n"
-         "- Security: SELinux/AppArmor, fail2ban, unattended-upgrades, hardening guides\n"
-         "- Automation: Bash scripts, Ansible, Terraform for infrastructure as code"},
+         {
+             "Linux is incredibly powerful once you get comfortable with the command line. The essentials: package management, file permissions, process management, and text processing with tools like grep and awk. Are you looking to learn Linux admin or solve a specific problem?",
+             "If you're getting into Linux, my advice is to start with the basics: navigating the filesystem, understanding permissions, and writing simple bash scripts. From there, systemd, networking, and log analysis open up the sysadmin world. What's your experience level?",
+             "I think the best thing about Linux is how transparent everything is. You can understand exactly how your system works, from boot process to networking to security. What are you trying to do - learn sysadmin, troubleshoot something, or automate tasks?",
+             "Linux administration is a deep skill but incredibly rewarding. The core areas are package management, process control, networking tools, and security hardening. Plus bash scripting for automation. What's your focus area?"
+         }},
         {{"network", "tcp", "ip", "dns", "http", "protocol", "packet"},
-         "Computer networking concepts:\n"
-         "- OSI model: Physical, Data Link, Network, Transport, Session, Presentation, Application\n"
-         "- TCP/IP: reliable connection-oriented, UDP: fast connectionless\n"
-         "- DNS: domain resolution, record types (A, AAAA, CNAME, MX, TXT)\n"
-         "- HTTP/HTTPS: methods (GET, POST, PUT, DELETE), status codes, TLS handshake\n"
-         "- Subnetting: CIDR notation, private ranges (10.x, 172.16-31.x, 192.168.x)\n"
-         "- Routing: BGP, OSPF for internetwork communication\n"
-         "- Modern: HTTP/2 multiplexing, HTTP/3 over QUIC, IPv6 adoption"},
+         {
+             "Networking concepts are fundamental to understanding how everything works online. The big ideas: TCP for reliable connections, UDP for speed, DNS for name resolution, and the HTTP protocol powering the web. What networking topic came up for you?",
+             "If you're thinking about networking, I'd start with the OSI model as a mental framework, then dive into TCP/IP since that's what actually runs the internet. DNS and HTTP are the protocols you interact with most directly. Are you studying networking or debugging a connection issue?",
+             "You know what's fascinating about computer networking? It's a stack of abstractions. Physical signals become packets, which become streams, which become web pages. Understanding each layer helps you debug anything from slow connections to security issues. What layer are you working with?",
+             "Here's the practical networking guide: understand TCP vs UDP, know your DNS record types, understand HTTP methods and status codes, and learn CIDR notation for IP addressing. Those basics cover 90% of what you'll encounter. What prompted the question?"
+         }},
         {{"science", "physics", "chemistry", "biology", "experiment"},
-         "Science topics I can help with:\n"
-         "- Physics: mechanics, thermodynamics, electromagnetism, quantum mechanics, relativity\n"
-         "- Chemistry: atomic structure, bonding, reactions, organic/inorganic chemistry\n"
-         "- Biology: cell biology, genetics, evolution, ecology, neuroscience\n"
-         "- Earth science: geology, meteorology, climate science\n"
-         "- Astronomy: stellar evolution, cosmology, exoplanets\n"
-         "- Scientific method: hypothesis, experimentation, peer review, reproducibility"},
+         {
+             "Science is essentially a systematic way of figuring out how the universe works. Whether it's physics, chemistry, biology, or earth science, the scientific method ties it all together. What area of science are you curious about?",
+             "If you're interested in science, I'd say start with whatever sparks your curiosity. The beauty is how everything connects - chemistry explains biology, physics explains chemistry, and it all comes together beautifully. What's drawing your interest?",
+             "I think the coolest thing about science is how the same principles show up everywhere. The scientific method works whether you're studying atoms, cells, or galaxies. What field or question are you exploring?",
+             "Science covers an incredible range - from quantum mechanics to ecosystems. The common thread is hypothesis, experiment, and reproducibility. Want to talk about a specific area, or are you looking for an overview of something?"
+         }},
         {{"git", "version control", "commit", "branch", "merge", "repository"},
-         "Git version control essentials:\n"
-         "- Basic workflow: add, commit, push, pull, clone\n"
-         "- Branching: feature branches, gitflow, trunk-based development\n"
-         "- Collaboration: pull requests, code reviews, merge conflicts\n"
-         "- Advanced: rebase vs merge, cherry-pick, stash, reflog\n"
-         "- Best practices: clear commit messages, small focused commits, never force-push shared branches\n"
-         "- Platforms: GitHub, GitLab, Bitbucket for code hosting and CI/CD\n"
-         "- .gitignore for excluding files, tags for versioning releases"},
+         {
+             "Git is one of those tools that's worth learning deeply. Start with the basics - commit, branch, merge, push, pull - then graduate to rebasing, cherry-picking, and understanding the reflog. The key rule: never force-push shared branches. What do you use Git for?",
+             "If you're thinking about Git, the most important thing is understanding branches. Feature branches keep things clean, and knowing when to merge vs. rebase will save you a lot of headaches. Are you working solo or on a team?",
+             "Version control is non-negotiable for any development work. Git's the standard for good reason - powerful branching, great platform support with GitHub and GitLab, and it handles everything from solo projects to massive team workflows. What's your Git experience level?",
+             "Here's what I tell people about Git: master the fundamentals first - staging, committing, branching, merging. Then learn to resolve conflicts, use interactive rebase, and write good commit messages. Are you setting up a workflow or fixing a Git problem?"
+         }},
         {{"docker", "container", "kubernetes", "k8s", "deploy", "devops"},
-         "Containerization and DevOps:\n"
-         "- Docker: Dockerfile, images, containers, docker-compose for multi-container apps\n"
-         "- Kubernetes: pods, deployments, services, ingress, configmaps, secrets\n"
-         "- CI/CD: GitHub Actions, GitLab CI, Jenkins pipelines\n"
-         "- Infrastructure as Code: Terraform, CloudFormation, Pulumi\n"
-         "- Monitoring: Prometheus, Grafana, ELK stack\n"
-         "- Cloud: AWS, GCP, Azure for scalable infrastructure"},
+         {
+             "Containers changed how we build and deploy software. Docker makes it easy to package apps consistently, and Kubernetes manages them at scale. For smaller setups, docker-compose might be all you need. What's your deployment situation like?",
+             "If you're getting into DevOps, I'd start with Docker - it's straightforward and immediately useful. Kubernetes is powerful but complex, so only reach for it when you actually need orchestration. Are you containerizing an existing app or starting fresh?",
+             "You know what's great about Docker? 'It works on my machine' stops being a problem. Containers give you consistent environments everywhere. From there, CI/CD pipelines and monitoring round out the DevOps picture. What are you deploying?",
+             "The DevOps toolkit is pretty clear these days: Docker for containers, Kubernetes for orchestration at scale, CI/CD with GitHub Actions or GitLab, and monitoring with Prometheus and Grafana. But start simple and add complexity only when needed. What's your setup?"
+         }},
         {{"cloud", "aws", "azure", "gcp", "serverless"},
-         "Cloud computing services:\n"
-         "- AWS: EC2 (compute), S3 (storage), Lambda (serverless), RDS (databases)\n"
-         "- Azure: VMs, Blob Storage, Functions, Cosmos DB, Active Directory\n"
-         "- GCP: Compute Engine, Cloud Storage, Cloud Functions, BigQuery\n"
-         "- Serverless benefits: auto-scaling, pay-per-use, no server management\n"
-         "- Best practices: least privilege IAM, encryption at rest/transit, multi-region\n"
-         "- Cost optimization: right-sizing, reserved instances, spot/preemptible instances"},
+         {
+             "Cloud computing is all about choosing the right service for the job. AWS has the most services, Azure is great for Microsoft shops, and GCP has excellent data tools. Serverless is amazing when your workload fits it. What's your cloud strategy?",
+             "If you're moving to the cloud, here's my advice: start with the managed services you need, use infrastructure as code from day one, and always think about security and cost from the beginning. Which cloud provider are you considering?",
+             "Cloud platforms offer incredible power but it's easy to get overwhelmed by the options. The core services you need to know are compute, storage, databases, and networking. Cost optimization - right-sizing, reserved instances - is a whole discipline of its own. What are you building in the cloud?",
+             "Serverless functions are genuinely transformative for certain workloads - auto-scaling, pay per use, zero server management. But they're not the answer for everything. The key is understanding when serverless beats traditional VMs and containers. What's the use case?"
+         }},
         {{"testing", "test", "unit test", "integration", "tdd", "debug"},
-         "Software testing strategies:\n"
-         "- Unit tests: test individual functions in isolation (JUnit, pytest, Jest)\n"
-         "- Integration tests: verify component interactions\n"
-         "- End-to-end tests: simulate user workflows (Cypress, Selenium, Playwright)\n"
-         "- TDD: Red-Green-Refactor cycle for writing tests before code\n"
-         "- Coverage: aim for meaningful coverage, not just percentage\n"
-         "- Performance testing: load testing, stress testing, benchmarking\n"
-         "- CI integration: run tests automatically on every commit"},
+         {
+             "Testing is one of those things that saves enormous pain down the road. Unit tests for individual functions, integration tests for component interactions, and end-to-end tests for user flows. The trick is writing meaningful tests, not just chasing coverage. What's your testing setup like?",
+             "If you're thinking about testing, I'd recommend starting with unit tests using pytest or Jest depending on your language. TDD is great when it works but don't feel pressured to do it perfectly. Integration tests catch the bugs unit tests miss. Are you adding tests to an existing project?",
+             "I think the most practical approach to testing is: test the critical paths first, use integration tests for the parts where components interact, and don't obsess over coverage percentages. Meaningful tests that catch real bugs are what matter. What are you testing?",
+             "Here's the thing about testing: the earlier you catch a bug, the cheaper it is to fix. Unit tests are fast and easy, integration tests catch the tricky interactions, and end-to-end tests with Playwright or Cypress verify the full user experience. Want to talk about testing strategy?"
+         }},
         {{"api", "rest", "graphql", "grpc", "endpoint", "request"},
-         "API design principles:\n"
-         "- REST: Use HTTP verbs correctly, proper status codes, resource-based URLs\n"
-         "- GraphQL: Flexible queries, single endpoint, schema-driven development\n"
-         "- gRPC: Protocol buffers, streaming, high performance for microservices\n"
-         "- Authentication: API keys, OAuth 2.0, JWT tokens\n"
-         "- Documentation: OpenAPI/Swagger, automatic doc generation\n"
-         "- Rate limiting, pagination, caching, versioning for robust APIs\n"
-         "- Error handling: consistent error format, meaningful error messages"},
+         {
+             "API design is all about making things intuitive for the people consuming them. REST is the standard with HTTP verbs and status codes, GraphQL gives you flexible queries, and gRPC is blazing fast for service-to-service communication. What kind of API are you building?",
+             "If you're thinking about APIs, REST is the safe default - everyone understands it and the tools are great. Consider GraphQL when clients need flexible data fetching, and gRPC when you need high-performance microservice communication. What's your use case?",
+             "You know what makes a good API? Consistency, clear documentation, proper error messages, and thinking about versioning from the start. Whether you go REST, GraphQL, or gRPC depends on your constraints. What are you connecting?",
+             "APIs are the glue of modern software. REST for most things, GraphQL when you want flexible queries, and gRPC for internal services that need speed. Plus authentication - JWTs and OAuth 2.0 are the standards. What's the API for?"
+         }},
         {{"algorithm", "sort", "complexity", "performance", "optimization", "efficient"},
-         "Algorithm optimization:\n"
-         "- Choose the right data structure: hash maps for O(1) lookup, sorted arrays for binary search\n"
-         "- Divide and conquer: break large problems into manageable subproblems\n"
-         "- Memoization and dynamic programming to avoid redundant computation\n"
-         "- Use appropriate sorting: Timsort (general), radix sort (integers), counting sort (small range)\n"
-         "- Profile before optimizing - measure actual bottlenecks\n"
-         "- Cache frequently accessed data, use lazy evaluation"}
+         {
+             "Performance optimization is one of those areas where measuring first is crucial. Profile your code to find the actual bottlenecks before changing anything - you might be surprised where the slowdown really is. What's running slow?",
+             "If you're thinking about optimization, the biggest wins usually come from choosing the right data structure, not from micro-optimizing code. Hash maps for fast lookups, dynamic programming to avoid redundant work, and caching for frequently accessed data. What are you optimizing?",
+             "You know what most people get wrong about performance? They optimize before measuring. Profile first, then focus on the actual bottlenecks. Usually it's an O(n^2) algorithm that could be O(n log n) or a missing cache. What's the slow part?",
+             "Algorithm optimization is as much about strategy as coding. Divide and conquer for complex problems, memoization for repeated calculations, and choosing the right data structure - those three techniques solve most performance issues. Are you working on a specific optimization problem?"
+         }},
+        {{"biology", "cell", "organism", "evolution", "dna", "genetics", "species", "ecology", "biodiversity", "microbe", "virus", "bacteria", "protein", "gene", "mutation", "natural selection"},
+         {
+             "Biology is endlessly fascinating. From how cells use DNA as a blueprint for building proteins, to evolution shaping species over billions of years, to ecosystems maintaining delicate balances - it's all interconnected. What aspect of biology interests you?",
+             "If you're curious about biology, here's what I find most amazing: every living thing uses the same molecular machinery - DNA, RNA, proteins. That common thread connects a bacterium to a blue whale. What area of biology are you exploring?",
+             "You know what's cool about evolution? It's not just a historical process - we can watch it happen in real-time with bacteria developing antibiotic resistance. Natural selection is ongoing, right now, all around us. What drew you to biology?",
+             "Biology works at every scale - from molecules to ecosystems. DNA encodes the instructions, cells execute them, organisms interact in ecosystems, and all of it is shaped by evolution. Are you studying something specific or just exploring?",
+             "Here's a good example of biology in action: gut bacteria help us digest food, our immune system constantly fights microscopic invaders, and our DNA carries billions of years of evolutionary history. The more you learn, the more interconnected it all seems. What topic sparked your interest?"
+         }},
+        {{"psychology", "mind", "behavior", "cognitive", "emotion", "consciousness", "memory", "personality", "perception", "motivation", "mental health", "anxiety", "depression", "therapy", "bias"},
+         {
+             "Psychology helps us understand why we think and act the way we do. The cognitive biases alone are worth studying - confirmation bias, anchoring, availability heuristic - they affect every decision we make. What aspect of psychology are you curious about?",
+             "If you're thinking about psychology, the Big Five personality model is one of the most useful frameworks I know. Combine it with understanding cognitive biases and emotional intelligence, and you start seeing patterns in behavior everywhere. Are you exploring this for personal growth or academic reasons?",
+             "You know what I find really compelling about psychology? How much of our behavior is driven by processes we're not aware of. Cognitive biases, emotional reactions, personality traits - they all influence us below the level of conscious thought. What's on your mind?",
+             "Mental health is such an important topic. Things like anxiety and depression are incredibly common, and approaches like CBT have shown real results. Building resilience through social support, mindfulness, and healthy coping strategies makes a genuine difference. Are you looking for understanding or resources?",
+             "Social psychology reveals some fascinating things about human behavior - how we conform to groups, obey authority, and make decisions differently in crowds. It really changes how you see everyday interactions. What part of psychology are you interested in?"
+         }},
+        {{"neuroscience", "brain", "neuron", "synapse", "neurotransmitter", "cerebral", "cortex", "hippocampus", "plasticity", "consciousness", "dopamine", "serotonin", "nervous system"},
+         {
+             "The brain is arguably the most complex structure in the known universe. About 86 billion neurons, trillions of connections, and neurotransmitters like dopamine and serotonin orchestrating everything from mood to movement. What aspect of neuroscience fascinates you?",
+             "If you're thinking about the brain, here's what I find most incredible: neuroplasticity. Your brain physically rewires itself throughout your entire life based on experience, learning, and even exercise. It's not a fixed organ at all. Are you studying neuroscience or just curious?",
+             "You know what's still one of science's biggest unsolved problems? How physical brain processes give rise to subjective conscious experience. We can map neurons and neurotransmitters, but the 'hard problem of consciousness' remains wide open. What's your interest in neuroscience?",
+             "Neuroscience is revealing fascinating things about the brain. The prefrontal cortex handles decision-making, the hippocampus forms memories, the amygdala processes emotions - and they all work together constantly. Are you interested in a specific brain function or question?",
+             "Here's something cool about neurotransmitters: dopamine isn't just about pleasure - it's really about motivation and reward prediction. Serotonin affects mood, sleep, and digestion. The brain's chemical system is incredibly nuanced. What are you curious about?"
+         }},
+        {{"physics", "force", "energy", "momentum", "gravity", "electromagnetic", "thermodynamics", "wavelength", "spectrum", "atom", "particle", "relativity", "motion", "velocity"},
+         {
+             "Physics is the most fundamental science - it describes how matter and energy interact at every scale. From Newton's laws governing everyday motion to Einstein's relativity warping spacetime, it's all beautifully connected. What area of physics are you thinking about?",
+             "If you're curious about physics, here's what I find mind-blowing: E=mc^2 means mass and energy are interchangeable, the speed of light is the same for all observers, and gravity is actually spacetime curvature. What aspect caught your interest?",
+             "You know what makes physics great? It explains everything from why apples fall to why stars shine with the same fundamental principles. Thermodynamics, electromagnetism, mechanics - they all fit together into an elegant picture. What are you exploring?",
+             "Thermodynamics is one of my favorite areas of physics. The laws are simple but profound: energy is conserved, entropy always increases, and absolute zero is unreachable. They govern everything from engines to the fate of the universe. What physics topic brought you here?",
+             "Here's a good way to think about physics: start with mechanics - force, momentum, energy conservation. From there, electromagnetism explains light and electricity, and thermodynamics explains heat and efficiency. Each layer builds on the last. What's your background with physics?"
+         }},
+        {{"quantum", "superposition", "entanglement", "wave function", "uncertainty", "heisenberg", "photon", "quantum computing", "schrodinger", "planck"},
+         {
+             "Quantum mechanics is where physics gets truly weird and wonderful. Particles existing in superposition, entangled particles communicating instantly across distances, the uncertainty principle limiting what we can know - it defies everyday intuition. What about quantum physics interests you?",
+             "If you're thinking about quantum mechanics, the double-slit experiment is the perfect starting point. Individual particles somehow create an interference pattern as if each one passes through both slits simultaneously. It's the gateway to understanding wave-particle duality. Are you studying this formally or exploring out of curiosity?",
+             "You know what Einstein called quantum entanglement? 'Spooky action at a distance.' Two particles linked so that measuring one instantly determines the other's state, regardless of how far apart they are. It's been experimentally proven and it's now the basis for quantum computing. Pretty wild, right?",
+             "Quantum computing is the practical side of quantum weirdness. Qubits in superposition, entangled for correlation, and algorithms like Shor's that could crack encryption. We're still early, but the potential is enormous. Are you interested in the theory or the computing applications?",
+             "Here's what I love about quantum mechanics: Heisenberg's uncertainty principle isn't about measurement limitations - it's a fundamental property of nature. You genuinely cannot know both the position and momentum of a particle with perfect precision. What drew you to quantum physics?"
+         }},
+        {{"religion", "faith", "belief", "spiritual", "god", "prayer", "worship", "church", "mosque", "temple", "bible", "quran", "veda", "torah", "buddha", "christianity", "islam", "hinduism", "buddhism", "judaism", "sikhism", "jainism", "taoism", "shinto", "atheism"},
+         {
+             "World religions represent humanity's diverse search for meaning and purpose. Christianity, Islam, Hinduism, Buddhism, Judaism - each offers its followers community, moral frameworks, and answers to life's deepest questions. What tradition or question are you exploring?",
+             "If you're thinking about religion, I find it fascinating how different traditions converge on similar themes - compassion, purpose, connection to something greater - while diverging completely on theology and practice. Are you comparing traditions or exploring one in particular?",
+             "You know what I think is most valuable about studying world religions? Understanding how billions of people make sense of existence. Whether it's the Four Noble Truths of Buddhism, the Five Pillars of Islam, or the concept of dharma in Hinduism - each framework has sustained communities for millennia. What interests you specifically?",
+             "Religion and spirituality touch on some of humanity's most fundamental questions. From organized religions to personal spirituality to atheism and agnosticism - people find meaning in many different ways. Are you exploring a specific question or tradition?",
+             "Interfaith understanding is so important in our diverse world. Christianity, Islam, Hinduism, Buddhism, Judaism, and many other traditions all offer their adherents depth, community, and purpose. Approaching each with respect and genuine curiosity opens up so much understanding. What would you like to discuss?"
+         }},
+        {{"environment", "climate", "pollution", "renewable", "sustainable", "ecosystem", "biodiversity", "greenhouse", "carbon", "global warming", "deforestation", "ocean", "recycle", "conservation", "ecology"},
+         {
+             "Climate change is arguably the defining challenge of our time. Greenhouse gases have risen over 50% since pre-industrial times, temperatures are up about 1.1 degrees C, and the effects are already visible. But there's real momentum in renewable energy and conservation too. What aspect concerns you most?",
+             "If you're thinking about the environment, here's what gives me hope: renewable energy is now cost-competitive with fossil fuels in most places, and solar and wind keep getting cheaper. The technology exists - it's about deployment and political will now. Are you looking at this from a personal or professional angle?",
+             "You know what's underappreciated about environmental issues? Biodiversity loss. A million species at risk of extinction, ecosystems collapsing - it's as serious as climate change. The 30x30 initiative aims to protect 30% of land and ocean by 2030, which would be a huge step. What environmental topic brought you here?",
+             "Individual action on the environment matters, but systemic change matters more. That said, things like energy efficiency, reducing single-use plastics, plant-based diets, and supporting sustainable products collectively make a real difference. Are you looking to reduce your footprint or working on an environmental project?",
+             "Environmental science covers everything from climate change to pollution to conservation. The air quality crisis alone causes 7 million premature deaths annually. But there's also incredible progress in renewable energy and circular economy approaches. What's the focus of your interest?"
+         }}
     };
     auto containsAny = [&](const std::string& text, const std::vector<std::string>& words) {
         for (const auto& w : words) {
@@ -1462,9 +1660,22 @@ std::string Language::respond(const std::string& message) {
         }
         return false;
     };
+    lastResponseUsedWebSearch = false;
+    lastWebSearchQuery = "";
+
+    if (shouldSearchWeb(message)) {
+        lastResponseUsedWebSearch = true;
+        lastWebSearchQuery = message;
+        std::string searchResult = webSearch(message);
+        response = summarizeWebResult(message, searchResult);
+        learnFromExchange(message, response);
+        return response;
+    }
+
     for (const auto& topic : topicBank) {
         if (containsAny(lowerMsg, topic.keywords)) {
-            response = topic.response;
+            int variantIdx = conversationCount % topic.responses.size();
+            response = topic.responses[variantIdx];
             learnFromExchange(message, response);
             return response;
         }
@@ -1589,6 +1800,16 @@ std::string Language::respond(const std::string& message) {
                        "mathematics, science, and technology. Could you tell me more specifically what you'd like to know?";
         }
     } else {
+        if (response.empty() && conversationCount > 2) {
+            std::string searchResult = webSearch(message);
+            if (!searchResult.empty()) {
+                lastResponseUsedWebSearch = true;
+                lastWebSearchQuery = message;
+                response = summarizeWebResult(message, searchResult);
+                learnFromExchange(message, response);
+                return response;
+            }
+        }
         std::vector<std::string> fallbackResponses = {
             "That's an interesting thought. Tell me more about where you're coming from with this - I'd love to understand your perspective better.",
             "I'm thinking about this with you. Could you give me a bit more context? The more I understand what you're working toward, the better I can help.",

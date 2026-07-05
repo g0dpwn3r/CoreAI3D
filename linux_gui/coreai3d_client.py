@@ -119,7 +119,12 @@ class CoreAI3DClient:
                         logger.error("Failed to establish session, cannot proceed with WebSocket connection")
                         return
 
-                    await self._connect_websocket()
+                    try:
+                        await asyncio.wait_for(self._connect_websocket(), timeout=self.config.get('timeout', 30.0))
+                    except asyncio.TimeoutError:
+                        logger.warning("WebSocket connection timed out during connect() — proceeding with HTTP-only mode")
+                        self._connecting = False
+
                     # Add reconnection logic for WebSocket
                     if self._is_connected and self.ws_connection and not self._shutdown:
                         # Set up automatic reconnection on connection loss
@@ -245,9 +250,11 @@ class CoreAI3DClient:
                         'X-Session-ID': session_id
                     }
 
+                    ws_timeout = min(self.config.get('timeout', 10.0), 10.0)
                     self.ws_connection = await self.session.ws_connect(
                         self.config['ws_url'],
-                        headers=headers
+                        headers=headers,
+                        timeout=ws_timeout
                     )
                     logger.info("WebSocket connection established successfully")
 
@@ -804,6 +811,45 @@ class CoreAI3DClient:
             'max_range': max_range
         }
         return await self.post('/training/load_dataset', data)
+
+    async def learn_from_directory(self, directory: str, dataset_name: str, extensions: List[str] = None,
+                                   output_size: int = 1, max_seq_len: int = 512, embedding_dim: int = 300) -> APIResponse:
+        """Learn from all files in a directory"""
+        data = {
+            'directory': directory,
+            'dataset_name': dataset_name,
+            'extensions': extensions or [],
+            'output_size': output_size,
+            'max_seq_len': max_seq_len,
+            'embedding_dim': embedding_dim
+        }
+        return await self.post('/training/load_dataset', data)
+
+    async def learn_from_files(self, files: List[str], dataset_name: str,
+                              output_size: int = 1, max_seq_len: int = 512, embedding_dim: int = 300) -> APIResponse:
+        """Learn from a batch of specific files"""
+        data = {
+            'files': files,
+            'dataset_name': dataset_name,
+            'output_size': output_size,
+            'max_seq_len': max_seq_len,
+            'embedding_dim': embedding_dim
+        }
+        return await self.post('/training/load_dataset', data)
+
+    async def generate_api_key(self, description: str = '') -> APIResponse:
+        """Generate a new SHA-256 API key (64 characters)"""
+        data = {
+            'description': description
+        }
+        return await self.post('/auth/generate_api_key', data)
+
+    async def validate_api_key(self, api_key: str) -> APIResponse:
+        """Validate an API key"""
+        data = {
+            'api_key': api_key
+        }
+        return await self.post('/auth/validate_api_key', data)
 
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:

@@ -17,13 +17,13 @@
 - fix training issues
 - fix chat issues
 - add learn from conversations
-- add learn from files
-- add learn from internet
-- add learn from videos
-- add learn from audio
-- add learn from images
-- add learn from 3d models
-- add learn from music
+- add learn from files with chat
+- add learn from internet with chat 
+- add learn from videos with chat
+- add learn from audio with chat
+- add learn from images with chat 
+- add learn from 3d models with chat
+- add learn from music with chat
 - dashboard should work
 - network topology should be working
 - change the dashboard to include all learing settings like learning rate, batch size, epochs learing-rate, etc. in one place

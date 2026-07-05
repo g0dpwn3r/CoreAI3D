@@ -2124,6 +2124,59 @@ class CoreAI3DDashboard(QMainWindow):
         list_layout.addLayout(dataset_buttons)
         layout.addWidget(list_group)
 
+        # File Learning Controls
+        file_learning_group = QGroupBox("Learn from Files")
+        file_learning_layout = QVBoxLayout(file_learning_group)
+
+        self.file_dataset_name = QLineEdit("file_learned_dataset")
+        file_learning_form = QFormLayout()
+        file_learning_form.addRow("Dataset Name:", self.file_dataset_name)
+
+        self.file_learning_mode_combo = QComboBox()
+        self.file_learning_mode_combo.addItems(["Single Directory", "Multiple Files"])
+        self.file_learning_mode_combo.currentIndexChanged.connect(self._on_file_learning_mode_changed)
+        file_learning_form.addRow("Learning Mode:", self.file_learning_mode_combo)
+
+        self.file_output_size = QSpinBox()
+        self.file_output_size.setRange(1, 1000)
+        self.file_output_size.setValue(1)
+        file_learning_form.addRow("Output Size:", self.file_output_size)
+
+        file_learning_layout.addLayout(file_learning_form)
+
+        directory_layout = QHBoxLayout()
+        self.file_directory_edit = QLineEdit()
+        self.file_directory_edit.setReadOnly(True)
+        browse_directory_btn = QPushButton("Browse Directory...")
+        browse_directory_btn.clicked.connect(self._browse_learning_directory)
+        directory_layout.addWidget(self.file_directory_edit)
+        directory_layout.addWidget(browse_directory_btn)
+        self.file_directory_widget = QWidget()
+        self.file_directory_widget.setLayout(directory_layout)
+        file_learning_layout.addWidget(self.file_directory_widget)
+
+        self.file_learning_list = QListWidget()
+        self.file_learning_list.setMaximumHeight(100)
+        self.file_learning_list.setFixedHeight(100)
+        file_browse_btn = QPushButton("Add Files...")
+        file_browse_btn.clicked.connect(self._add_learning_files)
+        file_remove_btn = QPushButton("Remove Selected")
+        file_remove_btn.clicked.connect(self._remove_learning_files)
+        file_buttons_layout = QHBoxLayout()
+        file_buttons_layout.addWidget(file_browse_btn)
+        file_buttons_layout.addWidget(file_remove_btn)
+        self.file_list_widget = QWidget()
+        self.file_list_widget.setLayout(file_buttons_layout)
+        file_learning_layout.addWidget(self.file_learning_list)
+        file_learning_layout.addWidget(self.file_list_widget)
+        self.file_list_widget.setVisible(False)
+
+        self.learn_files_btn = QPushButton("Learn from Files")
+        self.learn_files_btn.clicked.connect(self._learn_from_files)
+        file_learning_layout.addWidget(self.learn_files_btn)
+
+        layout.addWidget(file_learning_group)
+
         # Dataset details
         details_group = QGroupBox("Dataset Details")
         details_layout = QVBoxLayout(details_group)
@@ -4424,6 +4477,38 @@ if __name__ == "__main__":
 
         scroll_layout.addWidget(network_group)
 
+        # Input/Output Configuration
+        io_group = QGroupBox("Input/Output Configuration")
+        io_layout = QFormLayout(io_group)
+
+        self.network_input_size = QSpinBox()
+        self.network_input_size.setRange(1, 10000)
+        self.network_input_size.setValue(1)
+        self.network_input_size.setToolTip("Number of input features/neurons. Set this to match your data's feature count.")
+        io_layout.addRow("Input Size:", self.network_input_size)
+
+        self.network_output_size = QSpinBox()
+        self.network_output_size.setRange(1, 10000)
+        self.network_output_size.setValue(1)
+        self.network_output_size.setToolTip("Number of output classes/neurons. For classification: number of classes. For regression: number of values.")
+        io_layout.addRow("Output Size:", self.network_output_size)
+
+        self.max_seq_length = QSpinBox()
+        self.max_seq_length.setRange(32, 8192)
+        self.max_seq_length.setValue(512)
+        self.max_seq_length.setSingleStep(32)
+        self.max_seq_length.setToolTip("Maximum sequence length for text/file learning. Larger values process more text but use more memory.")
+        io_layout.addRow("Max Sequence Length:", self.max_seq_length)
+
+        self.embedding_dimension = QSpinBox()
+        self.embedding_dimension.setRange(16, 1024)
+        self.embedding_dimension.setValue(300)
+        self.embedding_dimension.setSingleStep(16)
+        self.embedding_dimension.setToolTip("Word embedding dimension. 300 is standard, 512+ for high-quality embeddings.")
+        io_layout.addRow("Embedding Dimension:", self.embedding_dimension)
+
+        scroll_layout.addWidget(io_group)
+
         # Training Parameters Section
         training_group = QGroupBox("Training Parameters")
         training_layout = QFormLayout(training_group)
@@ -4656,6 +4741,10 @@ if __name__ == "__main__":
             self.learning_rate_spin.setValue(self.learning_config.get('learning_rate', 0.01))
             self.batch_size_spin.setValue(self.learning_config.get('batch_size', 32))
             self.validation_split_spin.setValue(self.learning_config.get('validation_split', 0.2))
+            self.network_input_size.setValue(self.learning_config.get('inputSize', 1))
+            self.network_output_size.setValue(self.learning_config.get('outputSize', 1))
+            self.max_seq_length.setValue(self.learning_config.get('max_seq_len', 512))
+            self.embedding_dimension.setValue(self.learning_config.get('embedding_dim', 300))
 
             # Update combo boxes
             model_type = self.learning_config.get('model_type', 'neural_network').replace('_', ' ').title()
@@ -4918,11 +5007,20 @@ if __name__ == "__main__":
             logger.info("Chat response handler registered")
 
             logger.info("Connecting CoreAI3D client (HTTP + WebSocket)...")
+            http_ok = False
+            ws_ok = False
+            connect_timeout = getattr(self.config, 'connection_timeout', 15.0) or 15.0
             try:
-                await self.client.connect()
+                await asyncio.wait_for(self.client.connect(), timeout=connect_timeout)
                 logger.info("CoreAI3D client connected successfully")
+                http_ok = True
+                ws_ok = self.client.is_connected()
+            except asyncio.TimeoutError:
+                logger.warning(f"Client connect() timed out after {connect_timeout}s — HTTP path will still be available")
+                http_ok = self.client.session is not None
             except Exception as conn_err:
                 logger.warning(f"Client connect() raised: {conn_err} — HTTP path will still be available")
+                http_ok = self.client.session is not None
 
             logger.info("Creating CodeDebugger...")
             self.debugger = CodeDebugger(self.client)
@@ -5659,6 +5757,103 @@ if __name__ == "__main__":
 
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to remove file: {str(e)}")
+
+    def _on_file_learning_mode_changed(self, index):
+        """Toggle between directory and file list views"""
+        is_directory_mode = (index == 0)
+        self.file_directory_widget.setVisible(is_directory_mode)
+        self.file_list_widget.setVisible(not is_directory_mode)
+        self.file_learning_list.setVisible(not is_directory_mode)
+
+    def _browse_learning_directory(self):
+        """Browse for a directory to learn from"""
+        directory = QFileDialog.getExistingDirectory(self, "Select Directory to Learn From")
+        if directory:
+            self.file_directory_edit.setText(directory)
+
+    def _add_learning_files(self):
+        """Add files to the learning list"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Files to Learn From",
+            "",
+            "All Supported Files (*.txt *.json *.xml *.csv *.py *.js *.c *.cpp *.h *.java *.md);;All Files (*)"
+        )
+        if files:
+            if not hasattr(self, '_learning_files'):
+                self._learning_files = []
+            for f in files:
+                if f not in self._learning_files:
+                    self._learning_files.append(f)
+                    self.file_learning_list.addItem(f)
+
+    def _remove_learning_files(self):
+        """Remove selected files from the learning list"""
+        selected_items = self.file_learning_list.selectedItems()
+        if selected_items and hasattr(self, '_learning_files'):
+            for item in selected_items:
+                path = item.text()
+                if path in self._learning_files:
+                    self._learning_files.remove(path)
+                self.file_learning_list.takeItem(self.file_learning_list.row(item))
+
+    @qasync.asyncSlot()
+    async def _learn_from_files(self):
+        """Learn from selected files or directory"""
+        if not self.client:
+            QMessageBox.warning(self, "Error", "Client not connected. Please wait for initialization.")
+            return
+
+        dataset_name = self.file_dataset_name.text().strip() or "file_learned_dataset"
+        output_size = self.file_output_size.value()
+
+        learning_mode = self.file_learning_mode_combo.currentIndex()
+
+        try:
+            if learning_mode == 0:
+                directory = self.file_directory_edit.text().strip()
+                if not directory:
+                    QMessageBox.warning(self, "Error", "Please select a directory first.")
+                    return
+
+                self.learn_files_btn.setEnabled(False)
+                self.learn_files_btn.setText("Learning...")
+
+                result = await self.client.learn_from_directory(
+                    directory=directory,
+                    dataset_name=dataset_name,
+                    output_size=output_size
+                )
+
+                if result.success:
+                    QMessageBox.information(self, "Success", f"Successfully learned from directory:\n{directory}")
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to learn from directory: {result.message}")
+
+            else:
+                if not hasattr(self, '_learning_files') or not self._learning_files:
+                    QMessageBox.warning(self, "Error", "Please add files first.")
+                    return
+
+                self.learn_files_btn.setEnabled(False)
+                self.learn_files_btn.setText("Learning...")
+
+                result = await self.client.learn_from_files(
+                    files=self._learning_files,
+                    dataset_name=dataset_name,
+                    output_size=output_size
+                )
+
+                if result.success:
+                    QMessageBox.information(self, "Success", f"Successfully learned from {len(self._learning_files)} files")
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to learn from files: {result.message}")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Error during learning: {str(e)}")
+        finally:
+            self.learn_files_btn.setEnabled(True)
+            self.learn_files_btn.setText("Learn from Files")
 
     @qasync.asyncSlot()
     async def run_test(self):
@@ -6765,8 +6960,12 @@ if __name__ == "__main__":
             result = task.result()
             if result.success and result.data:
                 inner_data = result.data.get('data', result.data) if isinstance(result.data, dict) else result.data
+                web_searched = False
+                search_query = ""
                 if isinstance(inner_data, dict):
                     response = inner_data.get('response') or inner_data.get('content') or inner_data.get('message', '')
+                    web_searched = inner_data.get('web_searched', False)
+                    search_query = inner_data.get('search_query', '')
                 else:
                     response = ''
                 if response:
@@ -6775,7 +6974,7 @@ if __name__ == "__main__":
                     already_shown = key in self._shown_chat_response_keys
                     if not already_shown:
                         self._shown_chat_response_keys.add(key)
-                        QTimer.singleShot(0, lambda r=response: self._add_response_with_typing_effect(r))
+                        QTimer.singleShot(0, lambda r=response, ws=web_searched, sq=search_query: self._add_response_with_typing_effect(r, web_searched_indicator=ws, search_query=sq))
                     logger.info(f"HTTP chat response handled (shown={not already_shown}): {response[:80]}")
             elif not result.success:
                 error_msg = result.message or (result.data.get('error') if isinstance(result.data, dict) else None) or 'Unknown error'
@@ -6796,6 +6995,12 @@ if __name__ == "__main__":
                 key = (content, hashlib.md5(content.encode('utf-8', errors='ignore')).hexdigest())
                 if key not in self._shown_chat_response_keys:
                     self._shown_chat_response_keys.add(key)
+                    if not hasattr(self, '_web_search_info_by_hash'):
+                        self._web_search_info_by_hash = {}
+                    self._web_search_info_by_hash[key] = {
+                        'web_searched': data.get('web_searched', False),
+                        'search_query': data.get('search_query', ''),
+                    }
                     logger.info(f"Emitting chat response signal (new): {content[:80]}")
                     self.chat_response_received.emit(content)
                 else:
@@ -6814,27 +7019,50 @@ if __name__ == "__main__":
                 logger.debug(f"Signal-path chat response already shown, skipping: {response[:80]}")
                 return
             self._shown_chat_response_keys.add(key)
-        QTimer.singleShot(0, lambda r=response: self._add_response_with_typing_effect(r))
+        web_searched = False
+        search_query = ""
+        if hasattr(self, '_web_search_info_by_hash') and key in self._web_search_info_by_hash:
+            info = self._web_search_info_by_hash.pop(key)
+            web_searched = info.get('web_searched', False)
+            search_query = info.get('search_query', '')
+        QTimer.singleShot(0, lambda r=response, ws=web_searched, sq=search_query: self._add_response_with_typing_effect(r, web_searched_indicator=ws, search_query=sq))
 
-    def _add_response_with_typing_effect(self, text: str):
+    def _add_response_with_typing_effect(self, text: str, web_searched_indicator: bool = False, search_query: str = ""):
         """Add response text with a typing animation effect"""
-        import html
+        if hasattr(self, '_typing_timer') and self._typing_timer is not None:
+            try:
+                self._typing_timer.stop()
+            except RuntimeError:
+                pass
+            self._typing_timer.deleteLater()
+            self._typing_timer = None
+        if web_searched_indicator:
+            search_label = f"🔍 Searched the web for: \"{search_query}\"" if search_query else "🔍 Searched the web"
+            self.chat_history.append("")
+            cursor = self.chat_history.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.chat_history.setTextCursor(cursor)
+            self.chat_history.insertPlainText(search_label + "\n")
         self._typing_text = text
         self._typing_index = 0
-        self._typing_chunk = f"AI: "
-        self._typing_timer = QTimer()
-        self._typing_timer.setInterval(15)
+        self.chat_history.append("AI: ")
+        self._typing_timer = QTimer(self)
+        self._typing_timer.setInterval(20)
         def type_next_chunk():
-            if self._typing_index < len(self._typing_text):
-                chunk_size = min(3, len(self._typing_text) - self._typing_index)
-                self._typing_chunk += self._typing_text[self._typing_index:self._typing_index + chunk_size]
-                self._typing_index += chunk_size
-                cursor = self.chat_history.textCursor()
-                cursor.movePosition(cursor.MoveOperation.End)
-                self.chat_history.setTextCursor(cursor)
-            else:
+            if self._typing_index >= len(self._typing_text):
                 self._typing_timer.stop()
-        self.chat_history.append(f"AI: {text}")
+                return
+            chunk_size = min(3, len(self._typing_text) - self._typing_index)
+            piece = self._typing_text[self._typing_index:self._typing_index + chunk_size]
+            self._typing_index += chunk_size
+            cursor = self.chat_history.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.chat_history.setTextCursor(cursor)
+            self.chat_history.insertPlainText(piece)
+            scrollbar = self.chat_history.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+        self._typing_timer.timeout.connect(type_next_chunk)
+        self._typing_timer.start()
 
     def _handle_chat_error(self, error_msg: str):
         """Handle chat error"""
@@ -7908,6 +8136,8 @@ capabilities, training data, performance metrics, and usage instructions."""
         contains_text = self.learning_config.get('contains_text', False)
         min_range = self.learning_config.get('normalization_min', -1.0)
         max_range = self.learning_config.get('normalization_max', 1.0)
+        max_seq_len = self.max_seq_length.value()
+        embedding_dim = self.embedding_dimension.value()
 
         # Basic validation
         if output_size < 1:
@@ -7931,7 +8161,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 contains_text=contains_text,
                 dataset_name=dataset_name,
                 min_range=min_range,
-                max_range=max_range
+                max_range=max_range,
+                max_seq_len=max_seq_len,
+                embedding_dim=embedding_dim
             )
         elif file_ext in ['.json', '.xml', '.txt']:
             # For text-based formats, use generic data loading
@@ -7942,7 +8174,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 contains_text=contains_text,
                 dataset_name=dataset_name,
                 min_range=min_range,
-                max_range=max_range
+                max_range=max_range,
+                max_seq_len=max_seq_len,
+                embedding_dim=embedding_dim
             )
         elif file_ext in ['.pdf', '.docx', '.doc']:
             # For document formats, use document processing
@@ -7953,7 +8187,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 contains_text=True,  # Documents contain text
                 dataset_name=dataset_name,
                 min_range=min_range,
-                max_range=max_range
+                max_range=max_range,
+                max_seq_len=max_seq_len,
+                embedding_dim=embedding_dim
             )
         elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
             # For image formats, use vision processing
@@ -7964,7 +8200,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 contains_text=False,
                 dataset_name=dataset_name,
                 min_range=min_range,
-                max_range=max_range
+                max_range=max_range,
+                max_seq_len=max_seq_len,
+                embedding_dim=embedding_dim
             )
         elif file_ext in ['.mp4', '.avi', '.mov', '.mkv', '.mp3', '.wav', '.flac', '.aac']:
             # For media formats, use audio/video processing
@@ -7975,7 +8213,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 contains_text=False,
                 dataset_name=dataset_name,
                 min_range=min_range,
-                max_range=max_range
+                max_range=max_range,
+                max_seq_len=max_seq_len,
+                embedding_dim=embedding_dim
             )
         else:
             # Fallback for unknown formats
@@ -7986,7 +8226,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                 contains_text=contains_text,
                 dataset_name=dataset_name,
                 min_range=min_range,
-                max_range=max_range
+                max_range=max_range,
+                max_seq_len=max_seq_len,
+                embedding_dim=embedding_dim
             )
     def calculate_dataset_sizes(self, file_path: str, data_type: str = None) -> Dict[str, Any]:
         """Calculate inputsize, outputsize, and samplesize for a dataset file"""
@@ -8423,6 +8665,10 @@ capabilities, training data, performance metrics, and usage instructions."""
         training_config.setdefault('activation', 'relu')
         training_config.setdefault('min_range', self.norm_min)
         training_config.setdefault('max_range', self.norm_max)
+        training_config['inputSize'] = self.network_input_size.value()
+        training_config['outputSize'] = self.network_output_size.value()
+        training_config['max_seq_len'] = self.max_seq_length.value()
+        training_config['embedding_dim'] = self.embedding_dimension.value()
 
         result = await self.client.start_training(training_config)
         return result
@@ -9495,48 +9741,11 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Handle neural data refresh result"""
         try:
             topology_result, activity_result = task.result()
-
-            # Handle topology
-            if topology_result.success:
-                topology_data = topology_result.data
-                if isinstance(topology_data, dict) and topology_data.get('status') == 'success':
-                    # Format topology data nicely
-                    formatted_topology = self._format_topology_data(topology_data)
-                    self.topology_text.setPlainText(formatted_topology)
-                else:
-                    topology = json.dumps(topology_data, indent=2)
-                    self.topology_text.setPlainText(topology)
-            else:
-                error_msg = topology_result.data.get('error', 'Unknown error') if isinstance(topology_result.data, dict) else 'Unknown error'
-                self.topology_text.setPlainText(f"Error: {error_msg}")
-
-            # Handle activity
-            if activity_result.success:
-                activity_data = activity_result.data
-                if isinstance(activity_data, dict) and activity_data.get('status') == 'active':
-                    # Format activity data nicely
-                    formatted_activity = self._format_activity_data(activity_data)
-                    if MATPLOTLIB_AVAILABLE:
-                        self.update_neural_plot(activity_data)
-                    else:
-                        self.activity_text.setPlainText(formatted_activity)
-                else:
-                    if MATPLOTLIB_AVAILABLE:
-                        self.update_neural_plot(activity_data)
-                    else:
-                        activity = json.dumps(activity_data, indent=2)
-                        self.activity_text.setPlainText(activity)
-            else:
-                error_msg = activity_result.data.get('error', 'Unknown error') if isinstance(activity_result.data, dict) else 'Unknown error'
-                if MATPLOTLIB_AVAILABLE:
-                    self.activity_canvas.figure.clear()
-                    self.activity_canvas.draw()
-                else:
-                    self.activity_text.setPlainText(f"Error: {error_msg}")
+            self._handle_neural_data_result_direct(topology_result, activity_result)
 
         except Exception as e:
             error_msg_full = f"Error refreshing neural data: {str(e)}"
-            self.topology_text.setPlainText(error_msg_full)
+            self.topology_text.setPlainText(f"Neural Network Topology\n{'=' * 40}\n{error_msg_full}")
             if MATPLOTLIB_AVAILABLE:
                 self.activity_canvas.figure.clear()
                 self.activity_canvas.draw()
@@ -9546,47 +9755,33 @@ capabilities, training data, performance metrics, and usage instructions."""
     def _handle_neural_data_result_direct(self, topology_result, activity_result):
         """Handle neural data refresh result directly"""
         try:
-            # Handle topology
-            if topology_result.success:
-                topology_data = topology_result.data
-                if isinstance(topology_data, dict) and topology_data.get('status') == 'success':
-                    # Format topology data nicely
-                    formatted_topology = self._format_topology_data(topology_data)
-                    self.topology_text.setPlainText(formatted_topology)
-                else:
-                    topology = json.dumps(topology_data, indent=2)
-                    self.topology_text.setPlainText(topology)
+            if topology_result.success and isinstance(topology_result.data, dict):
+                formatted_topology = self._format_topology_data(topology_result.data)
+                self.topology_text.setPlainText(formatted_topology)
             else:
-                error_msg = topology_result.data.get('error', 'Unknown error') if isinstance(topology_result.data, dict) else 'Unknown error'
-                self.topology_text.setPlainText(f"Error: {error_msg}")
+                error_msg = topology_result.data.get('error', 'Unknown error') if isinstance(topology_result.data, dict) else (topology_result.message or 'Unknown error')
+                self.topology_text.setPlainText(f"Neural Network Topology\n{'=' * 40}\nError: {error_msg}")
 
-            # Handle activity
-            if activity_result.success:
+            if activity_result.success and isinstance(activity_result.data, dict):
                 activity_data = activity_result.data
-                if isinstance(activity_data, dict) and activity_data.get('status') == 'active':
-                    # Format activity data nicely
-                    formatted_activity = self._format_activity_data(activity_data)
-                    if MATPLOTLIB_AVAILABLE:
-                        self.update_neural_plot(activity_data)
-                    else:
-                        self.activity_text.setPlainText(formatted_activity)
-                else:
-                    if MATPLOTLIB_AVAILABLE:
-                        self.update_neural_plot(activity_data)
-                    else:
-                        activity = json.dumps(activity_data, indent=2)
-                        self.activity_text.setPlainText(activity)
+                if MATPLOTLIB_AVAILABLE:
+                    self.update_neural_plot(activity_data)
+                formatted_activity = self._format_activity_data(activity_data)
+                if not MATPLOTLIB_AVAILABLE:
+                    self.activity_text.setPlainText(formatted_activity)
             else:
-                error_msg = activity_result.data.get('error', 'Unknown error') if isinstance(activity_result.data, dict) else 'Unknown error'
+                error_msg = activity_result.data.get('error', 'Unknown error') if isinstance(activity_result.data, dict) else (activity_result.message or 'Unknown error')
                 if MATPLOTLIB_AVAILABLE:
                     self.activity_canvas.figure.clear()
+                    ax = self.activity_canvas.figure.add_subplot(111)
+                    ax.text(0.5, 0.5, f"Error: {error_msg}", ha='center', va='center', color='red')
                     self.activity_canvas.draw()
                 else:
-                    self.activity_text.setPlainText(f"Error: {error_msg}")
+                    self.activity_text.setPlainText(f"Neural Network Activity\n{'=' * 40}\nError: {error_msg}")
 
         except Exception as e:
             error_msg_full = f"Error refreshing neural data: {str(e)}"
-            self.topology_text.setPlainText(error_msg_full)
+            self.topology_text.setPlainText(f"Neural Network Topology\n{'=' * 40}\n{error_msg_full}")
             if MATPLOTLIB_AVAILABLE:
                 self.activity_canvas.figure.clear()
                 self.activity_canvas.draw()
@@ -9598,43 +9793,68 @@ capabilities, training data, performance metrics, and usage instructions."""
         try:
             lines = []
             lines.append("Neural Network Topology")
-            lines.append("=" * 30)
+            lines.append("=" * 40)
 
-            if 'layers' in data:
-                lines.append(f"Layers: {data['layers']}")
-            if 'neurons' in data:
-                lines.append(f"Neurons per Layer: {data['neurons']}")
-            if 'input_size' in data:
-                lines.append(f"Input Size: {data['input_size']}")
-            if 'output_size' in data:
-                lines.append(f"Output Size: {data['output_size']}")
-            if 'learning_rate' in data:
-                lines.append(f"Learning Rate: {data['learning_rate']}")
-            if 'num_samples' in data:
-                lines.append(f"Training Samples: {data['num_samples']}")
+            if data.get('status') == 'error':
+                lines.append(f"Error: {data.get('message', 'Unknown error')}")
+                return "\n".join(lines)
 
-            if 'normalization_range' in data:
-                norm_range = data['normalization_range']
-                if isinstance(norm_range, dict):
-                    min_val = norm_range.get('min', 'N/A')
-                    max_val = norm_range.get('max', 'N/A')
-                    lines.append(f"Normalization Range: [{min_val}, {max_val}]")
+            input_size = data.get('inputSize', data.get('input_size'))
+            output_size = data.get('outputSize', data.get('output_size'))
+            layers = data.get('layers')
+            neurons = data.get('neurons')
+            learning_rate = data.get('learning_rate')
+            num_samples = data.get('num_samples')
 
-            if 'core_initialized' in data:
-                status = "Yes" if data['core_initialized'] else "No"
-                lines.append(f"Core Initialized: {status}")
+            if input_size is not None:
+                lines.append(f"Input Layer Size:    {input_size}")
+            if neurons is not None and layers is not None:
+                lines.append(f"Hidden Layers:       {layers} x {neurons} neurons")
+            elif layers is not None:
+                lines.append(f"Hidden Layers:       {layers}")
+            elif neurons is not None:
+                lines.append(f"Neurons per Layer:   {neurons}")
+            if output_size is not None:
+                lines.append(f"Output Layer Size:   {output_size}")
+            if neurons is not None:
+                total_params = 0
+                if input_size is not None:
+                    total_params += input_size * neurons
+                if output_size is not None:
+                    total_params += neurons * output_size
+                total_params += neurons  # biases for hidden layer
+                total_params += output_size  # biases for output layer
+                lines.append(f"Approx. Parameters: {total_params}")
 
-            if 'network_structure' in data:
-                struct = data['network_structure']
-                if isinstance(struct, dict):
-                    lines.append("")
-                    lines.append("Network Structure:")
-                    if 'input_layer' in struct:
-                        lines.append(f"  Input Layer: {struct['input_layer']} neurons")
-                    if 'hidden_layers' in struct:
-                        lines.append(f"  Hidden Layers: {struct['hidden_layers']}")
-                    if 'output_layer' in struct:
-                        lines.append(f"  Output Layer: {struct['output_layer']} neurons")
+            lines.append("")
+            lines.append("Training Configuration")
+            lines.append("-" * 40)
+            if learning_rate is not None:
+                lines.append(f"Learning Rate:       {learning_rate}")
+            if num_samples is not None:
+                lines.append(f"Training Samples:    {num_samples}")
+
+            norm_range = data.get('normalization_range')
+            if norm_range and isinstance(norm_range, dict):
+                min_val = norm_range.get('min', 'N/A')
+                max_val = norm_range.get('max', 'N/A')
+                lines.append(f"Normalization Range: [{min_val}, {max_val}]")
+
+            weights = data.get('weights')
+            if weights and isinstance(weights, dict):
+                lines.append("")
+                lines.append("Weight Matrices")
+                lines.append("-" * 40)
+                for name, w in weights.items():
+                    if isinstance(w, list):
+                        if w and isinstance(w[0], list):
+                            rows = len(w)
+                            cols = len(w[0]) if rows > 0 else 0
+                            lines.append(f"  {name}: {rows} x {cols}")
+                        else:
+                            lines.append(f"  {name}: {len(w)} values")
+                    else:
+                        lines.append(f"  {name}: loaded")
 
             return "\n".join(lines)
 
@@ -9646,38 +9866,53 @@ capabilities, training data, performance metrics, and usage instructions."""
         try:
             lines = []
             lines.append("Neural Network Activity")
-            lines.append("=" * 30)
+            lines.append("=" * 40)
 
-            if 'status' in data:
-                lines.append(f"Status: {data['status']}")
+            if data.get('status') == 'error':
+                lines.append(f"Error: {data.get('message', 'Unknown error')}")
+                return "\n".join(lines)
+
+            status = data.get('status', 'unknown')
+            lines.append(f"Status: {status}")
+
             if 'samples_processed' in data:
                 lines.append(f"Samples Processed: {data['samples_processed']}")
             if 'timestamp' in data:
-                # Convert timestamp to readable format
                 try:
                     import datetime
-                    dt = datetime.datetime.fromtimestamp(data['timestamp'] / 1000000000)  # nanoseconds to seconds
+                    ts = data['timestamp']
+                    if ts > 1e15:
+                        ts = ts / 1e9
+                    dt = datetime.datetime.fromtimestamp(ts)
                     lines.append(f"Last Update: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
-                except:
+                except Exception:
                     lines.append(f"Timestamp: {data['timestamp']}")
 
-            # Show current metrics if available
-            if 'current_metrics' in data:
-                metrics = data['current_metrics']
-                if isinstance(metrics, dict):
-                    lines.append("")
-                    lines.append("Current Metrics:")
-                    for key, value in metrics.items():
-                        lines.append(f"  {key}: {value}")
+            def summarize_array(arr, label, max_vals=10):
+                if not isinstance(arr, list) or not arr:
+                    return
+                if isinstance(arr[0], list):
+                    rows = len(arr)
+                    cols = len(arr[0]) if rows > 0 else 0
+                    lines.append(f"  {label}: {rows} x {cols} matrix")
+                    flat = [v for row in arr for v in row]
+                    if flat:
+                        lines.append(f"    min={min(flat):.6f}  max={max(flat):.6f}  mean={sum(flat)/len(flat):.6f}")
+                else:
+                    lines.append(f"  {label}: {len(arr)} neurons")
+                    preview = arr[:max_vals]
+                    preview_str = ", ".join(f"{v:.4f}" if isinstance(v, float) else str(v) for v in preview)
+                    if len(arr) > max_vals:
+                        preview_str += f" ... ({len(arr) - max_vals} more)"
+                    lines.append(f"    [{preview_str}]")
 
-            # Show recent activity if available
-            if 'recent_activity' in data:
-                activity = data['recent_activity']
-                if isinstance(activity, dict):
+            for key, label in [('input', 'Input'), ('hidden', 'Hidden Activations'),
+                                ('hidden_output', 'Hidden Output'), ('output', 'Output'),
+                                ('results', 'Results'), ('hidden_error', 'Hidden Error')]:
+                if key in data:
                     lines.append("")
-                    lines.append("Recent Activity:")
-                    for key, value in activity.items():
-                        lines.append(f"  {key}: {value}")
+                    lines.append(f"{label}:")
+                    summarize_array(data[key], label)
 
             return "\n".join(lines)
 
@@ -9690,17 +9925,53 @@ capabilities, training data, performance metrics, and usage instructions."""
             return
 
         self.activity_canvas.figure.clear()
-        ax = self.activity_canvas.figure.add_subplot(111)
 
-        # Simple bar plot of activations (placeholder)
-        if 'activations' in activity_data:
-            activations = activity_data['activations']
-            if isinstance(activations, list) and activations:
-                ax.bar(range(len(activations)), activations)
+        if activity_data.get('status') == 'error':
+            ax = self.activity_canvas.figure.add_subplot(111)
+            ax.text(0.5, 0.5, activity_data.get('message', 'Error'),
+                    ha='center', va='center', fontsize=12, color='red')
+            self.activity_canvas.draw()
+            return
+
+        datasets = []
+        labels = []
+        colors = ['#2196F3', '#4CAF50', '#FF9800', '#F44336']
+
+        for key, label in [('input', 'Input'), ('hidden', 'Hidden'),
+                           ('output', 'Output'), ('results', 'Results')]:
+            if key in activity_data and isinstance(activity_data[key], list) and activity_data[key]:
+                val = activity_data[key]
+                if isinstance(val[0], list):
+                    val = val[-1] if val else []
+                if val and not isinstance(val[0], list):
+                    try:
+                        numeric = [float(v) for v in val]
+                        datasets.append(numeric)
+                        labels.append(label)
+                    except (TypeError, ValueError):
+                        pass
+
+        if not datasets:
+            ax = self.activity_canvas.figure.add_subplot(111)
+            ax.text(0.5, 0.5, 'No numeric activation data to display',
+                    ha='center', va='center', fontsize=10, color='gray')
+            self.activity_canvas.draw()
+            return
+
+        max_len = max(len(d) for d in datasets)
+        n_subplots = len(datasets)
+        for i, (data, label) in enumerate(zip(datasets, labels)):
+            ax = self.activity_canvas.figure.add_subplot(n_subplots, 1, i + 1)
+            bars = ax.bar(range(len(data)), data, color=colors[i % len(colors)], alpha=0.8)
+            ax.set_ylabel(label, fontsize=8)
+            ax.set_xlim(-0.5, max_len - 0.5)
+            ax.tick_params(axis='both', labelsize=7)
+            if i < n_subplots - 1:
+                ax.set_xticklabels([])
+            else:
                 ax.set_xlabel('Neuron')
-                ax.set_ylabel('Activation')
-                ax.set_title('Neural Network Activity')
 
+        self.activity_canvas.figure.tight_layout()
         self.activity_canvas.draw()
 
     def _setup_websocket_connection(self):

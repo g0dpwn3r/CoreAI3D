@@ -25,6 +25,8 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <openssl/rand.h>
+#include <openssl/evp.h>
 
 using namespace std::chrono_literals;
 
@@ -1615,10 +1617,14 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             }
 
             std::string responseMessage;
+            bool usedWebSearch = false;
+            std::string webSearchQuery;
             if (trainingModule) {
                 Language* lang = trainingModule->getLanguage();
                 if (lang) {
                     responseMessage = lang->respond(message);
+                    usedWebSearch = lang->lastResponseUsedWebSearch;
+                    webSearchQuery = lang->lastWebSearchQuery;
                 } else {
                     responseMessage = "I'm still initializing my language processing capabilities. Please try again in a moment.";
                 }
@@ -1653,6 +1659,10 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                 {"timestamp", getTimestampString()},
                 {"status", "success"}
             };
+            if (usedWebSearch) {
+                response["web_searched"] = true;
+                response["search_query"] = webSearchQuery;
+            }
             return response;
         }
         else if (action == "history" && method == "GET") {
@@ -2434,7 +2444,22 @@ bool APIServer::authenticateRequest(const std::string& sessionId, const json& re
 }
 
 std::string APIServer::generateAPIKey() {
-    return generateUniqueId();
+    unsigned char randomBytes[32];
+    if (RAND_bytes(randomBytes, sizeof(randomBytes)) != 1) {
+        return "";
+    }
+
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hashLen = 0;
+    if (EVP_Digest(randomBytes, sizeof(randomBytes), hash, &hashLen, EVP_sha256(), nullptr) == nullptr) {
+        return "";
+    }
+
+    std::ostringstream hexStream;
+    for (unsigned int i = 0; i < hashLen; ++i) {
+        hexStream << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
+    }
+    return hexStream.str();
 }
 
 bool APIServer::validateAPIKey(const std::string& apiKey) {
