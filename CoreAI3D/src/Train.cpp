@@ -752,11 +752,8 @@ bool Training::loadTargetsCSV(const std::string& filename, const char& delim,
             if (lines > 0) {
                 printProgressBar("Loading Target CSV", row_idx, lines, barWidth);
             }
+        }
     }
-}
-#endif
-
-
 
     if (temp_targets_data.empty()) {
         std::cerr << "Error: No valid target data rows found in '" << filename << "'." << std::endl;
