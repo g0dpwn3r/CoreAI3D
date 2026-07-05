@@ -2,6 +2,8 @@
 #include <openssl/rand.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/core_names.h>
+#include <openssl/params.h>
 #include <openssl/bn.h>
 #include <iomanip>
 #include <sstream>
@@ -67,26 +69,41 @@ std::string AuthTables::base64Decode(const std::string& input) {
 }
 
 std::string AuthTables::hmacSha256(const std::string& data, const std::string& key) {
-    unsigned int len = 0;
-    unsigned char* digest = new unsigned char[EVP_MAX_MD_SIZE];
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    size_t len = 0;
     
-    HMAC_CTX* ctx = HMAC_CTX_new();
-    if (!ctx) {
-        delete[] digest;
+    // Use OpenSSL 3.0+ EVP_MAC API instead of deprecated HMAC_CTX
+    EVP_MAC* mac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
+    if (!mac) {
         return "";
     }
     
-    HMAC_Init_ex(ctx, key.c_str(), static_cast<int>(key.length()), EVP_sha256(), nullptr);
-    HMAC_Update(ctx, reinterpret_cast<const unsigned char*>(data.c_str()), data.length());
-    HMAC_Final(ctx, digest, &len);
-    
-    std::stringstream ss;
-    for (unsigned int i = 0; i < len; ++i) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
+    EVP_MAC_CTX* ctx = EVP_MAC_CTX_new(mac);
+    if (!ctx) {
+        EVP_MAC_free(mac);
+        return "";
     }
     
-    HMAC_CTX_free(ctx);
-    delete[] digest;
+    OSSL_PARAM params[2];
+    const char* digest_name = "SHA256";
+    params[0] = OSSL_PARAM_construct_utf8_string("digest", const_cast<char*>(digest_name), 0);
+    params[1] = OSSL_PARAM_construct_end();
+    
+    if (EVP_MAC_init(ctx, reinterpret_cast<const unsigned char*>(key.c_str()), key.length(), params) != 1 ||
+        EVP_MAC_update(ctx, reinterpret_cast<const unsigned char*>(data.c_str()), data.length()) != 1 ||
+        EVP_MAC_final(ctx, digest, &len, EVP_MAX_MD_SIZE) != 1) {
+        EVP_MAC_CTX_free(ctx);
+        EVP_MAC_free(mac);
+        return "";
+    }
+    
+    EVP_MAC_CTX_free(ctx);
+    EVP_MAC_free(mac);
+    
+    std::stringstream ss;
+    for (size_t i = 0; i < len; ++i) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
+    }
     
     return ss.str();
 }

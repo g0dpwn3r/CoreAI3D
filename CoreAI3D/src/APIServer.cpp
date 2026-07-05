@@ -2650,7 +2650,8 @@ json APIServer::performSystemCleanup(const std::string& cleanupType, bool force)
                 if (std::filesystem::exists(cacheDir)) {
                     // Use system command to clean cache (safer than recursive deletion)
                     std::string cleanCmd = "find " + cacheDir + " -type f -mtime +7 -delete 2>/dev/null || true";
-                    system(cleanCmd.c_str());
+                    int sysRet = system(cleanCmd.c_str());
+                    (void)sysRet; // Suppress unused-result warning
                     result["message"] = "Cache cleanup completed (removed files older than 7 days)";
                 }
             }
