@@ -5,6 +5,7 @@ Standalone script to test CoreAI3D client connection logic without Qt GUI.
 Provides detailed logging to identify connection failures.
 """
 
+import os
 import logging
 import json
 import sys
@@ -90,8 +91,8 @@ class DebugClientTester:
 
         # Default configuration
         return {
-            'base_url': 'http://localhost:8080/api/v1',
-            'ws_url': 'ws://localhost:8081',
+            'base_url': os.environ.get('COREAI3D_API_URL', 'http://127.0.0.1:1906/api/v1'),
+            'ws_url': os.environ.get('COREAI3D_WS_URL', 'ws://127.0.0.1:1907'),
             'api_key': '',
             'session_id': '',
             'timeout': 30.0,

@@ -101,11 +101,45 @@ logging.getLogger('websockets.client').setLevel(logging.WARNING)
 logging.getLogger('aiohttp').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 
+def default_api_url() -> str:
+    """CoreAI3D backend API base URL.
+
+    Resolved from COREAI3D_API_URL when set; otherwise the bare-metal host
+    127.0.0.1:1906 (the API container's published port on the HOST). The GUI
+    runs on bare metal, so it must NOT talk to the container's internal 8080 or
+    to the Docker service name "coreai3d".
+    """
+    return os.environ.get('COREAI3D_API_URL', 'http://127.0.0.1:1906/api/v1')
+
+
+def default_ws_url() -> str:
+    """CoreAI3D backend WebSocket URL.
+
+    Honours COREAI3D_WS_URL when set; otherwise DERIVED from the API base URL
+    (http -> ws, port 1906 -> 1907) so the two always move together. This is a
+    fallback -- set COREAI3D_WS_URL explicitly if the mapping ever diverges.
+    """
+    explicit = os.environ.get('COREAI3D_WS_URL')
+    if explicit:
+        return explicit
+    api = default_api_url()
+    try:
+        parsed = urllib.parse.urlparse(api)
+        scheme = 'ws' if parsed.scheme == 'http' else 'wss'
+        # The API container publishes 1906 -> 8080 and 1907 -> 8081, so the
+        # WebSocket port is the API port + 1.
+        port = parsed.port + 1 if parsed.port else 1907
+        netloc = f'{parsed.hostname or "127.0.0.1"}:{port}'
+        return urllib.parse.urlunparse((scheme, netloc, '', '', '', ''))
+    except Exception:
+        return 'ws://127.0.0.1:1907'
+
+
 @dataclass
 class DashboardConfig:
     """Dashboard configuration settings"""
-    api_url: str = "http://coreai3d:8080/api/v1"
-    ws_url: str = "ws://coreai3d:8081"
+    api_url: str = field(default_factory=default_api_url)
+    ws_url: str = field(default_factory=default_ws_url)
     api_key: str = ""
     data_dir: str = "training_data"
     sandbox_timeout: int = 300
@@ -1883,17 +1917,21 @@ class CoreAI3DDashboard(QMainWindow):
         settings = QSettings("CoreAI3D", "Dashboard")
 
         config = DashboardConfig()
-        config.api_url = settings.value("api_url", config.api_url)
-        config.ws_url = settings.value("ws_url", config.ws_url)
+        # Env var wins; then the user's last-saved Settings value; then the
+        # 127.0.0.1 default. We no longer clobber a saved host on every load.
+        if env_api := os.environ.get('COREAI3D_API_URL'):
+            config.api_url = env_api
+        else:
+            config.api_url = settings.value("api_url", default_api_url())
+        if env_ws := os.environ.get('COREAI3D_WS_URL'):
+            config.ws_url = env_ws
+        else:
+            config.ws_url = settings.value("ws_url", default_ws_url())
         config.api_key = settings.value("api_key", config.api_key)
         config.data_dir = settings.value("data_dir", config.data_dir)
         config.sandbox_timeout = settings.value("sandbox_timeout", config.sandbox_timeout, type=int)
         config.log_level = settings.value("log_level", config.log_level)
         config.enable_diagnostics = settings.value("enable_diagnostics", config.enable_diagnostics, type=bool)
-
-        # Force reset API and WebSocket URLs to the coreai3d container, overriding any saved QSettings
-        config.api_url = "http://coreai3d:8080/api/v1"
-        config.ws_url = "ws://coreai3d:8081"
 
         # Validate and sanitize API key
         if config.api_key:
@@ -1976,6 +2014,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_chat_tab()
         self.create_neural_tab()
         self.create_settings_tab()
+        self.create_beta_keys_tab()
 
         # Create status bar
         self.status_bar = QStatusBar()
@@ -4856,6 +4895,326 @@ if __name__ == "__main__":
         # Stretch to fill space
         layout.addStretch()
 
+    def create_beta_keys_tab(self):
+        """Create the Beta Keys management tab (restored; last tab, after Settings).
+
+        Talks to the engine's /api/v1/beta/* endpoints:
+          POST /api/v1/beta/generate  {count, description?, email?}  -> {count, keys:[{id,key,expires_at,max_uses}]}
+          GET  /api/v1/beta/list      -> stored keys (hashed; no plaintext)
+          POST /api/v1/beta/toggle   {id, enable}                     -> {id, is_active}
+
+        Note: the plaintext beta key is only ever returned from /beta/generate
+        (shown once). /beta/list therefore returns no plaintext, so the
+        Existing Keys table is backed by the keys generated in this session and
+        exposes a one-click Copy while the plaintext is still resident.
+        """
+        tab = QWidget()
+        self.tab_widget.addTab(tab, "Beta Keys")
+
+        layout = QVBoxLayout(tab)
+
+        # ---- Generate Email Key ----
+        email_group = QGroupBox("Generate Email Key")
+        email_layout = QFormLayout(email_group)
+
+        self.beta_email_input = QLineEdit()
+        self.beta_email_input.setPlaceholderText("Recipient email")
+        self.beta_email_input.setToolTip("Email the generated beta key will be associated with.")
+        email_layout.addRow("Email:", self.beta_email_input)
+
+        self.beta_email_desc_input = QLineEdit()
+        self.beta_email_desc_input.setPlaceholderText("Optional description")
+        email_layout.addRow("Description:", self.beta_email_desc_input)
+
+        self.beta_email_generate_btn = QPushButton("Generate Email Key")
+        self.beta_email_generate_btn.clicked.connect(self.generate_beta_email_key)
+        email_layout.addRow(self.beta_email_generate_btn)
+
+        layout.addWidget(email_group)
+
+        # ---- Generate Beta Keys ----
+        gen_group = QGroupBox("Generate Beta Keys")
+        gen_layout = QFormLayout(gen_group)
+
+        self.beta_count_spin = QSpinBox()
+        self.beta_count_spin.setRange(1, 100)
+        self.beta_count_spin.setValue(1)
+        gen_layout.addRow("Count:", self.beta_count_spin)
+
+        self.beta_desc_input = QLineEdit()
+        self.beta_desc_input.setPlaceholderText("Optional description")
+        gen_layout.addRow("Description:", self.beta_desc_input)
+
+        self.beta_generate_btn = QPushButton("Generate Beta Keys")
+        self.beta_generate_btn.clicked.connect(self.generate_beta_keys)
+        gen_layout.addRow(self.beta_generate_btn)
+
+        layout.addWidget(gen_group)
+
+        # ---- Existing Keys ----
+        keys_group = QGroupBox("Existing Keys")
+        keys_layout = QVBoxLayout(keys_group)
+
+        keys_toolbar = QHBoxLayout()
+        self.beta_refresh_btn = QPushButton("Refresh")
+        self.beta_refresh_btn.clicked.connect(self.refresh_beta_keys)
+        keys_toolbar.addWidget(self.beta_refresh_btn)
+        keys_toolbar.addStretch()
+        keys_layout.addLayout(keys_toolbar)
+
+        self.beta_keys_table = QTableWidget(0, 5)
+        self.beta_keys_table.setHorizontalHeaderLabels(
+            ["Key", "ID", "Max Uses", "Expires At", "Active"]
+        )
+        self.beta_keys_table.horizontalHeader().setStretchLastSection(True)
+        self.beta_keys_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.beta_keys_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        keys_layout.addWidget(self.beta_keys_table)
+
+        row_actions = QHBoxLayout()
+        self.beta_copy_btn = QPushButton("Copy")
+        self.beta_copy_btn.setToolTip("Copy the plaintext key to the clipboard (only available right after generation).")
+        self.beta_copy_btn.clicked.connect(self.copy_beta_key)
+        row_actions.addWidget(self.beta_copy_btn)
+
+        self.beta_revoke_btn = QPushButton("Revoke")
+        self.beta_revoke_btn.setToolTip("Disable the selected beta key (cannot be undone).")
+        self.beta_revoke_btn.clicked.connect(self.revoke_beta_key)
+        row_actions.addWidget(self.beta_revoke_btn)
+
+        row_actions.addStretch()
+        keys_layout.addLayout(row_actions)
+
+        layout.addWidget(keys_group)
+        layout.addStretch()
+
+        # Keys generated during this session (plaintext is resident here).
+        self._beta_generated_keys: List[dict] = []
+
+    # ---- Beta Keys handlers ----
+
+    def _connection_error_message(self, result) -> str:
+        """Rewrite a failed backend call into a host-reachability note.
+
+        aiohttp/DNS failures surface as 'Cannot connect to host ... [Name or
+        service not known]' -- not actionable in a GUI. This rewrites the common
+        connection errors so the user knows it is a host/port/reachability
+        problem (and points them at COREAI3D_API_URL), and passes genuine API
+        errors through unchanged.
+        """
+        raw = getattr(result, 'message', '') or ''
+        low = raw.lower()
+        if not getattr(result, 'success', True) and any(
+            tok in low for tok in (
+                'name or service not known', 'cannot connect to host',
+                'connection refused', 'gaierror', 'could not resolve',
+                'timed out', 'connection reset', 'network is unreachable',
+                'temporary failure in name resolution',
+            )
+        ):
+            host = ''
+            try:
+                host = urllib.parse.urlparse(self.config.api_url).netloc
+            except Exception:
+                pass
+            target = host or 'the CoreAI3D backend'
+            return (f"Cannot reach {target}. The server may be down, the host "
+                    "unresolvable, or COREAI3D_API_URL is wrong.")
+        return raw or 'Unknown error'
+
+    def _beta_client_ready(self) -> bool:
+        if not self.client:
+            if not self.initialize_client():
+                QMessageBox.warning(self, "Connection Error", "Failed to initialize client.")
+                return False
+        return self.client is not None
+
+    @staticmethod
+    def _beta_extract_keys(result) -> List[dict]:
+        """Pull the keys array out of an engine response.
+
+        The engine wraps results as {"status":..,"data":{"count":N,"keys":[...]}}.
+        CoreAI3DClient._make_request stores the whole parsed JSON in result.data,
+        so the inner payload lives under result.data['data'].
+        """
+        payload = result.data.get('data') if isinstance(result.data, dict) else None
+        if isinstance(payload, dict) and 'keys' in payload:
+            return payload['keys'] or []
+        if isinstance(payload, list):
+            return payload
+        return []
+
+    def _beta_populate_table(self):
+        self.beta_keys_table.setRowCount(0)
+        for key in self._beta_generated_keys:
+            row = self.beta_keys_table.rowCount()
+            self.beta_keys_table.insertRow(row)
+            self.beta_keys_table.setItem(row, 0, QTableWidgetItem(str(key.get('key', ''))))
+            self.beta_keys_table.setItem(row, 1, QTableWidgetItem(str(key.get('id', ''))))
+            self.beta_keys_table.setItem(row, 2, QTableWidgetItem(str(key.get('max_uses', 0))))
+            self.beta_keys_table.setItem(row, 3, QTableWidgetItem(str(key.get('expires_at') or '')))
+            active = key.get('is_active', True) if key.get('is_active', True) is not None else True
+            self.beta_keys_table.setItem(row, 4, QTableWidgetItem('Yes' if active else 'No'))
+
+    def _beta_merge_keys(self, keys: List[dict]):
+        for key in keys:
+            if not any(existing.get('id') == key.get('id') for existing in self._beta_generated_keys):
+                self._beta_generated_keys.append(dict(key))
+        self._beta_populate_table()
+
+    @qasync.asyncSlot()
+    async def generate_beta_email_key(self):
+        """Generate a single beta key tied to a recipient email."""
+        if not self._beta_client_ready():
+            return
+
+        email = self.beta_email_input.text().strip()
+        if not email:
+            QMessageBox.warning(self, "Missing Email", "Enter a recipient email first.")
+            return
+
+        self.beta_email_generate_btn.setEnabled(False)
+        try:
+            result = await self.client.generate_beta_keys(
+                count=1,
+                description=self.beta_email_desc_input.text().strip() or '',
+                email=email,
+            )
+            if not result.success:
+                QMessageBox.warning(self, "Error", f"Failed to generate email key: {self._connection_error_message(result)}")
+                return
+            keys = self._beta_extract_keys(result)
+            if not keys:
+                QMessageBox.warning(self, "Error", "No key returned. Check the engine logs.")
+                return
+            self._beta_merge_keys(keys)
+            key = keys[0]
+            QMessageBox.information(
+                self, "Email Key Generated",
+                f"Beta key {key.get('key')} generated for {email}.\n"
+                "It is shown once; only the hash is stored afterwards."
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to generate email key: {e}")
+        finally:
+            self.beta_email_generate_btn.setEnabled(True)
+
+    @qasync.asyncSlot()
+    async def generate_beta_keys(self):
+        """Generate one or more beta keys."""
+        if not self._beta_client_ready():
+            return
+
+        count = self.beta_count_spin.value()
+        self.beta_generate_btn.setEnabled(False)
+        try:
+            result = await self.client.generate_beta_keys(
+                count=count,
+                description=self.beta_desc_input.text().strip() or '',
+            )
+            if not result.success:
+                QMessageBox.warning(self, "Error", f"Failed to generate beta keys: {self._connection_error_message(result)}")
+                return
+            keys = self._beta_extract_keys(result)
+            if not keys:
+                QMessageBox.warning(self, "Error", "No keys returned. Check the engine logs.")
+                return
+            self._beta_merge_keys(keys)
+            QMessageBox.information(
+                self, "Beta Keys Generated",
+                f"Generated {len(keys)} beta key(s). Each plaintext is shown once; "
+                "only hashes are stored afterwards."
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to generate beta keys: {e}")
+        finally:
+            self.beta_generate_btn.setEnabled(True)
+
+    @qasync.asyncSlot()
+    async def refresh_beta_keys(self):
+        """List stored beta keys from /beta/list and merge any new ones."""
+        if not self._beta_client_ready():
+            return
+
+        self.beta_refresh_btn.setEnabled(False)
+        try:
+            result = await self.client.list_beta_keys()
+            if not result.success:
+                # The engine's /beta/list currently 500s (it JSON-serializes a
+                # raw binary hash column as UTF-8). Fall back to the session list
+                # so the table stays useful until that is fixed upstream.
+                QMessageBox.warning(
+                    self, "List Unavailable",
+                    f"Could not list stored keys: {self._connection_error_message(result)}\n\n"
+                    "Showing keys generated in this session."
+                )
+                return
+            keys = self._beta_extract_keys(result)
+            self._beta_merge_keys(keys)
+            self.status_bar.showMessage(f"Loaded {len(keys)} stored beta key(s)", 3000)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to refresh beta keys: {e}")
+        finally:
+            self.beta_refresh_btn.setEnabled(True)
+
+    def copy_beta_key(self):
+        """Copy the selected key's plaintext to the clipboard."""
+        row = self.beta_keys_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "No Selection", "Select a key row to copy.")
+            return
+        item = self.beta_keys_table.item(row, 0)
+        if not item or not item.text():
+            QMessageBox.warning(self, "No Plaintext", "The plaintext is not available for stored keys (shown once at generation).")
+            return
+        cb = QApplication.clipboard()
+        cb.setText(item.text())
+        self.status_bar.showMessage("Beta key copied to clipboard", 3000)
+
+    @qasync.asyncSlot()
+    async def revoke_beta_key(self):
+        """Disable (revoke) the selected beta key via /beta/toggle."""
+        if not self._beta_client_ready():
+            return
+
+        row = self.beta_keys_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "No Selection", "Select a key row to revoke.")
+            return
+        id_item = self.beta_keys_table.item(row, 1)
+        id_str = id_item.text() if id_item else ''
+        try:
+            key_id = int(id_str)
+        except ValueError:
+            QMessageBox.warning(self, "No ID", "Selected row has no key id to revoke.")
+            return
+
+        if QMessageBox.question(
+            self, "Revoke Key",
+            f"Revoke beta key ID {key_id}? This disables it and cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        self.beta_revoke_btn.setEnabled(False)
+        try:
+            result = await self.client.toggle_beta_key(key_id, enable=False)
+            if not result.success:
+                QMessageBox.warning(self, "Error", f"Failed to revoke key: {self._connection_error_message(result)}")
+                return
+            # Match by id (not row index) so a successful list merge that reorders
+            # or augments the table still updates the right model object.
+            for key in self._beta_generated_keys:
+                if key.get('id') == key_id:
+                    key['is_active'] = False
+                    break
+            self._beta_populate_table()
+            self.status_bar.showMessage(f"Beta key {key_id} revoked", 3000)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to revoke key: {e}")
+        finally:
+            self.beta_revoke_btn.setEnabled(True)
+
     def setup_connections(self):
         """Setup signal-slot connections"""
         # Sandbox manager connections
@@ -4970,8 +5329,8 @@ if __name__ == "__main__":
             logger.info(f"API Key configured: {bool(self.config.api_key)}")
 
             if not self.config.api_url:
-                logger.warning("API URL not configured - client will work in offline mode")
-                self.config.api_url = "http://coreai3d:8080/api/v1"
+                logger.warning("API URL not configured - falling back to default")
+                self.config.api_url = default_api_url()
 
             if not self.config.api_key:
                 logger.warning("API key not configured - using empty key (may cause authentication failures)")
@@ -6869,8 +7228,7 @@ if __name__ == "__main__":
                 "",
                 "Please verify:",
                 "  - The CoreAI3D server is running",
-                "  - The host resolves (for Docker bridge, use the service name,",
-                "    e.g. http://coreai3d:8080)",
+                "  - The host is reachable (set COREAI3D_API_URL, e.g. http://127.0.0.1:1906/api/v1)",
                 "  - The port is correct and reachable",
                 "  - The API key is correct (if required)",
                 "",
@@ -9977,7 +10335,7 @@ capabilities, training data, performance metrics, and usage instructions."""
     def _setup_websocket_connection(self):
         """Setup WebSocket connection to CoreAI3D server"""
         try:
-            # Use the configured WebSocket URL directly (e.g. ws://coreai3d:8081)
+            # Use the configured WebSocket URL directly (e.g. ws://127.0.0.1:1907)
             ws_url = self.config.ws_url
             logger.info(f"Setting up WebSocket connection to: {ws_url}")
 

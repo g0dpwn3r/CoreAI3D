@@ -46,6 +46,21 @@ echo "Starting CoreAI3D Dashboard..."
 echo "Press Ctrl+C to exit"
 echo
 
+# Source the local .env (COREAI3D_API_URL / COREAI3D_WS_URL) so the Python
+# process inherits the backend endpoints. The GUI runs on bare metal and must
+# reach the host-published ports (127.0.0.1:1906 HTTP, 127.0.0.1:1907 WS),
+# not the container's internal 8080/8081.
+if [ -f ".env" ]; then
+    set -a
+    . ./.env
+    set +a
+    echo "Loaded backend endpoints from .env:"
+    echo "  COREAI3D_API_URL=${COREAI3D_API_URL}"
+    echo "  COREAI3D_WS_URL=${COREAI3D_WS_URL}"
+else
+    echo "Warning: .env not found - using built-in defaults (127.0.0.1:1906 / :1907)"
+fi
+
 # Start the dashboard
 python3 run_dashboard.py
 

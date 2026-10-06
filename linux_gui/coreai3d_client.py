@@ -24,6 +24,40 @@ logger = logging.getLogger(__name__)
 logging.getLogger('websocket').setLevel(logging.WARNING)
 logging.getLogger('requests').setLevel(logging.WARNING)
 
+
+def default_base_url() -> str:
+    """CoreAI3D backend base URL.
+
+    COREAI3D_API_URL wins; otherwise the bare-metal host 127.0.0.1:1906 (the
+    API container's published port on the HOST). The GUI runs on bare metal, so
+    it must NOT talk to the container's internal 8080 or to the Docker service
+    name "coreai3d".
+    """
+    return os.environ.get('COREAI3D_API_URL', 'http://127.0.0.1:1906/api/v1')
+
+
+def default_ws_url() -> str:
+    """CoreAI3D backend WebSocket URL.
+
+    COREAI3D_WS_URL wins; otherwise DERIVED from the API base (http -> ws,
+    port +1: 1906 -> 1907) so the two always move together.
+    """
+    explicit = os.environ.get('COREAI3D_WS_URL')
+    if explicit:
+        return explicit
+    try:
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(default_base_url())
+        scheme = 'ws' if parsed.scheme == 'http' else 'wss'
+        port = (parsed.port or 1906) + 1
+        netloc = parsed.hostname or '127.0.0.1'
+        if port:
+            netloc = f'{netloc}:{port}'
+        return urlunparse((scheme, netloc, parsed.path, '', '', ''))
+    except Exception:
+        return 'ws://127.0.0.1:1907'
+
+
 @dataclass
 class APIResponse:
     """Standardized API response structure"""
@@ -46,8 +80,8 @@ class CoreAI3DClient:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = {
-            'base_url': 'http://localhost:8080/api/v1',
-            'ws_url': 'ws://localhost:8081',
+            'base_url': default_base_url(),
+            'ws_url': default_ws_url(),
             'api_key': '',
             'session_id': '',
             'timeout': 30.0,
@@ -850,6 +884,44 @@ class CoreAI3DClient:
             'api_key': api_key
         }
         return await self.post('/auth/validate_api_key', data)
+
+    # Beta Keys API
+    # These mirror the engine's /api/v1/beta/* actions
+    # (supported: generate [POST], list [GET/POST], toggle [POST]).
+
+    async def generate_beta_keys(
+        self,
+        count: int = 1,
+        description: str = '',
+        email: str = '',
+        expires_at: Optional[str] = None,
+        max_uses: int = 0,
+    ) -> APIResponse:
+        """POST /beta/generate.
+
+        Issues ``count`` beta keys. The plaintext key string is returned ONLY from
+        this call (shown once); afterwards only the SHA-256 hash is stored, so it
+        cannot be recovered later via /beta/list. ``email`` associates the first
+        generated key with a recipient -- the "Generate Email Key" path.
+        """
+        data: Dict[str, Any] = {'count': count}
+        if description:
+            data['description'] = description
+        if email:
+            data['email'] = email
+        if expires_at:
+            data['expires_at'] = expires_at
+        if max_uses:
+            data['max_uses'] = max_uses
+        return await self.post('/beta/generate', data)
+
+    async def list_beta_keys(self) -> APIResponse:
+        """GET /beta/list. Returns stored beta keys (hashed; no plaintext)."""
+        return await self.get('/beta/list')
+
+    async def toggle_beta_key(self, key_id: int, enable: bool = True) -> APIResponse:
+        """POST /beta/toggle -- enable (true) or disable/revoke (false) a key by id."""
+        return await self.post('/beta/toggle', {'id': key_id, 'enable': enable})
 
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:
