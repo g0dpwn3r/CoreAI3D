@@ -56,6 +56,7 @@ from coreai3d_client import CoreAI3DClient
 from automation_helper import AutomationHelper
 
 # Configure logging
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -659,6 +660,7 @@ class CoreAI3DDashboard(QMainWindow):
         self.create_debugging_tab()
         self.create_linux_sandbox_tab()
         self.create_model_downloads_tab()
+        self.create_code_generation_tab()
         self.create_chat_tab()
         self.create_neural_tab()
         self.create_settings_tab()
