@@ -17,11 +17,20 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 
 # Configure logging
+log_dir = Path('/logs')
+try:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'linux_training.log'
+except Exception:
+    log_dir = Path('./logs')
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'linux_training.log'
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/logs/linux_training.log'),
+        logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )

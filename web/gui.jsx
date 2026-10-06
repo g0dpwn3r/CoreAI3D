@@ -100,64 +100,66 @@ const App = () => {
                 )}
 
                 {/* File and Data Loading Options */}
-                <Section title="File & Data Options" icon="FileText" />
-                <Section title="Training Parameters" icon="Brain" />
-                <Section title="Database Configuration" icon="Database" />
-                <Section title="Actions" icon="Play" />
+                <Section title="File & Data Options" icon="FileText">
+                    <SectionContent>
+                        <InputGroup label="Input File (--input-file)" value={inputFile} onChange={handleChange(setInputFile)} type="text" placeholder="e.g., data.csv" />
+                        <InputGroup label="Target File (--target-file)" value={targetFile} onChange={handleChange(setTargetFile)} type="text" placeholder="Optional: targets.csv" />
+                        <InputGroup label="Output CSV (--output-csv)" value={outputCsv} onChange={handleChange(setOutputCsv)} type="text" placeholder="e.g., results.csv" />
+                        <InputGroup label="Delimiter (--delimiter)" value={delimiter} onChange={handleChange(setDelimiter)} type="text" maxLength={1} placeholder="e.g., ," />
+                        <InputGroup label="Number of Samples (--num-samples)" value={numSamples} onChange={handleNumberChange(setNumSamples)} type="number" placeholder="-1 for all" />
+                        <ToggleSwitch label="Contains Header (--contains-header)" checked={containsHeader} onChange={handleCheckboxChange(setContainsHeader)} />
+                        <ToggleSwitch label="Contains Text (--contains-text)" checked={containsText} onChange={handleCheckboxChange(setContainsText)} />
+                        <InputGroup label="Language Code (--language)" value={language} onChange={handleChange(setLanguage)} type="text" placeholder="e.g., en, nl" />
+                        <InputGroup label="Embedding File (--embeding-file)" value={embeddingFile} onChange={handleChange(setEmbeddingFile)} type="text" placeholder="e.g., embeddings.txt" />
+                    </SectionContent>
+                </Section>
 
-                {/* The actual content of the sections */}
-                <SectionContent>
-                    <InputGroup label="Input File (--input-file)" value={inputFile} onChange={handleChange(setInputFile)} type="text" placeholder="e.g., data.csv" />
-                    <InputGroup label="Target File (--target-file)" value={targetFile} onChange={handleChange(setTargetFile)} type="text" placeholder="Optional: targets.csv" />
-                    <InputGroup label="Output CSV (--output-csv)" value={outputCsv} onChange={handleChange(setOutputCsv)} type="text" placeholder="e.g., results.csv" />
-                    <InputGroup label="Delimiter (--delimiter)" value={delimiter} onChange={handleChange(setDelimiter)} type="text" maxLength={1} placeholder="e.g., ," />
-                    <InputGroup label="Number of Samples (--num-samples)" value={numSamples} onChange={handleNumberChange(setNumSamples)} type="number" placeholder="-1 for all" />
-                    <ToggleSwitch label="Contains Header (--contains-header)" checked={containsHeader} onChange={handleCheckboxChange(setContainsHeader)} />
-                    <ToggleSwitch label="Contains Text (--contains-text)" checked={containsText} onChange={handleCheckboxChange(setContainsText)} />
-                    <InputGroup label="Language Code (--language)" value={language} onChange={handleChange(setLanguage)} type="text" placeholder="e.g., en, nl" />
-                    <InputGroup label="Embedding File (--embeding-file)" value={embeddingFile} onChange={handleChange(setEmbeddingFile)} type="text" placeholder="e.g., embeddings.txt" />
-                </SectionContent>
+                <Section title="Training Parameters" icon="Brain">
+                    <SectionContent>
+                        <InputGroup label="Epochs (--epochs)" value={epochs} onChange={handleNumberChange(setEpochs)} type="number" min="1" />
+                        <InputGroup label="Learning Rate (--learning-rate)" value={learningRate} onChange={handleNumberChange(setLearningRate)} type="number" step="0.001" min="0" />
+                        <InputGroup label="Layers (--layers)" value={layers} onChange={handleNumberChange(setLayers)} type="number" min="1" />
+                        <InputGroup label="Neurons per Layer (--neurons)" value={neurons} onChange={handleNumberChange(setNeurons)} type="number" min="1" />
+                        <InputGroup label="Min Range (--min)" value={minRange} onChange={handleNumberChange(setMinRange)} type="number" step="0.1" />
+                        <InputGroup label="Max Range (--max)" value={maxRange} onChange={handleNumberChange(setMaxRange)} type="number" step="0.1" />
+                    </SectionContent>
+                </Section>
 
-                <SectionContent>
-                    <InputGroup label="Epochs (--epochs)" value={epochs} onChange={handleNumberChange(setEpochs)} type="number" min="1" />
-                    <InputGroup label="Learning Rate (--learning-rate)" value={learningRate} onChange={handleNumberChange(setLearningRate)} type="number" step="0.001" min="0" />
-                    <InputGroup label="Layers (--layers)" value={layers} onChange={handleNumberChange(setLayers)} type="number" min="1" />
-                    <InputGroup label="Neurons per Layer (--neurons)" value={neurons} onChange={handleNumberChange(setNeurons)} type="number" min="1" />
-                    <InputGroup label="Min Range (--min)" value={minRange} onChange={handleNumberChange(setMinRange)} type="number" step="0.1" />
-                    <InputGroup label="Max Range (--max)" value={maxRange} onChange={handleNumberChange(setMaxRange)} type="number" step="0.1" />
-                </SectionContent>
+                <Section title="Database Configuration" icon="Database">
+                    <SectionContent>
+                        <InputGroup label="DB Host (--db-host)" value={dbHost} onChange={handleChange(setDbHost)} type="text" placeholder="e.g., localhost" />
+                        <InputGroup label="DB Port (--db-port)" value={dbPort} onChange={handleNumberChange(setDbPort)} type="number" />
+                        <InputGroup label="DB User (--db-user)" value={dbUser} onChange={handleChange(setDbUser)} type="text" />
+                        <InputGroup label="DB Password (--db-password)" value={dbPassword} onChange={handleChange(setDbPassword)} type="password" />
+                        <InputGroup label="DB Schema (--db-schema)" value={dbSchema} onChange={handleChange(setDbSchema)} type="text" />
+                        <SelectGroup label="SSL Mode (--ssl-mode)" value={sslMode} onChange={handleChange(setSslMode)} options={['DISABLED', 'VERIFY_CA', 'VERIFY_IDENTITY']} />
+                        <ToggleSwitch label="Create Tables (--create-tables)" checked={createTables} onChange={handleCheckboxChange(setCreateTables)} />
+                        <InputGroup label="Dataset ID (for DB operations)" value={datasetId} onChange={handleNumberChange(setDatasetId)} type="number" placeholder="-1 for new/latest" />
+                    </SectionContent>
+                </Section>
 
-                <SectionContent>
-                    <InputGroup label="DB Host (--db-host)" value={dbHost} onChange={handleChange(setDbHost)} type="text" placeholder="e.g., localhost" />
-                    <InputGroup label="DB Port (--db-port)" value={dbPort} onChange={handleNumberChange(setDbPort)} type="number" />
-                    <InputGroup label="DB User (--db-user)" value={dbUser} onChange={handleChange(setDbUser)} type="text" />
-                    <InputGroup label="DB Password (--db-password)" value={dbPassword} onChange={handleChange(setDbPassword)} type="password" />
-                    <InputGroup label="DB Schema (--db-schema)" value={dbSchema} onChange={handleChange(setDbSchema)} type="text" />
-                    <SelectGroup label="SSL Mode (--ssl-mode)" value={sslMode} onChange={handleChange(setSslMode)} options={['DISABLED', 'VERIFY_CA', 'VERIFY_IDENTITY']} />
-                    <ToggleSwitch label="Create Tables (--create-tables)" checked={createTables} onChange={handleCheckboxChange(setCreateTables)} />
-                    <InputGroup label="Dataset ID (for DB operations)" value={datasetId} onChange={handleNumberChange(setDatasetId)} type="number" placeholder="-1 for new/latest" />
-                </SectionContent>
-
-                <SectionContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <ActionButton onClick={() => simulateApiCall('Load CSV')} disabled={isLoading} label="Load CSV" />
-                        <ActionButton onClick={() => simulateApiCall('Load Targets CSV')} disabled={isLoading} label="Load Targets CSV" />
-                        <ActionButton onClick={() => simulateApiCall('Load Dataset from DB')} disabled={isLoading || datasetId === -1} label="Load Dataset from DB" />
-                        <ActionButton onClick={() => simulateApiCall('Preprocess Data')} disabled={isLoading} label="Preprocess Data" />
-                        <ActionButton onClick={() => simulateApiCall('Train Model')} disabled={isLoading} label="Train Model" />
-                        <ActionButton onClick={() => simulateApiCall('Calculate RMSE')} disabled={isLoading} label="Calculate RMSE" />
-                        <ActionButton onClick={() => simulateApiCall('Save Model')} disabled={isLoading || datasetId === -1} label="Save Model" />
-                        <ActionButton onClick={() => simulateApiCall('Load Model')} disabled={isLoading || datasetId === -1} label="Load Model" />
-                        <ActionButton onClick={() => simulateApiCall('Save Results to CSV')} disabled={isLoading} label="Save Results to CSV" />
-                    </div>
-                </SectionContent>
+                <Section title="Actions" icon="Play">
+                    <SectionContent>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <ActionButton onClick={() => simulateApiCall('Load CSV')} disabled={isLoading} label="Load CSV" />
+                            <ActionButton onClick={() => simulateApiCall('Load Targets CSV')} disabled={isLoading} label="Load Targets CSV" />
+                            <ActionButton onClick={() => simulateApiCall('Load Dataset from DB')} disabled={isLoading || datasetId === -1} label="Load Dataset from DB" />
+                            <ActionButton onClick={() => simulateApiCall('Preprocess Data')} disabled={isLoading} label="Preprocess Data" />
+                            <ActionButton onClick={() => simulateApiCall('Train Model')} disabled={isLoading} label="Train Model" />
+                            <ActionButton onClick={() => simulateApiCall('Calculate RMSE')} disabled={isLoading} label="Calculate RMSE" />
+                            <ActionButton onClick={() => simulateApiCall('Save Model')} disabled={isLoading || datasetId === -1} label="Save Model" />
+                            <ActionButton onClick={() => simulateApiCall('Load Model')} disabled={isLoading || datasetId === -1} label="Load Model" />
+                            <ActionButton onClick={() => simulateApiCall('Save Results to CSV')} disabled={isLoading} label="Save Results to CSV" />
+                        </div>
+                    </SectionContent>
+                </Section>
             </div>
         </div>
     );
 };
 
 // Section Component for grouping related inputs
-const Section = ({ title, icon }) => {
+const Section = ({ title, icon, children }) => {
     // Define simple SVG icons here
     const icons = {
         FileText: (
@@ -200,6 +202,7 @@ const Section = ({ title, icon }) => {
                 {Icon && <span className="mr-3">{Icon}</span>} {/* Render SVG directly */}
                 {title}
             </h2>
+            {children}
         </div>
     );
 };

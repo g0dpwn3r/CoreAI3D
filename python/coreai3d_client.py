@@ -472,6 +472,32 @@ class CoreAI3DClient:
     async def get_neural_activity(self) -> APIResponse:
         return await self.get('/neural/activity')
 
+    # Linux Sandbox API
+    async def execute_linux_command(self, container: str, command: str) -> APIResponse:
+        return await self.post('/linux/execute', {'container': container, 'command': command})
+
+    async def start_linux_container(self, container: str) -> APIResponse:
+        return await self.post('/linux/start', {'container': container})
+
+    async def stop_linux_container(self, container: str) -> APIResponse:
+        return await self.post('/linux/stop', {'container': container})
+
+    async def run_linux_training(self, container: str, scenario: str) -> APIResponse:
+        return await self.post('/linux/train', {'container': container, 'scenario': scenario})
+
+    async def generate_training_report(self, container: str) -> APIResponse:
+        return await self.post('/linux/report', {'container': container})
+
+    # Method Aliases for Client Compatibility
+    async def web_search(self, query: str, max_results: int = 10) -> APIResponse:
+        return await self.search_web(query, max_results)
+
+    async def solve_math(self, expression: str) -> APIResponse:
+        return await self.calculate(expression)
+
+    async def close(self):
+        await self.disconnect()
+
     # Utility Methods
     async def wait_for_ready(self, timeout: float = 30.0) -> bool:
         start_time = time.time()

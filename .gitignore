@@ -30,7 +30,7 @@ cmake_install.cmake
 Makefile
 *.vcxproj
 *.vcxproj.filters
-*.sln # Uncomment this if you want to exclude CoreAI3D.sln as well
+*.sln
 
 # vcpkg related
 /vcpkg/
@@ -103,4 +103,5 @@ fastText
 *.swp
 .DS_Store
 data.sql
-windows_gui/__pycache__/
+__pycache__/
+*.pyc
