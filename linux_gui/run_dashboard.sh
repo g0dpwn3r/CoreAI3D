@@ -1,6 +1,8 @@
 #!/bin/bash
 # CoreAI3D Dashboard Startup Script for Linux
-# This script launches the CoreAI3D Linux GUI Dashboard
+# This script launches the CoreAI3D GUI Dashboard (dashboard.py)
+
+set -e
 
 echo "CoreAI3D Dashboard Startup"
 echo "=========================="
@@ -24,8 +26,7 @@ fi
 
 # Check if requirements are installed
 echo "Checking dependencies..."
-python3 -c "import PyQt6, psutil, aiohttp, websockets" &> /dev/null
-if [ $? -ne 0 ]; then
+if ! python3 -c "import PyQt6, keyring, cryptography" &> /dev/null; then
     echo
     echo "Some dependencies are missing."
     echo "Installing requirements..."
@@ -62,7 +63,7 @@ else
 fi
 
 # Start the dashboard
-python3 run_dashboard.py
+python3 dashboard.py
 
 echo
 echo "Dashboard stopped."

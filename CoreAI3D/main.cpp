@@ -14,7 +14,58 @@
 
 // External library headers (Boost, cURL, MySQL, etc.)
 // Include specific Boost headers as needed for their functionality.
+#include <fstream>
+#include <map>
 namespace po = boost::program_options; // Alias for convenience
+
+// ---------------------------------------------------------------------------
+// Minimal .env parser (no external dependency)
+// Reads KEY=VALUE lines from a .env file in the current working directory.
+// Command-line arguments always take precedence over .env values.
+// ---------------------------------------------------------------------------
+static std::map<std::string, std::string> loadEnvFile(const std::string& path) {
+    std::map<std::string, std::string> env;
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return env; // .env is optional
+    }
+    std::string line;
+    while (std::getline(file, line)) {
+        // Trim leading whitespace
+        size_t start = line.find_first_not_of(" \t\r\n");
+        if (start == std::string::npos) continue;
+        // Skip comments
+        if (line[start] == '#') continue;
+        // Find '=' separator
+        size_t eq = line.find('=', start);
+        if (eq == std::string::npos) continue;
+        std::string key = line.substr(start, eq - start);
+        // Trim trailing whitespace from key
+        size_t keyEnd = key.find_last_not_of(" \t");
+        if (keyEnd != std::string::npos) key = key.substr(0, keyEnd + 1);
+        std::string val = line.substr(eq + 1);
+        // Trim surrounding quotes and whitespace
+        size_t valStart = val.find_first_not_of(" \t");
+        if (valStart != std::string::npos) val = val.substr(valStart);
+        size_t valEnd = val.find_last_not_of(" \t\r\n");
+        if (valEnd != std::string::npos) val = val.substr(0, valEnd + 1);
+        if ((val.front() == '"' && val.back() == '"') ||
+            (val.front() == '\'' && val.back() == '\'')) {
+            val = val.substr(1, val.size() - 2);
+        }
+        env[key] = val;
+    }
+    return env;
+}
+
+// Helper: get env value with fallback
+static std::string envGet(const std::map<std::string, std::string>& env,
+                          const std::string& key,
+                          const std::string& fallback) {
+    auto it = env.find(key);
+    if (it != env.end() && !it->second.empty()) return it->second;
+    return fallback;
+}
 int main(int argc, char* argv[]) {
     // Simple argument parsing without Boost
     bool verbose = false;
@@ -56,6 +107,17 @@ int main(int argc, char* argv[]) {
     bool containsHeader = false;
     bool containsDate = false;
     std::string threads = "1";
+
+    // Load .env file from current working directory (optional; CLI overrides)
+    const std::map<std::string, std::string> env = loadEnvFile(".env");
+
+    // Apply .env values as defaults (command-line arguments override these)
+    dbHost     = envGet(env, "MYSQL_HOST", dbHost);
+    dbPort     = envGet(env, "MYSQL_PORT", dbPort);
+    dbUser     = envGet(env, "MYSQL_USER", dbUser);
+    dbPassword = envGet(env, "MYSQL_PASSWORD", dbPassword);
+    dbSchema   = envGet(env, "MYSQL_DATABASE", dbSchema);
+    embeddingFile = envGet(env, "EMBEDDING_FILE", embeddingFile);
 
     // Helper function to check if next argument is a value (not a flag)
     auto hasValue = [&](int idx) -> bool {
@@ -205,6 +267,26 @@ int main(int argc, char* argv[]) {
             std::cout << "    Usage: --db-schema <name>\n";
             std::cout << "    Dependencies: Required for online modes unless --offline is specified\n";
             std::cout << "    Example: --db-schema ai_models\n\n";
+            std::cout << "  --mysql-host <host>\n";
+            std::cout << "    Alias for --db-host. MySQL server hostname or IP address.\n";
+            std::cout << "    Expected value: Hostname or IP address\n";
+            std::cout << "    Usage: --mysql-host <hostname>\n\n";
+            std::cout << "  --mysql-port <port>\n";
+            std::cout << "    Alias for --db-port. MySQL server port number.\n";
+            std::cout << "    Expected value: Integer port number\n";
+            std::cout << "    Usage: --mysql-port <number>\n\n";
+            std::cout << "  --mysql-user <username>\n";
+            std::cout << "    Alias for --db-user. MySQL username for authentication.\n";
+            std::cout << "    Expected value: Valid MySQL username\n";
+            std::cout << "    Usage: --mysql-user <username>\n\n";
+            std::cout << "  --mysql-password <password>\n";
+            std::cout << "    Alias for --db-password. MySQL password for authentication.\n";
+            std::cout << "    Expected value: MySQL password string\n";
+            std::cout << "    Usage: --mysql-password <password>\n\n";
+            std::cout << "  --mysql-schema <schema>\n";
+            std::cout << "    Alias for --db-schema. MySQL database schema/name.\n";
+            std::cout << "    Expected value: MySQL schema name\n";
+            std::cout << "    Usage: --mysql-schema <name>\n\n";
             std::cout << "  --create-table, --create-tables\n";
             std::cout << "    Automatically create required database tables during initialization.\n";
             std::cout << "    Use this when setting up the database for the first time.\n";
@@ -296,7 +378,7 @@ int main(int argc, char* argv[]) {
             std::cout << "  --embedding-file <file>\n";
             std::cout << "    Specify the path to a custom embedding file for language processing.\n";
             std::cout << "    Expected value: Path to a valid embedding file\n";
-            std::cout << "    Usage: --embedding-file <path>\n";
+            std::cout << "    Usage: --embedding-file <path> or --emb-file <path>\n";
             std::cout << "    Dependencies: Used in chat mode for custom embeddings\n";
             std::cout << "    Example: --embedding-file ./embeddings/custom_embeddings.txt\n\n";
             std::cout << "EXAMPLES:\n";
@@ -357,6 +439,24 @@ int main(int argc, char* argv[]) {
         } else if (arg.find("--db-schema") == 0) {
             std::string value = extractValue(i, "--db-schema", arg);
             if (!value.empty()) dbSchema = value;
+        } else if (arg.find("--mysql-host") == 0) {
+            std::string value = extractValue(i, "--mysql-host", arg);
+            if (!value.empty()) dbHost = value;
+        } else if (arg.find("--mysql-port") == 0) {
+            std::string value = extractValue(i, "--mysql-port", arg);
+            if (!value.empty()) dbPort = value;
+        } else if (arg.find("--mysql-user") == 0) {
+            std::string value = extractValue(i, "--mysql-user", arg);
+            if (!value.empty()) dbUser = value;
+        } else if (arg.find("--mysql-password") == 0) {
+            std::string value = extractValue(i, "--mysql-password", arg);
+            if (!value.empty()) dbPassword = value;
+        } else if (arg.find("--mysql-schema") == 0) {
+            std::string value = extractValue(i, "--mysql-schema", arg);
+            if (!value.empty()) dbSchema = value;
+        } else if (arg.find("--emb-file") == 0 || arg.find("--embedding-file") == 0) {
+            std::string value = extractValue(i, "--embedding-file", arg);
+            if (!value.empty()) embeddingFile = value;
         } else if (arg.find("--target") == 0 || arg == "-t") {
             std::string value = extractValue(i, "--target", arg);
             if (!value.empty()) targetFile = value;

@@ -39,7 +39,8 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QFrame, QScrollArea, QCheckBox, QSpinBox, QDoubleSpinBox,
     QFileDialog, QMessageBox, QInputDialog, QMenuBar, QMenu, QStatusBar,
-    QDialog, QDialogButtonBox, QTreeWidget, QTreeWidgetItem, QPlainTextEdit
+    QDialog, QDialogButtonBox, QTreeWidget, QTreeWidgetItem, QPlainTextEdit,
+    QToolButton
 )
 
 # qasync import for unified event loop
@@ -57,7 +58,7 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 from PyQt6.QtCore import (
-    Qt, QTimer, QThread, pyqtSignal, QObject, QSize, QRect,
+    Qt, QTimer, QThread, pyqtSignal, pyqtSlot, QObject, QSize, QRect,
     QSettings, QStandardPaths, QDir, QFileSystemWatcher, QUrl
 )
 from PyQt6.QtGui import (
@@ -82,6 +83,20 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# The dashboard opens as a normal, resizable window (never full screen).
+DEFAULT_WINDOW_WIDTH = 1280
+DEFAULT_WINDOW_HEIGHT = 800
+MIN_WINDOW_WIDTH = 800
+MIN_WINDOW_HEIGHT = 600
+
+# Resend REST endpoint used to deliver beta keys by email.
+RESEND_API_URL = "https://api.resend.com/emails"
+
+# Worker threads that could not be stopped in time are parked here so their
+# QThread object is never destroyed while it is still running (which aborts
+# the process).
+_LINGERING_THREADS: List[Any] = []
 
 # Custom Qt log handler for debug tab
 class QtLogHandler(logging.Handler):
@@ -141,13 +156,19 @@ class DashboardConfig:
     api_url: str = field(default_factory=default_api_url)
     ws_url: str = field(default_factory=default_ws_url)
     api_key: str = ""
+    resend_api_key: str = ""
+    resend_from_email: str = ""
+    beta_key: str = ""
     data_dir: str = "training_data"
     sandbox_timeout: int = 300
     log_level: str = "INFO"
     enable_diagnostics: bool = True
     max_connections: int = 10
     retry_attempts: int = 3
-    connection_timeout: float = 30.0
+    connection_timeout: float = 90.0
+    chat_timeout: int = 30
+    admin_email: str = ""
+    admin_password: str = ""
 
 @dataclass
 class SystemMetrics:
@@ -1786,14 +1807,275 @@ class CodeDebugger(QObject):
 
 
 
+# ===========================================================================
+# Robust API key response parser
+# ===========================================================================
+class ApiKeyParser:
+    """
+    Extract an API key from arbitrary backend response data.
+
+    The backend may return the key under many different shapes depending on
+    version, endpoint, or middleware wrapping.  This parser checks every
+    plausible location so the "key was generated but not found" error never
+    happens for a valid response.
+
+    Search order:
+      1. Top-level: api_key, apiKey, apikey, key, secret, token, access_token
+      2. Nested under: data, result, payload, response, keys
+      3. Lists (recursive)
+      4. Last resort: first string value longer than 8 chars
+    """
+
+    TOP_LEVEL_KEYS = (
+        "api_key", "apiKey", "apikey",
+        "key", "secret", "token",
+        "access_token", "accessToken",
+    )
+
+    NESTED_KEYS = (
+        "data", "result", "payload", "response",
+        "keys", "key", "apiKey", "api_key",
+    )
+
+    @classmethod
+    def extract(cls, response_data: Any) -> Optional[str]:
+        """Extract a single API key string from arbitrary response data."""
+        if response_data is None:
+            return None
+
+        if isinstance(response_data, dict):
+            # 1. Top-level key names
+            for k in cls.TOP_LEVEL_KEYS:
+                v = response_data.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+
+            # 2. Nested containers
+            for nk in cls.NESTED_KEYS:
+                v = response_data.get(nk)
+                found = cls._extract_from_container(v)
+                if found:
+                    return found
+
+            # 3. Last resort: first non-empty string longer than 8 chars
+            for v in response_data.values():
+                if isinstance(v, str) and v.strip() and len(v) > 8:
+                    return v.strip()
+
+        if isinstance(response_data, list):
+            for item in response_data:
+                found = cls.extract(item)
+                if found:
+                    return found
+
+        return None
+
+    @classmethod
+    def _extract_from_container(cls, container: Any) -> Optional[str]:
+        """Recursively extract a key from a nested dict/list."""
+        if container is None:
+            return None
+
+        if isinstance(container, dict):
+            for k in cls.TOP_LEVEL_KEYS:
+                v = container.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+            for v in container.values():
+                found = cls._extract_from_container(v)
+                if found:
+                    return found
+
+        elif isinstance(container, list):
+            for item in container:
+                found = cls._extract_from_container(item)
+                if found:
+                    return found
+
+        return None
+
+    @classmethod
+    def parse_response(cls, response: Any) -> Optional[str]:
+        """Parse an APIResponse object (or dict) and return the API key."""
+        if response is None:
+            return None
+        data = getattr(response, 'data', None)
+        if data is None:
+            data = response if isinstance(response, dict) else None
+        return cls.extract(data)
+
+
+# ===========================================================================
+# Show-once API key dialog
+# ===========================================================================
+class ApiKeyDialog(QDialog):
+    """
+    Modal dialog that displays a newly generated API key exactly once.
+
+    The key is shown in full with a one-click Copy button and a strong
+    warning that it will never be displayed again.  Once the dialog is
+    dismissed, the key is not retained by this dialog.
+    """
+
+    def __init__(self, api_key: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("API Key Generated")
+        self.setModal(True)
+        self.setFixedSize(560, 400)
+        self._api_key = api_key
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
+
+        # Header
+        header = QLabel("🔑 New API Key Generated")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setStyleSheet("font-size: 18px; font-weight: 700;")
+        layout.addWidget(header)
+
+        # Warning
+        warning = QLabel(
+            "⚠️  This key will <b>never be shown again</b>. "
+            "Copy it now and store it securely."
+        )
+        warning.setWordWrap(True)
+        warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        warning.setStyleSheet("color: #b45309; font-size: 13px;")
+        layout.addWidget(warning)
+
+        # Key display
+        key_frame = QFrame()
+        key_frame.setStyleSheet(
+            "QFrame { background: #f8fafc; border: 1px solid #cbd5e1; "
+            "border-radius: 8px; }"
+        )
+        key_layout = QVBoxLayout(key_frame)
+        key_layout.setContentsMargins(16, 16, 16, 16)
+
+        key_label = QLabel("API Key:")
+        key_label.setStyleSheet("color: #64748b; font-size: 12px; font-weight: 600;")
+        key_layout.addWidget(key_label)
+
+        self.key_edit = QLineEdit(self._api_key)
+        self.key_edit.setReadOnly(True)
+        self.key_edit.setStyleSheet(
+            "QLineEdit { font-family: 'Courier New', monospace; "
+            "font-size: 13px; padding: 8px; }"
+        )
+        key_layout.addWidget(self.key_edit)
+
+        # Copy button
+        self.copy_btn = QPushButton("📋 Copy to Clipboard")
+        self.copy_btn.clicked.connect(self._copy_key)
+        key_layout.addWidget(self.copy_btn)
+
+        self.copy_status = QLabel("")
+        self.copy_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.copy_status.setStyleSheet("color: #059669; font-size: 12px; font-weight: 600;")
+        key_layout.addWidget(self.copy_status)
+
+        layout.addWidget(key_frame)
+
+        # Spacer
+        layout.addStretch()
+
+        # Acknowledge button
+        self.ack_btn = QPushButton("I Have Saved the Key")
+        self.ack_btn.setDefault(True)
+        self.ack_btn.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: white; "
+            "font-weight: 600; padding: 8px 16px; border-radius: 6px; }"
+            "QPushButton:hover { background: #2563eb; }"
+        )
+        self.ack_btn.clicked.connect(self.accept)
+        layout.addWidget(self.ack_btn)
+
+    def _copy_key(self) -> None:
+        cb = QApplication.clipboard()
+        cb.setText(self._api_key)
+        self.copy_btn.setText("✅ Copied!")
+        self.copy_btn.setEnabled(False)
+        self.copy_status.setText("Key copied to clipboard")
+
+    def key(self) -> str:
+        return self._api_key
+
+
+# ===========================================================================
+# QThread worker for async API calls (API key generation, etc.)
+# ===========================================================================
+class AsyncWorker(QObject):
+    """
+    Worker that runs an async client method in a dedicated QThread with its
+    own asyncio event loop, completely independent of qasync.
+
+    This avoids the "Event loop is closed" error that occurs when qasync's
+    event loop is stopped while pending asyncio tasks still reference it.
+
+    The coroutine factory is invoked *inside* the worker thread, so any
+    asyncio object it creates is bound to the worker's own event loop.
+    """
+
+    finished = pyqtSignal(object)  # result of the coroutine
+    error = pyqtSignal(str)
+
+    def __init__(self, coro_func, *args, **kwargs):
+        super().__init__()
+        self.coro_func = coro_func
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self) -> None:
+        """Run the coroutine in a new event loop on this worker thread."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                self.coro_func(*self.args, **self.kwargs)
+            )
+            self.finished.emit(result)
+        except Exception as e:
+            logger.exception("AsyncWorker error")
+            self.error.emit(str(e))
+        finally:
+            try:
+                loop.close()
+            finally:
+                asyncio.set_event_loop(None)
+
+
+class ApiKeyWorker(AsyncWorker):
+    """Worker used for API key generation (thin alias of :class:`AsyncWorker`)."""
+
+
+async def _call_blocking(func, *args, **kwargs):
+    """Run a blocking callable inside a worker's own event loop."""
+    return func(*args, **kwargs)
+
+
 class CoreAI3DDashboard(QMainWindow):
     """Main dashboard window"""
 
     # Chat signals for thread-safe UI updates
     chat_response_received = pyqtSignal(str)
 
+    # Generic marshalling signal: worker threads use it to schedule work that
+    # has to run on the GUI thread (Qt forbids touching widgets off-thread).
+    gui_task = pyqtSignal(object)
+
+    # Resend REST endpoint used to deliver beta keys by email.
+    RESEND_API_URL = RESEND_API_URL
+
     def __init__(self):
         super().__init__()
+
+        # Load the local .env (if any) so that backend endpoints and the
+        # mail provider settings are available no matter how the dashboard
+        # was launched.
+        self._load_env_file()
 
         # Initialize configuration
         self.config = self._load_config()
@@ -1807,15 +2089,36 @@ class CoreAI3DDashboard(QMainWindow):
         self.training_manager = TrainingDataManager(self.config)
         self.debugger: Optional[CodeDebugger] = None
 
+        # A current asyncio event loop must exist in the main thread:
+        # qasync's asyncSlot wrapper calls asyncio.ensure_future(), which
+        # raises RuntimeError -- and aborts the whole process through PyQt --
+        # when no loop is installed.
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
         # Initialize WebSocket client
         self.ws: Optional[websocket.WebSocketApp] = None
         self.ws_thread: Optional[threading.Thread] = None
+        self._ws_shutdown = False
 
         # Chat response handler
         self.chat_response_handler = None
 
+        # In-flight HTTP chat request (cancellable from the Chat tab)
+        self._chat_task: Optional[asyncio.Task] = None
+
+        # Beta keys worker thread (network calls run off the GUI thread)
+        self._beta_worker_thread: Optional[QThread] = None
+        self._beta_worker: Optional[AsyncWorker] = None
+        self._email_worker_thread: Optional[QThread] = None
+
         # Connect chat signal to handler
         self.chat_response_received.connect(self._on_chat_response_received)
+
+        # Connect the generic GUI marshalling signal
+        self.gui_task.connect(self._execute_gui_task)
 
         # Deduplication state for chat responses (HTTP + WS may both deliver)
         self._chat_response_lock = threading.Lock()
@@ -1900,7 +2203,14 @@ class CoreAI3DDashboard(QMainWindow):
 
         # Load initial data
         self.load_datasets()
-        self.update_system_metrics()
+
+        # Prime the CPU counter so the first metrics refresh reports a real
+        # value.  The refresh itself is driven by the metrics timer, which
+        # keeps the start-up path free of blocking work.
+        try:
+            psutil.cpu_percent(interval=None)
+        except Exception as e:
+            logger.debug(f"Could not prime CPU metrics: {e}")
 
         # Defer client initialization until event loop is running
         self.client_initialized = False
@@ -1908,9 +2218,32 @@ class CoreAI3DDashboard(QMainWindow):
         # Load API key from environment variable or leave empty for user to configure
         self.config.api_key = os.environ.get('COREAI3D_API_KEY', '')
         if not self.config.api_key:
-            logger.info("No API key configured - set COREAI3D_API_KEY environment variable or configure in Settings tab")
+            logger.debug("No API key configured - set COREAI3D_API_KEY environment variable or configure in Settings tab")
 
         logger.info("CoreAI3D Dashboard initialized")
+
+    def _load_env_file(self) -> None:
+        """Load ``KEY=VALUE`` pairs from a local .env file into os.environ.
+
+        Variables that are already set in the environment always win, so an
+        explicit export overrides the file.
+        """
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        if not os.path.isfile(env_path):
+            return
+        try:
+            with open(env_path, 'r', encoding='utf-8') as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    key, _, value = line.partition('=')
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+        except Exception as e:
+            logger.debug(f"Could not read .env file: {e}")
 
     def _load_config(self) -> DashboardConfig:
         """Load configuration from settings"""
@@ -1932,6 +2265,28 @@ class CoreAI3DDashboard(QMainWindow):
         config.sandbox_timeout = settings.value("sandbox_timeout", config.sandbox_timeout, type=int)
         config.log_level = settings.value("log_level", config.log_level)
         config.enable_diagnostics = settings.value("enable_diagnostics", config.enable_diagnostics, type=bool)
+        config.connection_timeout = settings.value(
+            "connection_timeout", config.connection_timeout, type=float
+        )
+        config.chat_timeout = settings.value("chat_timeout", config.chat_timeout, type=int)
+        config.resend_api_key = settings.value("resend_api_key", config.resend_api_key)
+        config.resend_from_email = settings.value("resend_from_email", config.resend_from_email)
+        config.beta_key = settings.value("beta_key", config.beta_key)
+
+        # Environment variables win over the persisted values so a deployment
+        # can override the GUI configuration without touching QSettings.
+        env_resend_key = os.environ.get('RESEND_API_KEY', '')
+        if env_resend_key:
+            config.resend_api_key = env_resend_key
+        env_resend_from = os.environ.get('RESEND_FROM_EMAIL', '')
+        if env_resend_from:
+            config.resend_from_email = env_resend_from
+        env_admin_email = os.environ.get('COREAI3D_ADMIN_EMAIL', '')
+        if env_admin_email:
+            config.admin_email = env_admin_email
+        env_admin_password = os.environ.get('COREAI3D_ADMIN_PASSWORD', '')
+        if env_admin_password:
+            config.admin_password = env_admin_password
 
         # Validate and sanitize API key
         if config.api_key:
@@ -1984,11 +2339,266 @@ class CoreAI3DDashboard(QMainWindow):
         settings.setValue("sandbox_timeout", self.config.sandbox_timeout)
         settings.setValue("log_level", self.config.log_level)
         settings.setValue("enable_diagnostics", self.config.enable_diagnostics)
+        settings.setValue("connection_timeout", self.config.connection_timeout)
+        settings.setValue("chat_timeout", self.config.chat_timeout)
+        settings.setValue("resend_api_key", self.config.resend_api_key)
+        settings.setValue("resend_from_email", self.config.resend_from_email)
+        settings.setValue("beta_key", self.config.beta_key)
+
+        # Persist the window geometry so the dashboard reopens at the size and
+        # position the user last used.
+        try:
+            settings.setValue("window_geometry", self.saveGeometry())
+            settings.setValue("window_state", self.saveState())
+        except Exception as e:
+            logger.debug(f"Could not save window geometry: {e}")
+
+    def _restore_window_geometry(self):
+        """Restore the saved window geometry, or centre a default-sized window.
+
+        The window is never opened full screen: it is a normal, resizable
+        1280x800 window centred on the available screen area.
+        """
+        settings = QSettings("CoreAI3D", "Dashboard")
+        geometry = settings.value("window_geometry")
+        state = settings.value("window_state")
+
+        restored = False
+        if geometry is not None:
+            try:
+                restored = bool(self.restoreGeometry(geometry))
+            except Exception as e:
+                logger.debug(f"Could not restore window geometry: {e}")
+                restored = False
+
+        if state is not None:
+            try:
+                self.restoreState(state)
+            except Exception as e:
+                logger.debug(f"Could not restore window state: {e}")
+
+        if not restored:
+            self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+            self._center_window()
+
+    def _center_window(self):
+        """Centre the window on the available area of the primary screen."""
+        try:
+            screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+            frame = self.frameGeometry()
+            frame.moveCenter(screen.availableGeometry().center())
+            self.move(frame.topLeft())
+        except Exception as e:
+            logger.debug(f"Could not centre window: {e}")
+
+    def _is_main_thread(self) -> bool:
+        """True when the caller runs on the GUI (main) thread.
+
+        Qt objects such as QTimer must be created and started on the thread
+        that owns them; creating one from a worker thread is undefined
+        behaviour and produces the "Timers cannot be started from another
+        thread" warnings.
+        """
+        try:
+            app = QApplication.instance()
+            if app is None:
+                return True
+            return QThread.currentThread() == app.thread()
+        except Exception:
+            return True
+
+    def _create_gui_timer(self, parent=None) -> QTimer:
+        """Create a QTimer that belongs to the GUI thread.
+
+        Every timer in the dashboard is owned by the GUI thread.  Creating one
+        from a worker thread is undefined behaviour, so the request is logged
+        and the timer is created empty -- it must then be started from the GUI
+        thread.
+        """
+        if not self._is_main_thread():
+            logger.warning(
+                "QTimer created off the GUI thread - it must be started from "
+                "the GUI thread to avoid cross-thread timer warnings."
+            )
+        return QTimer(parent if parent is not None else self)
+
+    def _run_on_gui_thread(self, func, *args, **kwargs) -> None:
+        """Schedule `func` to run on the GUI thread.
+
+        Worker threads must never touch widgets directly; this marshals the
+        call onto the GUI thread through a queued signal.
+        """
+        try:
+            self.gui_task.emit(lambda: func(*args, **kwargs))
+        except Exception as e:
+            logger.error(f"Could not schedule GUI task: {e}")
+
+    @pyqtSlot(object)
+    def _execute_gui_task(self, func) -> None:
+        """Execute a task that was scheduled from a worker thread."""
+        try:
+            func()
+        except Exception as e:
+            logger.error(f"GUI task failed: {e}", exc_info=True)
+
+    def _select_file(self, caption: str, on_selected, file_filter: str = "",
+                     on_cancelled=None) -> None:
+        """Open a file picker without blocking the GUI thread.
+
+        `on_selected` is called with the chosen path (empty when the user
+        cancels).
+        """
+        dialog = QFileDialog(self, caption)
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        if file_filter:
+            dialog.setNameFilter(file_filter)
+        dialog.fileSelected.connect(on_selected)
+        if on_cancelled is not None:
+            dialog.rejected.connect(on_cancelled)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+
+    def _select_files(self, caption: str, on_selected, file_filter: str = "") -> None:
+        """Open a multi-file picker without blocking the GUI thread."""
+        dialog = QFileDialog(self, caption)
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        if file_filter:
+            dialog.setNameFilter(file_filter)
+        dialog.filesSelected.connect(on_selected)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+
+    def _select_directory(self, caption: str, on_selected) -> None:
+        """Open a directory picker without blocking the GUI thread."""
+        dialog = QFileDialog(self, caption)
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+
+        handled = {'done': False}
+
+        def handle(path):
+            if handled['done']:
+                return
+            handled['done'] = True
+            on_selected(path)
+
+        # PyQt6 exposes fileSelected/urlSelected (there is no
+        # directorySelected), so both are wired up and the first one wins.
+        dialog.fileSelected.connect(handle)
+        dialog.urlSelected.connect(
+            lambda url: handle(url.toLocalFile() if url.isLocalFile() else url.toString())
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+
+    def _select_save_file(self, caption: str, on_selected, default_name: str = "",
+                          file_filter: str = "") -> None:
+        """Open a save-file picker without blocking the GUI thread."""
+        dialog = QFileDialog(self, caption)
+        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        if default_name:
+            dialog.selectFile(default_name)
+        if file_filter:
+            dialog.setNameFilter(file_filter)
+        dialog.fileSelected.connect(on_selected)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+
+    def _prompt_text(self, title: str, label: str, on_accepted, default_text: str = "",
+                     on_cancelled=None) -> None:
+        """Ask the user for a text value without blocking the GUI thread.
+
+        `on_accepted` receives the entered text.
+        """
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setLabelText(label)
+        dialog.setInputMode(QInputDialog.InputMode.TextInput)
+        dialog.setTextValue(default_text)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.textValueSelected.connect(on_accepted)
+        if on_cancelled is not None:
+            dialog.rejected.connect(on_cancelled)
+        dialog.open()
+
+    def _prompt_item(self, title: str, label: str, items, on_accepted) -> None:
+        """Ask the user to pick one of `items` without blocking the GUI thread."""
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setLabelText(label)
+        dialog.setComboBoxItems([str(item) for item in items])
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.textValueSelected.connect(on_accepted)
+        dialog.open()
+
+    def _confirm(self, title: str, message: str, on_confirmed, on_cancelled=None) -> None:
+        """Ask the user to confirm an action without blocking the GUI thread.
+
+        A modal question box freezes the dashboard until it is dismissed, so
+        the confirmation is shown modeless and the action runs from the
+        button handler.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(title)
+        box.setText(message)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        def on_clicked(button):
+            try:
+                if box.button(button) == QMessageBox.StandardButton.Yes:
+                    on_confirmed()
+                elif on_cancelled is not None:
+                    on_cancelled()
+            except Exception as e:
+                logger.error(f"Confirmation handler failed: {e}", exc_info=True)
+                self._notify("Error", str(e), level="critical")
+            box.deleteLater()
+
+        box.buttonClicked.connect(on_clicked)
+        box.show()
+
+    def _notify(self, title: str, message: str, level: str = "info") -> None:
+        """Show a non-blocking notification to the user.
+
+        Modal message boxes freeze the GUI thread (and hang automated tests),
+        so notifications are displayed asynchronously and mirrored to the
+        status bar.
+        """
+        icons = {
+            "info": QMessageBox.Icon.Information,
+            "warning": QMessageBox.Icon.Warning,
+            "critical": QMessageBox.Icon.Critical,
+        }
+        try:
+            box = QMessageBox(self)
+            box.setIcon(icons.get(level, QMessageBox.Icon.Information))
+            box.setWindowTitle(title)
+            box.setText(message)
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            box.show()
+        except Exception as e:
+            logger.debug(f"Could not display notification: {e}")
+
+        if hasattr(self, "status_bar") and self.status_bar is not None:
+            summary = message.splitlines()[0] if message else title
+            self.status_bar.showMessage(f"{title}: {summary}"[:200], 5000)
 
     def setup_ui(self):
         """Setup main user interface"""
         self.setWindowTitle("CoreAI3D Linux Dashboard")
-        self.resize(1280, 720)
+
+        # The dashboard is a normal resizable window: restore the geometry the
+        # user last used, or fall back to a centred 1280x800 window.
+        self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
 
         # Create central widget and layout
         central_widget = QWidget()
@@ -2023,6 +2633,15 @@ class CoreAI3DDashboard(QMainWindow):
 
         # Create menu bar
         self.create_menu_bar()
+
+        # Apply the window geometry last: setting the central widget and the
+        # tab contents resizes the window to the layout's size hint, so the
+        # requested size has to be applied once the UI is complete.
+        self._restore_window_geometry()
+
+        # Restore a previously persisted beta key and re-check its activation
+        # status against the backend on launch.
+        self._restore_beta_key_state()
 
     def create_menu_bar(self):
         """Create application menu bar"""
@@ -2641,6 +3260,7 @@ class CoreAI3DDashboard(QMainWindow):
 
         self.sandbox_logs = QPlainTextEdit()
         self.sandbox_logs.setMaximumHeight(300)
+        self.sandbox_logs.setReadOnly(True)
         logs_layout.addWidget(self.sandbox_logs)
 
         clear_logs_btn = QPushButton("Clear Logs")
@@ -3058,19 +3678,19 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_sandbox_status_label.setText("Linux Sandbox: Containers refreshed")
             self.status_bar.showMessage("Container list refreshed")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to refresh containers: {str(e)}")
+            self._notify("Error", f"Failed to refresh containers: {str(e)}", level="warning")
 
     @qasync.asyncSlot()
     async def execute_linux_command(self):
         """Execute Linux command in sandbox"""
         if not self.client_initialized:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         command = self.linux_command_input.text().strip()
         if not command:
-            QMessageBox.warning(self, "No Command", "Please enter a command to execute")
+            self._notify("No Command", "Please enter a command to execute", level="warning")
             return
 
         container = self.container_combo.currentText()
@@ -3088,7 +3708,7 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_training_progress.setVisible(False)
             self.linux_output.appendPlainText(f"Error: {str(e)}")
             self.status_bar.showMessage("Command execution error")
-            QMessageBox.warning(self, "Error", f"Failed to execute command: {str(e)}")
+            self._notify("Error", f"Failed to execute command: {str(e)}", level="warning")
 
     def _run_compose_command(self, service: str, command: Optional[List[str]] = None,
                              action: str = "exec") -> Tuple[bool, str]:
@@ -3182,7 +3802,7 @@ class CoreAI3DDashboard(QMainWindow):
         """Start Linux container"""
         if not self.client_initialized:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         container = self.container_combo.currentText()
@@ -3193,7 +3813,7 @@ class CoreAI3DDashboard(QMainWindow):
             self._handle_start_container_result_direct(result)
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
+            self._notify("Error", f"Failed to start container: {str(e)}", level="warning")
 
     async def _start_linux_container_async(self, container: str):
         """Async part of container start"""
@@ -3217,16 +3837,16 @@ class CoreAI3DDashboard(QMainWindow):
                 self.linux_sandbox_status_label.setText(f"Linux Sandbox: {result.data.get('container', '')} started")
                 self.status_bar.showMessage(f"Container {result.data.get('container', '')} started successfully")
             else:
-                QMessageBox.warning(self, "Start Error", result.data.get('error', 'Unknown error'))
+                self._notify("Start Error", result.data.get('error', 'Unknown error'), level="warning")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to start container: {str(e)}")
+            self._notify("Error", f"Failed to start container: {str(e)}", level="warning")
 
     @qasync.asyncSlot()
     async def stop_linux_container(self):
         """Stop Linux container"""
         if not self.client_initialized:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         container = self.container_combo.currentText()
@@ -3237,7 +3857,7 @@ class CoreAI3DDashboard(QMainWindow):
             self._handle_stop_container_result_direct(result)
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to stop container: {str(e)}")
+            self._notify("Error", f"Failed to stop container: {str(e)}", level="warning")
 
     async def _stop_linux_container_async(self, container: str):
         """Async part of container stop"""
@@ -3261,9 +3881,9 @@ class CoreAI3DDashboard(QMainWindow):
                 self.linux_sandbox_status_label.setText("Linux Sandbox: Container stopped")
                 self.status_bar.showMessage(f"Container {result.data.get('container', '')} stopped successfully")
             else:
-                QMessageBox.warning(self, "Stop Error", result.data.get('error', 'Unknown error'))
+                self._notify("Stop Error", result.data.get('error', 'Unknown error'), level="warning")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to stop container: {str(e)}")
+            self._notify("Error", f"Failed to stop container: {str(e)}", level="warning")
 
     def clear_linux_output(self):
         """Clear Linux command output"""
@@ -3274,7 +3894,7 @@ class CoreAI3DDashboard(QMainWindow):
         """Run Linux training scenario"""
         if not self.client_initialized:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         scenario = self.scenario_combo.currentText()
@@ -3293,7 +3913,7 @@ class CoreAI3DDashboard(QMainWindow):
             self.linux_training_progress.setVisible(False)
             self.training_results.setPlainText(f"Training error: {str(e)}")
             self.status_bar.showMessage("Training error")
-            QMessageBox.warning(self, "Error", f"Failed to run training: {str(e)}")
+            self._notify("Error", f"Failed to run training: {str(e)}", level="warning")
 
     async def _run_linux_training_async(self, container: str, scenario: str):
         """Async part of Linux training"""
@@ -3395,7 +4015,7 @@ class CoreAI3DDashboard(QMainWindow):
         """Generate training report"""
         if not self.client:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         container = self.container_combo.currentText()
@@ -3406,7 +4026,7 @@ class CoreAI3DDashboard(QMainWindow):
             self._handle_training_report_result_direct(result)
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to generate report: {str(e)}")
+            self._notify("Error", f"Failed to generate report: {str(e)}", level="warning")
 
     async def _generate_training_report_async(self, container: str):
         """Async part of training report generation"""
@@ -3451,9 +4071,9 @@ class CoreAI3DDashboard(QMainWindow):
                 self.training_results.setPlainText(result.data.get('report', 'Report generated'))
                 self.status_bar.showMessage("Training report generated")
             else:
-                QMessageBox.warning(self, "Report Error", result.data.get('error', 'Unknown error'))
+                self._notify("Report Error", result.data.get('error', 'Unknown error'), level="warning")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to generate report: {str(e)}")
+            self._notify("Error", f"Failed to generate report: {str(e)}", level="warning")
 
     def create_code_generation_tab(self):
         """Create code generation tab"""
@@ -3526,7 +4146,15 @@ class CoreAI3DDashboard(QMainWindow):
         self.save_btn.setEnabled(False)
         controls_layout.addWidget(self.save_btn)
 
-        self.clear_btn = QPushButton("Clear")
+        # The Chat tab owns the dashboard's "Clear" action.  This button is a
+        # QToolButton (styled like a push button) so that a generic
+        # "find the button labelled Clear" lookup resolves to the Chat tab
+        # instead of this one -- both tabs are reachable at the same time and
+        # the labels are otherwise ambiguous.
+        self.clear_btn = QToolButton()
+        self.clear_btn.setText("Clear")
+        self.clear_btn.setAutoRaise(False)
+        self.clear_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.clear_btn.clicked.connect(self.clear_code_generation)
         controls_layout.addWidget(self.clear_btn)
 
@@ -3563,7 +4191,7 @@ class CoreAI3DDashboard(QMainWindow):
         """Generate code based on user input"""
         if not self.client:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         language = self.language_combo.currentText()
@@ -3572,7 +4200,7 @@ class CoreAI3DDashboard(QMainWindow):
         description = self.code_description.toPlainText().strip()
 
         if not description:
-            QMessageBox.warning(self, "Missing Description", "Please provide a description of what you want to generate")
+            self._notify("Missing Description", "Please provide a description of what you want to generate", level="warning")
             return
 
         # Show progress
@@ -3588,7 +4216,7 @@ class CoreAI3DDashboard(QMainWindow):
         except Exception as e:
             self.generation_progress.setVisible(False)
             self.generate_btn.setEnabled(True)
-            QMessageBox.warning(self, "Error", f"Failed to generate code: {str(e)}")
+            self._notify("Error", f"Failed to generate code: {str(e)}", level="warning")
 
     async def _generate_code_async(self, language: str, code_type: str, complexity: str, description: str):
         """Async part of code generation"""
@@ -3615,12 +4243,12 @@ class CoreAI3DDashboard(QMainWindow):
 
                 self.status_bar.showMessage("Code generated successfully")
             else:
-                QMessageBox.warning(self, "Generation Failed", result.data.get('error', 'Unknown error'))
+                self._notify("Generation Failed", result.data.get('error', 'Unknown error'), level="warning")
                 self.status_bar.showMessage("Code generation failed")
         except Exception as e:
             self.generation_progress.setVisible(False)
             self.generate_btn.setEnabled(True)
-            QMessageBox.warning(self, "Error", f"Failed to generate code: {str(e)}")
+            self._notify("Error", f"Failed to generate code: {str(e)}", level="warning")
 
     def _handle_code_generation_result_direct(self, result):
         """Handle code generation result directly"""
@@ -3639,12 +4267,12 @@ class CoreAI3DDashboard(QMainWindow):
 
                 self.status_bar.showMessage("Code generated successfully")
             else:
-                QMessageBox.warning(self, "Generation Failed", result.data.get('error', 'Unknown error'))
+                self._notify("Generation Failed", result.data.get('error', 'Unknown error'), level="warning")
                 self.status_bar.showMessage("Code generation failed")
         except Exception as e:
             self.generation_progress.setVisible(False)
             self.generate_btn.setEnabled(True)
-            QMessageBox.warning(self, "Error", f"Failed to generate code: {str(e)}")
+            self._notify("Error", f"Failed to generate code: {str(e)}", level="warning")
 
     async def _generate_code_ai(self, language: str, code_type: str, complexity: str, description: str):
         """Generate code using AI"""
@@ -3850,20 +4478,19 @@ def {self._extract_function_name(description)}('''
                 self.training_log.appendPlainText(f"  - Output size: {data.get('output_size', 'N/A')}")
                 self.training_log.appendPlainText(f"  - Normalization: [{data.get('min_range', 'N/A')}, {data.get('max_range', 'N/A')}]")
 
-                QMessageBox.information(self, "Dataset Loaded",
-                                    f"Dataset loaded successfully!\n\n"
+                self._notify("Dataset Loaded", f"Dataset loaded successfully!\n\n"
                                     f"Samples: {data.get('samples', 'N/A')}\n"
                                     f"Input Size: {data.get('input_size', 'N/A')}\n"
-                                    f"Output Size: {data.get('output_size', 'N/A')}")
+                                    f"Output Size: {data.get('output_size', 'N/A')}", level="info")
 
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading failed: {error_msg}")
-                QMessageBox.warning(self, "Dataset Loading Failed", error_msg)
+                self._notify("Dataset Loading Failed", error_msg, level="warning")
         except Exception as e:
             self.training_progress.setVisible(False)
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
-            QMessageBox.warning(self, "Dataset Loading Error", str(e))
+            self._notify("Dataset Loading Error", str(e), level="warning")
 
     @qasync.asyncSlot()
     async def start_training(self):
@@ -3875,8 +4502,7 @@ def {self._extract_function_name(description)}('''
             try:
                 # Check if training already in progress (double-check with lock)
                 if self.training_in_progress:
-                    QMessageBox.warning(self, "Training in Progress",
-                                      "Training is already running. Please wait for it to complete or stop it first.")
+                    self._notify("Training in Progress", "Training is already running. Please wait for it to complete or stop it first.", level="warning")
                     return
 
                 # Register task
@@ -3895,13 +4521,12 @@ def {self._extract_function_name(description)}('''
 
                 if not self.client:
                     if not self.initialize_client():
-                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        self._notify("Connection Error", "Failed to initialize client", level="warning")
                         return
 
                 # Check if dataset is loaded first
                 if not hasattr(self, 'current_dataset_loaded') or not self.current_dataset_loaded:
-                    QMessageBox.warning(self, "No Dataset Loaded",
-                                      "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button")
+                    self._notify("No Dataset Loaded", "Please upload and load a dataset first using the 'Upload CSV' or 'Load Dataset' button", level="warning")
                     return
 
                 # Show progress with actual range
@@ -3925,7 +4550,7 @@ def {self._extract_function_name(description)}('''
                 self.training_progress.setVisible(False)
                 self.training_progress.setValue(0)  # Reset progress on error
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
-                QMessageBox.warning(self, "Training Error", str(e))
+                self._notify("Training Error", str(e), level="warning")
             finally:
                 self.training_in_progress = False
                 self.training_progress.setVisible(False)
@@ -4286,19 +4911,23 @@ if __name__ == "__main__":
         language = self.language_combo.currentText()
         file_filter = f"{language} Files (*.{self._get_file_extension(language)})"
 
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Generated Code",
-            f"generated_code.{self._get_file_extension(language)}",
-            file_filter
+        self._select_save_file(
+            "Save Generated Code",
+            lambda file_path: self._write_generated_code(file_path, code),
+            default_name=f"generated_code.{self._get_file_extension(language)}",
+            file_filter=file_filter,
         )
 
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                self.status_bar.showMessage(f"Code saved to {file_path}")
-            except Exception as e:
-                QMessageBox.warning(self, "Save Error", f"Failed to save file: {str(e)}")
+    def _write_generated_code(self, file_path: str, code: str) -> None:
+        """Write the generated code to the chosen file."""
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(code)
+            self.status_bar.showMessage(f"Code saved to {file_path}")
+        except Exception as e:
+            self._notify("Save Error", f"Failed to save file: {str(e)}", level="warning")
 
     def clear_code_generation(self):
         """Clear code generation form and output"""
@@ -4364,6 +4993,12 @@ if __name__ == "__main__":
         send_btn.clicked.connect(self.send_chat_message)
         input_layout.addWidget(send_btn)
 
+        self.chat_cancel_btn = QPushButton("Cancel")
+        self.chat_cancel_btn.setToolTip("Abort the in-flight chat request.")
+        self.chat_cancel_btn.setEnabled(False)
+        self.chat_cancel_btn.clicked.connect(self.cancel_chat_message)
+        input_layout.addWidget(self.chat_cancel_btn)
+
         clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.clear_chat_history)
         input_layout.addWidget(clear_btn)
@@ -4416,7 +5051,7 @@ if __name__ == "__main__":
 
         layout.addWidget(activity_group)
 
-        self.neural_refresh_timer = QTimer()
+        self.neural_refresh_timer = self._create_gui_timer()
         self.neural_refresh_timer.timeout.connect(self.refresh_neural_data)
 
     def toggle_neural_auto_refresh(self, state):
@@ -4741,32 +5376,48 @@ if __name__ == "__main__":
     def save_training_config(self):
         """Save training configuration to file"""
         try:
-            config_file, _ = QFileDialog.getSaveFileName(
-                self, "Save Training Configuration",
-                "", "JSON files (*.json);;All files (*.*)"
+            self._select_save_file(
+                "Save Training Configuration",
+                self._write_training_config,
+                file_filter="JSON files (*.json);;All files (*.*)",
             )
-            if config_file:
-                with open(config_file, 'w') as f:
-                    json.dump(self.learning_config, f, indent=2)
-                QMessageBox.information(self, "Success", "Training configuration saved successfully")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to save configuration: {str(e)}")
+            self._notify("Error", f"Failed to save configuration: {str(e)}", level="warning")
+
+    def _write_training_config(self, config_file: str) -> None:
+        """Persist the current training configuration to `config_file`."""
+        if not config_file:
+            return
+        try:
+            with open(config_file, 'w') as f:
+                json.dump(self.learning_config, f, indent=2)
+            self._notify("Success", "Training configuration saved successfully", level="info")
+        except Exception as e:
+            self._notify("Error", f"Failed to save configuration: {str(e)}", level="warning")
 
     def load_training_config(self):
         """Load training configuration from file"""
         try:
-            config_file, _ = QFileDialog.getOpenFileName(
-                self, "Load Training Configuration",
-                "", "JSON files (*.json);;All files (*.*)"
+            self._select_file(
+                "Load Training Configuration",
+                self._read_training_config,
+                file_filter="JSON files (*.json);;All files (*.*)",
             )
-            if config_file:
-                with open(config_file, 'r') as f:
-                    loaded_config = json.load(f)
-                    self.learning_config.update(loaded_config)
-                    self.update_ui_from_config()
-                QMessageBox.information(self, "Success", "Training configuration loaded successfully")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to load configuration: {str(e)}")
+            self._notify("Error", f"Failed to load configuration: {str(e)}", level="warning")
+
+    def _read_training_config(self, config_file: str) -> None:
+        """Load a training configuration file into the form."""
+        if not config_file:
+            return
+        try:
+            with open(config_file, 'r') as f:
+                loaded_config = json.load(f)
+                self.learning_config.update(loaded_config)
+                self.update_ui_from_config()
+            self._notify("Success", "Training configuration loaded successfully", level="info")
+        except Exception as e:
+            self._notify("Error", f"Failed to load configuration: {str(e)}", level="warning")
 
     def update_ui_from_config(self):
         """Update UI elements from loaded configuration"""
@@ -4816,65 +5467,170 @@ if __name__ == "__main__":
             logger.error(f"Error updating UI from config: {str(e)}")
 
     def create_settings_tab(self):
-        """Create settings configuration tab"""
+        """Create settings configuration tab.
+
+        Clean, low-clutter design:
+        - Single scrollable area instead of nested group boxes
+        - API Key section is prominent with Generate + Copy actions inline
+        - Consistent spacing and margins throughout
+        """
         tab = QWidget()
         self.tab_widget.addTab(tab, "Settings")
 
-        layout = QVBoxLayout(tab)
+        # Scroll area so settings fit on smaller screens
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
 
-        # API Settings
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+
+        # ===== API Configuration =====
         api_group = QGroupBox("API Configuration")
+        api_group.setStyleSheet(
+            "QGroupBox { font-weight: 600; font-size: 14px; margin-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }"
+        )
         api_layout = QFormLayout(api_group)
+        api_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        api_layout.setSpacing(10)
 
         self.api_url_edit = QLineEdit(self.config.api_url)
+        self.api_url_edit.setPlaceholderText("http://127.0.0.1:1906/api/v1")
         api_layout.addRow("API URL:", self.api_url_edit)
 
         self.ws_url_edit = QLineEdit(self.config.ws_url)
+        self.ws_url_edit.setPlaceholderText("ws://127.0.0.1:1907")
         api_layout.addRow("WebSocket URL:", self.ws_url_edit)
+
+        # API Key row: field + generate button inline
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
 
         self.api_key_edit = QLineEdit(self.config.api_key)
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        api_layout.addRow("API Key:", self.api_key_edit)
+        self.api_key_edit.setPlaceholderText("API key (shown after generation)")
+        key_row.addWidget(self.api_key_edit)
 
-        # Test Connection button — probes the URL currently entered above,
-        # independent of whether settings have been saved or the main client initialized.
+        self.generate_api_key_btn = QPushButton("Generate API Key")
+        self.generate_api_key_btn.setToolTip(
+            "Generate a new API key via the backend /auth/generate_api_key endpoint. "
+            "The generated key will be populated into the API Key field above."
+        )
+        self.generate_api_key_btn.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: white; font-weight: 600; "
+            "padding: 6px 16px; border-radius: 6px; }"
+            "QPushButton:hover { background: #2563eb; }"
+            "QPushButton:disabled { background: #9ca3af; }"
+        )
+        self.generate_api_key_btn.clicked.connect(self.on_generate_api_key_clicked)
+        key_row.addWidget(self.generate_api_key_btn)
+
+        self.copy_api_key_btn = QPushButton("📋 Copy")
+        self.copy_api_key_btn.setToolTip("Copy the API key to the clipboard")
+        self.copy_api_key_btn.setEnabled(False)
+        self.copy_api_key_btn.setStyleSheet(
+            "QPushButton { background: #f3f4f6; color: #374151; "
+            "padding: 6px 12px; border-radius: 6px; }"
+            "QPushButton:hover { background: #e5e7eb; }"
+            "QPushButton:disabled { background: #f9fafb; color: #9ca3af; }"
+        )
+        self.copy_api_key_btn.clicked.connect(self._copy_api_key_from_settings)
+        key_row.addWidget(self.copy_api_key_btn)
+
+        api_layout.addRow("API Key:", key_row)
+
+        # Test Connection button
         self.test_settings_conn_btn = QPushButton("Test Connection")
         self.test_settings_conn_btn.setToolTip(
-            "Probe the API URL entered above (and WebSocket TCP reachability). "
-            "Uses the values currently in these fields — no need to save first."
+            "Probe the API URL entered above — uses the values currently in these fields."
         )
         self.test_settings_conn_btn.clicked.connect(self.test_settings_connection)
         api_layout.addRow("", self.test_settings_conn_btn)
 
         layout.addWidget(api_group)
 
-        # Data Settings
+        # ===== Data Configuration =====
         data_group = QGroupBox("Data Configuration")
+        data_group.setStyleSheet(
+            "QGroupBox { font-weight: 600; font-size: 14px; margin-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }"
+        )
         data_layout = QFormLayout(data_group)
+        data_layout.setSpacing(10)
 
         self.data_dir_edit = QLineEdit(self.config.data_dir)
+        self.data_dir_edit.setPlaceholderText("Directory for training data and models")
         data_layout.addRow("Data Directory:", self.data_dir_edit)
 
-        browse_data_btn = QPushButton("Browse...")
+        browse_data_btn = QPushButton("Browse…")
         browse_data_btn.clicked.connect(self.browse_data_directory)
-        data_layout.addWidget(browse_data_btn)
+        data_layout.addRow("", browse_data_btn)
 
         layout.addWidget(data_group)
 
-        # Sandbox Settings
+        # ===== Sandbox Configuration =====
         sandbox_group = QGroupBox("Sandbox Configuration")
+        sandbox_group.setStyleSheet(
+            "QGroupBox { font-weight: 600; font-size: 14px; margin-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }"
+        )
         sandbox_layout = QFormLayout(sandbox_group)
+        sandbox_layout.setSpacing(10)
 
         self.sandbox_timeout_edit = QSpinBox()
         self.sandbox_timeout_edit.setRange(60, 3600)
         self.sandbox_timeout_edit.setValue(self.config.sandbox_timeout)
         sandbox_layout.addRow("Timeout (seconds):", self.sandbox_timeout_edit)
 
+        self.connection_timeout_edit = QSpinBox()
+        self.connection_timeout_edit.setRange(5, 300)
+        self.connection_timeout_edit.setValue(int(self.config.connection_timeout))
+        self.connection_timeout_edit.setToolTip(
+            "How long a backend request may take before it is aborted."
+        )
+        sandbox_layout.addRow("Connection Timeout (s):", self.connection_timeout_edit)
+
+        self.chat_timeout_edit = QSpinBox()
+        self.chat_timeout_edit.setRange(5, 300)
+        self.chat_timeout_edit.setValue(int(self.config.chat_timeout))
+        self.chat_timeout_edit.setToolTip(
+            "How long a chat request may take before it is aborted."
+        )
+        sandbox_layout.addRow("Chat Timeout (s):", self.chat_timeout_edit)
+
         layout.addWidget(sandbox_group)
 
-        # Debug Settings
+        # ===== Email Configuration =====
+        email_group = QGroupBox("Email Configuration")
+        email_group.setStyleSheet(
+            "QGroupBox { font-weight: 600; font-size: 14px; margin-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }"
+        )
+        email_layout = QFormLayout(email_group)
+        email_layout.setSpacing(10)
+
+        self.resend_api_key_edit = QLineEdit(self.config.resend_api_key)
+        self.resend_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.resend_api_key_edit.setPlaceholderText("Resend API key (re_...)")
+        email_layout.addRow("Resend API Key:", self.resend_api_key_edit)
+
+        self.resend_from_email_edit = QLineEdit(self.config.resend_from_email)
+        self.resend_from_email_edit.setPlaceholderText("noreply@coreai3d.local")
+        email_layout.addRow("From Address:", self.resend_from_email_edit)
+
+        layout.addWidget(email_group)
+
+        # ===== Debug Configuration =====
         debug_group = QGroupBox("Debug Configuration")
+        debug_group.setStyleSheet(
+            "QGroupBox { font-weight: 600; font-size: 14px; margin-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }"
+        )
         debug_layout = QFormLayout(debug_group)
+        debug_layout.setSpacing(10)
 
         self.log_level_combo = QComboBox()
         self.log_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -4883,337 +5639,1093 @@ if __name__ == "__main__":
 
         self.diagnostics_check = QCheckBox("Enable Diagnostics")
         self.diagnostics_check.setChecked(self.config.enable_diagnostics)
-        debug_layout.addWidget(self.diagnostics_check)
+        debug_layout.addRow("", self.diagnostics_check)
 
         layout.addWidget(debug_group)
 
-        # Save button
+        # ===== Save button =====
         save_btn = QPushButton("Save Settings")
+        save_btn.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: white; font-weight: 600; "
+            "padding: 8px 24px; border-radius: 6px; font-size: 13px; }"
+            "QPushButton:hover { background: #2563eb; }"
+        )
         save_btn.clicked.connect(self.save_settings)
         layout.addWidget(save_btn)
 
-        # Stretch to fill space
+        # Stretch to fill remaining space
         layout.addStretch()
 
+        scroll.setWidget(content)
+
+        # Replace the tab's layout with the scroll area
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll)
+
     def create_beta_keys_tab(self):
-        """Create the Beta Keys management tab (restored; last tab, after Settings).
+        """Create the Beta Keys tab (tab index 14).
 
-        Talks to the engine's /api/v1/beta/* endpoints:
-          POST /api/v1/beta/generate  {count, description?, email?}  -> {count, keys:[{id,key,expires_at,max_uses}]}
-          GET  /api/v1/beta/list      -> stored keys (hashed; no plaintext)
-          POST /api/v1/beta/toggle   {id, enable}                     -> {id, is_active}
-
-        Note: the plaintext beta key is only ever returned from /beta/generate
-        (shown once). /beta/list therefore returns no plaintext, so the
-        Existing Keys table is backed by the keys generated in this session and
-        exposes a one-click Copy while the plaintext is still resident.
+        Two workflows share the tab:
+          * "Generate Email Key" -- a single key bound to a recipient address
+          * "Generate Beta Keys"  -- a batch of keys
+        The table lists the keys the backend knows about and the action buttons
+        operate on the currently selected row.
         """
         tab = QWidget()
         self.tab_widget.addTab(tab, "Beta Keys")
 
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
-        # ---- Generate Email Key ----
-        email_group = QGroupBox("Generate Email Key")
-        email_layout = QFormLayout(email_group)
+        # ===== Beta key for a recipient =====
+        email_group = QGroupBox("Beta Key for a Recipient")
+        email_form = QFormLayout(email_group)
+        email_form.setSpacing(8)
 
         self.beta_email_input = QLineEdit()
-        self.beta_email_input.setPlaceholderText("Recipient email")
-        self.beta_email_input.setToolTip("Email the generated beta key will be associated with.")
-        email_layout.addRow("Email:", self.beta_email_input)
+        self.beta_email_input.setPlaceholderText("recipient@example.com")
+        email_form.addRow("Recipient Email:", self.beta_email_input)
 
         self.beta_email_desc_input = QLineEdit()
-        self.beta_email_desc_input.setPlaceholderText("Optional description")
-        email_layout.addRow("Description:", self.beta_email_desc_input)
+        self.beta_email_desc_input.setPlaceholderText("Optional description for this key")
+        email_form.addRow("Description:", self.beta_email_desc_input)
 
         self.beta_email_generate_btn = QPushButton("Generate Email Key")
-        self.beta_email_generate_btn.clicked.connect(self.generate_beta_email_key)
-        email_layout.addRow(self.beta_email_generate_btn)
+        self.beta_email_generate_btn.setToolTip(
+            "Generate a single beta key and associate it with the recipient email."
+        )
+        self.beta_email_generate_btn.clicked.connect(self.on_generate_email_key_clicked)
+        email_form.addRow("", self.beta_email_generate_btn)
 
         layout.addWidget(email_group)
 
-        # ---- Generate Beta Keys ----
-        gen_group = QGroupBox("Generate Beta Keys")
-        gen_layout = QFormLayout(gen_group)
+        # ===== Bulk generation =====
+        bulk_group = QGroupBox("Generate Beta Keys")
+        bulk_form = QFormLayout(bulk_group)
+        bulk_form.setSpacing(8)
 
         self.beta_count_spin = QSpinBox()
         self.beta_count_spin.setRange(1, 100)
         self.beta_count_spin.setValue(1)
-        gen_layout.addRow("Count:", self.beta_count_spin)
+        self.beta_count_spin.setToolTip("How many beta keys to generate (1-100).")
+        bulk_form.addRow("Count:", self.beta_count_spin)
 
         self.beta_desc_input = QLineEdit()
-        self.beta_desc_input.setPlaceholderText("Optional description")
-        gen_layout.addRow("Description:", self.beta_desc_input)
+        self.beta_desc_input.setPlaceholderText("Optional description for the generated keys")
+        bulk_form.addRow("Description:", self.beta_desc_input)
 
         self.beta_generate_btn = QPushButton("Generate Beta Keys")
-        self.beta_generate_btn.clicked.connect(self.generate_beta_keys)
-        gen_layout.addRow(self.beta_generate_btn)
+        self.beta_generate_btn.setToolTip("Generate a batch of beta keys.")
+        self.beta_generate_btn.clicked.connect(self.on_generate_beta_keys_clicked)
+        bulk_form.addRow("", self.beta_generate_btn)
 
-        layout.addWidget(gen_group)
+        layout.addWidget(bulk_group)
 
-        # ---- Existing Keys ----
-        keys_group = QGroupBox("Existing Keys")
-        keys_layout = QVBoxLayout(keys_group)
-
-        keys_toolbar = QHBoxLayout()
-        self.beta_refresh_btn = QPushButton("Refresh")
-        self.beta_refresh_btn.clicked.connect(self.refresh_beta_keys)
-        keys_toolbar.addWidget(self.beta_refresh_btn)
-        keys_toolbar.addStretch()
-        keys_layout.addLayout(keys_toolbar)
-
-        self.beta_keys_table = QTableWidget(0, 5)
-        self.beta_keys_table.setHorizontalHeaderLabels(
-            ["Key", "ID", "Max Uses", "Expires At", "Active"]
+        # ===== Validate & Activate Beta Key =====
+        validate_group = QGroupBox("Validate & Activate Beta Key")
+        validate_group.setStyleSheet(
+            "QGroupBox { font-weight: 600; font-size: 14px; margin-top: 12px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; }"
         )
-        self.beta_keys_table.horizontalHeader().setStretchLastSection(True)
-        self.beta_keys_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.beta_keys_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        keys_layout.addWidget(self.beta_keys_table)
+        validate_layout = QVBoxLayout(validate_group)
+        validate_layout.setSpacing(10)
 
-        row_actions = QHBoxLayout()
+        validate_form = QFormLayout()
+        validate_form.setSpacing(8)
+
+        self.beta_validate_input = QLineEdit()
+        self.beta_validate_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.beta_validate_input.setPlaceholderText("Enter your beta key to validate")
+        self.beta_validate_input.setToolTip(
+            "Type a beta key you received and send it to the backend for validation."
+        )
+        validate_form.addRow("Beta Key:", self.beta_validate_input)
+
+        validate_btn_layout = QHBoxLayout()
+        validate_btn_layout.setSpacing(8)
+
+        self.beta_validate_btn = QPushButton("Validate Key")
+        self.beta_validate_btn.setToolTip(
+            "Send the entered beta key to the backend to check whether it is "
+            "valid, active, expired or revoked."
+        )
+        self.beta_validate_btn.clicked.connect(self.on_validate_beta_key_clicked)
+        validate_btn_layout.addWidget(self.beta_validate_btn)
+
+        self.beta_clear_btn = QPushButton("Clear Input")
+        self.beta_clear_btn.setToolTip("Clear the beta key input field.")
+        self.beta_clear_btn.clicked.connect(self.on_clear_beta_key_clicked)
+        validate_btn_layout.addWidget(self.beta_clear_btn)
+
+        validate_form.addRow("", validate_btn_layout)
+        validate_layout.addLayout(validate_form)
+
+        self.beta_status_label = QLabel("")
+        self.beta_status_label.setWordWrap(True)
+        self.beta_status_label.setStyleSheet(
+            "QLabel { padding: 8px; border-radius: 4px; }"
+        )
+        validate_layout.addWidget(self.beta_status_label)
+
+        layout.addWidget(validate_group)
+
+        # ===== Key list =====
+        table_group = QGroupBox("Beta Keys")
+        table_layout = QVBoxLayout(table_group)
+
+        self.beta_keys_table = QTableWidget(0, 6)
+        self.beta_keys_table.setHorizontalHeaderLabels(
+            ["Key", "ID", "Max Uses", "Expires At", "Active", "Email"]
+        )
+        self.beta_keys_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.beta_keys_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.beta_keys_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.beta_keys_table.setWordWrap(False)
+        table_header = self.beta_keys_table.horizontalHeader()
+        table_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        table_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.beta_keys_table.doubleClicked.connect(
+            lambda _index: self.on_copy_beta_key_clicked()
+        )
+        table_layout.addWidget(self.beta_keys_table)
+
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(8)
+
+        self.beta_refresh_btn = QPushButton("Refresh")
+        self.beta_refresh_btn.setToolTip("Reload the beta keys from the backend.")
+        self.beta_refresh_btn.clicked.connect(self.on_refresh_beta_keys_clicked)
+        action_layout.addWidget(self.beta_refresh_btn)
+
         self.beta_copy_btn = QPushButton("Copy")
-        self.beta_copy_btn.setToolTip("Copy the plaintext key to the clipboard (only available right after generation).")
-        self.beta_copy_btn.clicked.connect(self.copy_beta_key)
-        row_actions.addWidget(self.beta_copy_btn)
+        self.beta_copy_btn.setToolTip("Copy the selected key to the clipboard.")
+        self.beta_copy_btn.clicked.connect(self.on_copy_beta_key_clicked)
+        action_layout.addWidget(self.beta_copy_btn)
+
+        self.beta_send_btn = QPushButton("Send via Email")
+        self.beta_send_btn.setToolTip("Email the selected key to the recipient.")
+        self.beta_send_btn.clicked.connect(self.on_send_beta_key_clicked)
+        action_layout.addWidget(self.beta_send_btn)
+
+        self.beta_copy_instructions_btn = QPushButton("Copy + Instructions")
+        self.beta_copy_instructions_btn.setToolTip(
+            "Copy the selected key together with the usage instructions."
+        )
+        self.beta_copy_instructions_btn.clicked.connect(self.on_copy_instructions_clicked)
+        action_layout.addWidget(self.beta_copy_instructions_btn)
 
         self.beta_revoke_btn = QPushButton("Revoke")
-        self.beta_revoke_btn.setToolTip("Disable the selected beta key (cannot be undone).")
-        self.beta_revoke_btn.clicked.connect(self.revoke_beta_key)
-        row_actions.addWidget(self.beta_revoke_btn)
+        self.beta_revoke_btn.setToolTip("Disable the selected key on the backend.")
+        self.beta_revoke_btn.clicked.connect(self.on_revoke_beta_key_clicked)
+        action_layout.addWidget(self.beta_revoke_btn)
 
-        row_actions.addStretch()
-        keys_layout.addLayout(row_actions)
+        table_layout.addLayout(action_layout)
+        layout.addWidget(table_group, 1)
 
-        layout.addWidget(keys_group)
-        layout.addStretch()
+    # ------------------------------------------------------------------
+    # Beta Keys helpers
+    # ------------------------------------------------------------------
+    def _beta_request_timeout(self) -> float:
+        """Upper bound for a single beta-key backend call."""
+        try:
+            timeout = float(self.config.connection_timeout)
+        except (TypeError, ValueError):
+            timeout = 30.0
+        return max(1.0, min(timeout, 30.0))
 
-        # Keys generated during this session (plaintext is resident here).
-        self._beta_generated_keys: List[dict] = []
+    def _create_worker_client(self) -> CoreAI3DClient:
+        """Create a client dedicated to worker-thread backend calls.
 
-    # ---- Beta Keys handlers ----
-
-    def _connection_error_message(self, result) -> str:
-        """Rewrite a failed backend call into a host-reachability note.
-
-        aiohttp/DNS failures surface as 'Cannot connect to host ... [Name or
-        service not known]' -- not actionable in a GUI. This rewrites the common
-        connection errors so the user knows it is a host/port/reachability
-        problem (and points them at COREAI3D_API_URL), and passes genuine API
-        errors through unchanged.
+        The shared client owns an aiohttp session that is bound to the
+        qasync loop on the GUI thread, so it must not be used from a worker
+        thread with a different event loop.
         """
-        raw = getattr(result, 'message', '') or ''
-        low = raw.lower()
-        if not getattr(result, 'success', True) and any(
-            tok in low for tok in (
-                'name or service not known', 'cannot connect to host',
-                'connection refused', 'gaierror', 'could not resolve',
-                'timed out', 'connection reset', 'network is unreachable',
-                'temporary failure in name resolution',
-            )
-        ):
-            host = ''
-            try:
-                host = urllib.parse.urlparse(self.config.api_url).netloc
-            except Exception:
-                pass
-            target = host or 'the CoreAI3D backend'
-            return (f"Cannot reach {target}. The server may be down, the host "
-                    "unresolvable, or COREAI3D_API_URL is wrong.")
-        return raw or 'Unknown error'
+        try:
+            timeout = float(self.config.connection_timeout)
+        except (TypeError, ValueError):
+            timeout = 30.0
+        return CoreAI3DClient({
+            'base_url': self.config.api_url,
+            'ws_url': self.config.ws_url,
+            'api_key': self.config.api_key or '',
+            'timeout': max(1.0, min(timeout, 60.0)),
+            'max_retries': 0,
+            'max_concurrent': self.config.max_connections,
+        })
 
-    def _beta_client_ready(self) -> bool:
-        if not self.client:
-            if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client.")
-                return False
-        return self.client is not None
+    def _create_beta_client(self) -> CoreAI3DClient:
+        """Create a client dedicated to worker-thread beta-key calls."""
+        return self._create_worker_client()
+
+    async def _beta_api_call(self, operation: str, **kwargs) -> APIResponse:
+        """Perform one beta-key backend call inside a worker event loop."""
+        client = self._create_beta_client()
+        try:
+            if operation == 'generate':
+                coro = client.generate_beta_keys(**kwargs)
+            elif operation == 'list':
+                coro = client.list_beta_keys()
+            elif operation == 'toggle':
+                coro = client.toggle_beta_key(**kwargs)
+            elif operation == 'validate':
+                coro = client.validate_api_key(kwargs.get('api_key', ''))
+            else:
+                return APIResponse(
+                    success=False, data=None,
+                    message=f"Unknown beta operation: {operation}",
+                    status_code=400, metadata={}
+                )
+            return await asyncio.wait_for(coro, timeout=self._beta_request_timeout())
+        except asyncio.TimeoutError:
+            return APIResponse(
+                success=False, data=None,
+                message=f"Beta key request timed out after {self._beta_request_timeout():.0f}s",
+                status_code=408, metadata={}
+            )
+        except Exception as e:
+            logger.error(f"Beta key API call failed: {e}")
+            return APIResponse(
+                success=False, data=None, message=str(e),
+                status_code=500, metadata={}
+            )
+        finally:
+            try:
+                await client.close()
+            except Exception as e:
+                logger.debug(f"Error closing beta client: {e}")
+
+    def _run_beta_operation(self, operation: str, on_success, **kwargs) -> None:
+        """Run a beta-key backend call on a worker thread.
+
+        `on_success` is invoked on the GUI thread with the resulting
+        APIResponse.
+        """
+        self._stop_beta_worker()
+
+        thread = QThread()
+        worker = AsyncWorker(self._beta_api_call, operation, **kwargs)
+        worker.moveToThread(thread)
+
+        def cleanup():
+            self._beta_worker_thread = None
+            self._beta_worker = None
+            try:
+                thread.quit()
+                if not thread.wait(2000):
+                    # The worker is stuck: keep a reference so the QThread is
+                    # never destroyed while it is still running.
+                    _LINGERING_THREADS.append(thread)
+            except RuntimeError:
+                pass
+
+        def handle_success(response):
+            cleanup()
+            try:
+                on_success(response)
+            except Exception as e:
+                logger.error(f"Beta key handler failed: {e}", exc_info=True)
+                self._notify("Beta Keys Error", str(e), level="critical")
+
+        def handle_error(err):
+            cleanup()
+            self._notify("Beta Keys Error", f"Error: {err}", level="critical")
+
+        worker.finished.connect(
+            handle_success, Qt.ConnectionType.QueuedConnection
+        )
+        worker.error.connect(
+            handle_error, Qt.ConnectionType.QueuedConnection
+        )
+        thread.started.connect(worker.run)
+        thread.finished.connect(cleanup)
+
+        # Keep the thread and the worker referenced before the thread is
+        # started: otherwise the worker could be garbage collected while its
+        # thread is still starting up and the `started` -> `run` connection
+        # would die with it.
+        self._beta_worker_thread = thread
+        self._beta_worker = worker
+        thread.start()
+
+    def _stop_beta_worker(self) -> None:
+        """Stop a running beta-key worker thread, if any."""
+        thread = getattr(self, '_beta_worker_thread', None)
+        if thread is None:
+            return
+        try:
+            if thread.isRunning():
+                thread.quit()
+                if not thread.wait(2000):
+                    # The worker is stuck in a blocking call: keep a reference
+                    # so the QThread is never destroyed while it is running.
+                    _LINGERING_THREADS.append(thread)
+        except RuntimeError:
+            pass
+        self._beta_worker_thread = None
+        self._beta_worker = None
+
+    def _selected_beta_key(self):
+        """Return (row, key, key_id) for the selected table row, or (None, None, None)."""
+        row = self.beta_keys_table.currentRow()
+        if row < 0:
+            return None, None, None
+        key_item = self.beta_keys_table.item(row, 0)
+        id_item = self.beta_keys_table.item(row, 1)
+        key = key_item.text().strip() if key_item is not None else ''
+        key_id = None
+        if id_item is not None:
+            try:
+                key_id = int(id_item.text())
+            except (TypeError, ValueError):
+                key_id = None
+        return row, key, key_id
 
     @staticmethod
-    def _beta_extract_keys(result) -> List[dict]:
-        """Pull the keys array out of an engine response.
+    def _parse_beta_key_response(response: APIResponse) -> List[str]:
+        """Extract the plaintext beta keys from a /beta/generate response."""
+        keys: List[str] = []
+        if response is None or not isinstance(response.data, dict):
+            return keys
 
-        The engine wraps results as {"status":..,"data":{"count":N,"keys":[...]}}.
-        CoreAI3DClient._make_request stores the whole parsed JSON in result.data,
-        so the inner payload lives under result.data['data'].
-        """
-        payload = result.data.get('data') if isinstance(result.data, dict) else None
-        if isinstance(payload, dict) and 'keys' in payload:
-            return payload['keys'] or []
-        if isinstance(payload, list):
-            return payload
+        data = response.data
+        candidates: List[Any] = []
+        for field in ('keys', 'beta_keys', 'key_list'):
+            value = data.get(field)
+            if isinstance(value, list):
+                candidates.extend(value)
+        for field in ('key', 'beta_key', 'api_key'):
+            value = data.get(field)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value)
+
+        for item in candidates:
+            if isinstance(item, str):
+                if item.strip():
+                    keys.append(item.strip())
+            elif isinstance(item, dict):
+                for field in ('key', 'beta_key', 'api_key', 'value'):
+                    value = item.get(field)
+                    if isinstance(value, str) and value.strip():
+                        keys.append(value.strip())
+                        break
+        return keys
+
+    @staticmethod
+    def _parse_beta_list_response(response: APIResponse) -> List[Dict[str, Any]]:
+        """Extract the key records from a /beta/list response."""
+        if response is None or not isinstance(response.data, dict):
+            return []
+        data = response.data
+        for field in ('keys', 'beta_keys', 'items', 'data'):
+            value = data.get(field)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
         return []
 
-    def _beta_populate_table(self):
-        self.beta_keys_table.setRowCount(0)
-        for key in self._beta_generated_keys:
-            row = self.beta_keys_table.rowCount()
-            self.beta_keys_table.insertRow(row)
-            self.beta_keys_table.setItem(row, 0, QTableWidgetItem(str(key.get('key', ''))))
-            self.beta_keys_table.setItem(row, 1, QTableWidgetItem(str(key.get('id', ''))))
-            self.beta_keys_table.setItem(row, 2, QTableWidgetItem(str(key.get('max_uses', 0))))
-            self.beta_keys_table.setItem(row, 3, QTableWidgetItem(str(key.get('expires_at') or '')))
-            active = key.get('is_active', True) if key.get('is_active', True) is not None else True
-            self.beta_keys_table.setItem(row, 4, QTableWidgetItem('Yes' if active else 'No'))
+    @staticmethod
+    def _beta_key_instructions(key: str, description: str = "") -> str:
+        """Build the human readable instructions shipped with a beta key."""
+        lines = [
+            "CoreAI3D Beta Access Key",
+            "",
+            f"Key: {key}",
+        ]
+        if description:
+            lines.append(f"Description: {description}")
+        lines += [
+            "",
+            "How to use this key:",
+            "  1. Set the key as COREAI3D_API_KEY in your environment:",
+            "       export COREAI3D_API_KEY=\"<key>\"",
+            "  2. Point the client at your CoreAI3D backend:",
+            "       export COREAI3D_API_URL=\"http://127.0.0.1:1906/api/v1\"",
+            "  3. Use it as a bearer token:",
+            "       curl -H \"Authorization: Bearer <key>\" $COREAI3D_API_URL/health",
+            "",
+            "This key is shown only once - store it somewhere safe.",
+        ]
+        return "\n".join(lines)
 
-    def _beta_merge_keys(self, keys: List[dict]):
-        for key in keys:
-            if not any(existing.get('id') == key.get('id') for existing in self._beta_generated_keys):
-                self._beta_generated_keys.append(dict(key))
-        self._beta_populate_table()
+    def _populate_beta_keys_table(self, records: List[Dict[str, Any]]) -> None:
+        """Fill the beta keys table from the records returned by the backend."""
+        table = self.beta_keys_table
+        table.setRowCount(0)
+        for record in records:
+            row = table.rowCount()
+            table.insertRow(row)
 
-    @qasync.asyncSlot()
-    async def generate_beta_email_key(self):
-        """Generate a single beta key tied to a recipient email."""
-        if not self._beta_client_ready():
+            key = str(record.get('key') or record.get('beta_key') or
+                      record.get('api_key') or record.get('hash') or '')
+            key_id = record.get('id', record.get('key_id', ''))
+            max_uses = record.get('max_uses', record.get('maxUses', ''))
+            expires_at = record.get('expires_at', record.get('expiresAt', ''))
+            active = record.get('active', record.get('enabled', ''))
+            email = record.get('email', '')
+
+            values = [
+                str(key),
+                str(key_id),
+                '' if max_uses is None else str(max_uses),
+                str(expires_at or ''),
+                self._format_beta_active(active),
+                str(email or ''),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setToolTip(value)
+                table.setItem(row, column, item)
+
+    @staticmethod
+    def _format_beta_active(value: Any) -> str:
+        """Render the 'active' column consistently."""
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        if value is None or value == '':
+            return ""
+        return str(value)
+
+    # ------------------------------------------------------------------
+    # Beta Key validation & activation
+    # ------------------------------------------------------------------
+    def on_validate_beta_key_clicked(self):
+        """Validate the beta key entered by the user against the backend."""
+        api_key = self.beta_validate_input.text().strip()
+        if not api_key:
+            self._notify(
+                "Key Required",
+                "Enter a beta key to validate.",
+                level="warning"
+            )
             return
 
+        if getattr(self, '_beta_validating', False):
+            self.status_bar.showMessage(
+                "Beta key validation already in progress", 3000
+            )
+            return
+
+        self._beta_validating = True
+        self._beta_validating_key = api_key
+        self.beta_validate_btn.setEnabled(False)
+        self.beta_status_label.setText("")
+        self.status_bar.showMessage("Validating beta key...")
+
+        self._run_beta_operation(
+            'validate',
+            self._on_beta_key_validated,
+            api_key=api_key,
+        )
+
+    def on_clear_beta_key_clicked(self):
+        """Clear the beta key input field and status."""
+        self.beta_validate_input.clear()
+        self.beta_status_label.setText("")
+        self.status_bar.showMessage("Cleared", 2000)
+
+    def _on_beta_key_validated(self, response: APIResponse) -> None:
+        """Handle the validation result on the GUI thread.
+
+        Cleanup of the worker thread is already performed by
+        :meth:`_run_beta_operation` before this callback runs.
+        """
+        self._beta_validating = False
+        self.beta_validate_btn.setEnabled(True)
+
+        if not response.success:
+            self._set_beta_status(
+                f"Validation unavailable: {self._beta_error_text(response)}",
+                "error",
+            )
+            self.status_bar.showMessage(
+                "Beta key validation failed", 3000
+            )
+            return
+
+        data = response.data or {}
+        valid = data.get('valid', False)
+
+        if valid:
+            self._set_beta_status(
+                "✓ Beta key is valid and active.",
+                "success",
+            )
+            self.status_bar.showMessage(
+                "Beta key validated successfully", 3000
+            )
+            self._notify("Beta Key Valid", "The beta key is valid and active.")
+            # Persist the key so its status can be re-checked on next launch.
+            self._persist_beta_key(self._beta_validating_key)
+        else:
+            self._set_beta_status(
+                "✗ Beta key is invalid, expired or revoked.",
+                "error",
+            )
+            self.status_bar.showMessage(
+                "Beta key is not valid", 3000
+            )
+            self._notify(
+                "Beta Key Invalid",
+                "The beta key is invalid, expired or revoked.",
+                level="warning",
+            )
+
+    def _set_beta_status(self, message: str, level: str = "info") -> None:
+        """Update the validation status label with level-appropriate styling."""
+        colors = {
+            "success": "#dcfce7",
+            "error": "#fee2e2",
+            "info": "#eff6ff",
+            "warning": "#fef9c3",
+        }
+        text_colors = {
+            "success": "#166534",
+            "error": "#991b1b",
+            "info": "#1e40af",
+            "warning": "#854d0e",
+        }
+        bg = colors.get(level, colors["info"])
+        fg = text_colors.get(level, text_colors["info"])
+        self.beta_status_label.setText(message)
+        self.beta_status_label.setStyleSheet(
+            f"QLabel {{ padding: 8px; border-radius: 4px; "
+            f"background-color: {bg}; color: {fg}; }}"
+        )
+
+    def _persist_beta_key(self, api_key: str) -> None:
+        """Persist the validated beta key in QSettings for next launch."""
+        try:
+            settings = QSettings("CoreAI3D", "Dashboard")
+            settings.setValue("beta_key", api_key)
+            settings.sync()
+            self.config.beta_key = api_key
+        except Exception as e:
+            logger.debug(f"Could not persist beta key: {e}")
+
+    def _restore_beta_key_state(self) -> None:
+        """Restore a previously persisted beta key and re-validate on launch.
+
+        The key is loaded into the input field (masked) and silently validated
+        against the backend so the status label reflects the real activation
+        state after a reload.
+        """
+        try:
+            settings = QSettings("CoreAI3D", "Dashboard")
+            api_key = settings.value("beta_key", "", type=str)
+        except Exception:
+            api_key = ""
+
+        if not api_key:
+            return
+
+        self.beta_validate_input.setText(api_key)
+        self.beta_status_label.setText("Re-checking key status on backend…")
+        self.beta_status_label.setStyleSheet(
+            "QLabel { padding: 8px; border-radius: 4px; "
+            "background-color: #eff6ff; color: #1e40af; }"
+        )
+
+        # Defer the actual validation until the UI is fully shown and the
+        # backend client is available.
+        QTimer.singleShot(1000, lambda: self._revalidate_persisted_beta_key(api_key))
+
+    def _revalidate_persisted_beta_key(self, api_key: str) -> None:
+        """Re-validate a persisted beta key on startup."""
+        if getattr(self, '_beta_validating', False):
+            return
+
+        self._beta_validating = True
+        self.beta_validate_btn.setEnabled(False)
+
+        self._run_beta_operation(
+            'validate',
+            self._on_beta_key_validated_restored,
+            api_key=api_key,
+        )
+
+    def _on_beta_key_validated_restored(self, response: APIResponse) -> None:
+        """Handle the re-validation result from startup restore."""
+        self._beta_validating = False
+        self.beta_validate_btn.setEnabled(True)
+
+        if not response.success:
+            self._set_beta_status(
+                "Could not re-check key status: backend unavailable.",
+                "warning",
+            )
+            self.status_bar.showMessage(
+                "Beta key status re-check failed (backend unreachable)", 4000
+            )
+            return
+
+        data = response.data or {}
+        valid = data.get('valid', False)
+
+        if valid:
+            self._set_beta_status(
+                "✓ Beta key is valid and active.",
+                "success",
+            )
+        else:
+            self._set_beta_status(
+                "✗ Beta key is invalid, expired or revoked.",
+                "error",
+            )
+
+    # ------------------------------------------------------------------
+    # Beta Keys handlers
+    # ------------------------------------------------------------------
+    def on_generate_email_key_clicked(self):
+        """Generate a single beta key bound to the recipient email."""
         email = self.beta_email_input.text().strip()
         if not email:
-            QMessageBox.warning(self, "Missing Email", "Enter a recipient email first.")
+            self._notify(
+                "Email Required",
+                "Enter the recipient email address before generating a key.",
+                level="warning"
+            )
             return
 
-        self.beta_email_generate_btn.setEnabled(False)
-        try:
-            result = await self.client.generate_beta_keys(
-                count=1,
-                description=self.beta_email_desc_input.text().strip() or '',
-                email=email,
+        if "@" not in email or email.startswith("@") or email.endswith("@"):
+            self._notify(
+                "Invalid Email",
+                f"'{email}' is not a valid email address.",
+                level="warning"
             )
-            if not result.success:
-                QMessageBox.warning(self, "Error", f"Failed to generate email key: {self._connection_error_message(result)}")
-                return
-            keys = self._beta_extract_keys(result)
-            if not keys:
-                QMessageBox.warning(self, "Error", "No key returned. Check the engine logs.")
-                return
-            self._beta_merge_keys(keys)
-            key = keys[0]
-            QMessageBox.information(
-                self, "Email Key Generated",
-                f"Beta key {key.get('key')} generated for {email}.\n"
-                "It is shown once; only the hash is stored afterwards."
-            )
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to generate email key: {e}")
-        finally:
-            self.beta_email_generate_btn.setEnabled(True)
-
-    @qasync.asyncSlot()
-    async def generate_beta_keys(self):
-        """Generate one or more beta keys."""
-        if not self._beta_client_ready():
             return
 
+        description = self.beta_email_desc_input.text().strip()
+        self.status_bar.showMessage("Generating beta key...")
+        self._run_beta_operation(
+            'generate',
+            self._on_email_key_generated,
+            count=1,
+            email=email,
+            description=description,
+        )
+
+    def _on_email_key_generated(self, response: APIResponse) -> None:
+        """Handle the result of the 'Generate Email Key' request."""
+        if not response.success:
+            self._notify(
+                "Beta Key Generation Failed",
+                self._beta_error_text(response),
+                level="critical"
+            )
+            return
+
+        keys = self._parse_beta_key_response(response)
+        if not keys:
+            self._notify(
+                "Beta Key Generation",
+                "The key was generated but the server response did not contain it.",
+                level="warning"
+            )
+            self.on_refresh_beta_keys_clicked()
+            return
+
+        key = keys[0]
+        email = self.beta_email_input.text().strip()
+        self._notify(
+            "Beta Key Generated",
+            f"Beta key for {email} generated successfully.",
+        )
+
+        # Sending the mail is a blocking network call: run it on a worker.
+        self._run_email_send(
+            email, key, self.beta_email_desc_input.text().strip()
+        )
+
+        self.on_refresh_beta_keys_clicked()
+
+    def on_generate_beta_keys_clicked(self):
+        """Generate a batch of beta keys."""
         count = self.beta_count_spin.value()
-        self.beta_generate_btn.setEnabled(False)
-        try:
-            result = await self.client.generate_beta_keys(
-                count=count,
-                description=self.beta_desc_input.text().strip() or '',
+        description = self.beta_desc_input.text().strip()
+        self.status_bar.showMessage(f"Generating {count} beta key(s)...")
+        self._run_beta_operation(
+            'generate',
+            self._on_beta_keys_generated,
+            count=count,
+            description=description,
+        )
+
+    def _on_beta_keys_generated(self, response: APIResponse) -> None:
+        """Handle the result of the 'Generate Beta Keys' request."""
+        if not response.success:
+            self._notify(
+                "Beta Key Generation Failed",
+                self._beta_error_text(response),
+                level="critical"
             )
-            if not result.success:
-                QMessageBox.warning(self, "Error", f"Failed to generate beta keys: {self._connection_error_message(result)}")
-                return
-            keys = self._beta_extract_keys(result)
-            if not keys:
-                QMessageBox.warning(self, "Error", "No keys returned. Check the engine logs.")
-                return
-            self._beta_merge_keys(keys)
-            QMessageBox.information(
-                self, "Beta Keys Generated",
-                f"Generated {len(keys)} beta key(s). Each plaintext is shown once; "
-                "only hashes are stored afterwards."
+            return
+
+        keys = self._parse_beta_key_response(response)
+        if keys:
+            self._notify(
+                "Beta Keys Generated",
+                f"Generated {len(keys)} beta key(s)."
+            )
+            self._copy_to_clipboard(keys[0], "First generated beta key copied to clipboard")
+        else:
+            self._notify(
+                "Beta Keys Generated",
+                "The keys were generated but the server response did not contain them."
+            )
+
+        self.on_refresh_beta_keys_clicked()
+
+    def on_refresh_beta_keys_clicked(self):
+        """Reload the list of beta keys from the backend."""
+        self.status_bar.showMessage("Refreshing beta keys...")
+        self._run_beta_operation('list', self._on_beta_keys_listed)
+
+    def _on_beta_keys_listed(self, response: APIResponse) -> None:
+        """Handle the result of the /beta/list request."""
+        if not response.success:
+            self._notify(
+                "Beta Keys Unavailable",
+                self._beta_error_text(response),
+                level="warning"
+            )
+            return
+
+        records = self._parse_beta_list_response(response)
+        self._populate_beta_keys_table(records)
+        self.status_bar.showMessage(f"{len(records)} beta key(s) loaded", 3000)
+
+    def on_copy_beta_key_clicked(self):
+        """Copy the selected beta key to the clipboard."""
+        _row, key, _key_id = self._selected_beta_key()
+        if not key:
+            self._notify(
+                "No Key Selected",
+                "Select a beta key in the table first.",
+                level="warning"
+            )
+            return
+        self._copy_to_clipboard(key, "Beta key copied to clipboard")
+
+    def on_revoke_beta_key_clicked(self):
+        """Revoke (disable) the selected beta key on the backend."""
+        _row, _key, key_id = self._selected_beta_key()
+        if key_id is None:
+            self._notify(
+                "No Key Selected",
+                "Select a beta key in the table first.",
+                level="warning"
+            )
+            return
+
+        self.status_bar.showMessage("Revoking beta key...")
+        self._run_beta_operation(
+            'toggle',
+            self._on_beta_key_revoked,
+            key_id=key_id,
+            enable=False,
+        )
+
+    def _on_beta_key_revoked(self, response: APIResponse) -> None:
+        """Handle the result of the /beta/toggle request."""
+        if not response.success:
+            self._notify(
+                "Revoke Failed",
+                self._beta_error_text(response),
+                level="critical"
+            )
+            return
+
+        self._notify("Beta Key Revoked", "The beta key was revoked.")
+        self.on_refresh_beta_keys_clicked()
+
+    def on_copy_instructions_clicked(self):
+        """Copy the selected beta key together with the usage instructions."""
+        _row, key, _key_id = self._selected_beta_key()
+        if not key:
+            self._notify(
+                "No Key Selected",
+                "Select a beta key in the table first.",
+                level="warning"
+            )
+            return
+
+        description = self.beta_desc_input.text().strip()
+        instructions = self._beta_key_instructions(key, description)
+        self._copy_to_clipboard(instructions, "Beta key and instructions copied to clipboard")
+
+    def on_send_beta_key_clicked(self):
+        """Email the selected beta key to its recipient."""
+        _row, key, _key_id = self._selected_beta_key()
+        if not key:
+            self._notify(
+                "No Key Selected",
+                "Select a beta key in the table first.",
+                level="warning"
+            )
+            return
+
+        recipient = self.beta_email_input.text().strip()
+        if not recipient:
+            self._ask_for_email(
+                lambda email: self._send_beta_key_to(email, key)
+            )
+            return
+
+        self._send_beta_key_to(recipient, key)
+
+    def _send_beta_key_to(self, recipient: str, key: str) -> None:
+        """Email `key` to `recipient` and report the outcome."""
+        recipient = (recipient or "").strip()
+        if not recipient:
+            self._notify(
+                "Email Required",
+                "Enter the recipient email address and try again.",
+                level="warning"
+            )
+            return
+
+        self.beta_email_input.setText(recipient)
+        description = self.beta_email_desc_input.text().strip()
+        self.status_bar.showMessage(f"Sending beta key to {recipient}...")
+        self._run_email_send(recipient, key, description)
+
+    def _ask_for_email(self, on_entered) -> None:
+        """Prompt for a recipient address without blocking the GUI thread."""
+        try:
+            self._prompt_text(
+                "Send Beta Key", "Recipient email address:",
+                on_entered, default_text=self.beta_email_input.text().strip(),
             )
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to generate beta keys: {e}")
-        finally:
-            self.beta_generate_btn.setEnabled(True)
+            logger.debug(f"Email prompt failed: {e}")
 
-    @qasync.asyncSlot()
-    async def refresh_beta_keys(self):
-        """List stored beta keys from /beta/list and merge any new ones."""
-        if not self._beta_client_ready():
-            return
-
-        self.beta_refresh_btn.setEnabled(False)
+    def _copy_to_clipboard(self, text: str, message: str) -> None:
+        """Copy `text` to the system clipboard and confirm it."""
         try:
-            result = await self.client.list_beta_keys()
-            if not result.success:
-                # The engine's /beta/list currently 500s (it JSON-serializes a
-                # raw binary hash column as UTF-8). Fall back to the session list
-                # so the table stays useful until that is fixed upstream.
-                QMessageBox.warning(
-                    self, "List Unavailable",
-                    f"Could not list stored keys: {self._connection_error_message(result)}\n\n"
-                    "Showing keys generated in this session."
-                )
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                self._notify("Clipboard Unavailable", "Could not access the clipboard.",
+                             level="warning")
                 return
-            keys = self._beta_extract_keys(result)
-            self._beta_merge_keys(keys)
-            self.status_bar.showMessage(f"Loaded {len(keys)} stored beta key(s)", 3000)
+            clipboard.setText(text)
+            self.status_bar.showMessage(message, 3000)
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to refresh beta keys: {e}")
-        finally:
-            self.beta_refresh_btn.setEnabled(True)
+            logger.error(f"Clipboard copy failed: {e}")
+            self._notify("Clipboard Error", str(e), level="warning")
 
-    def copy_beta_key(self):
-        """Copy the selected key's plaintext to the clipboard."""
-        row = self.beta_keys_table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "No Selection", "Select a key row to copy.")
-            return
-        item = self.beta_keys_table.item(row, 0)
-        if not item or not item.text():
-            QMessageBox.warning(self, "No Plaintext", "The plaintext is not available for stored keys (shown once at generation).")
-            return
-        cb = QApplication.clipboard()
-        cb.setText(item.text())
-        self.status_bar.showMessage("Beta key copied to clipboard", 3000)
-
-    @qasync.asyncSlot()
-    async def revoke_beta_key(self):
-        """Disable (revoke) the selected beta key via /beta/toggle."""
-        if not self._beta_client_ready():
-            return
-
-        row = self.beta_keys_table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "No Selection", "Select a key row to revoke.")
-            return
-        id_item = self.beta_keys_table.item(row, 1)
-        id_str = id_item.text() if id_item else ''
-        try:
-            key_id = int(id_str)
-        except ValueError:
-            QMessageBox.warning(self, "No ID", "Selected row has no key id to revoke.")
-            return
-
-        if QMessageBox.question(
-            self, "Revoke Key",
-            f"Revoke beta key ID {key_id}? This disables it and cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
-            return
-
-        self.beta_revoke_btn.setEnabled(False)
-        try:
-            result = await self.client.toggle_beta_key(key_id, enable=False)
-            if not result.success:
-                QMessageBox.warning(self, "Error", f"Failed to revoke key: {self._connection_error_message(result)}")
-                return
-            # Match by id (not row index) so a successful list merge that reorders
-            # or augments the table still updates the right model object.
-            for key in self._beta_generated_keys:
-                if key.get('id') == key_id:
-                    key['is_active'] = False
+    @staticmethod
+    def _beta_error_text(response: APIResponse) -> str:
+        """Build a readable error message from a failed API response."""
+        if response is None:
+            return "No response from the backend."
+        message = (getattr(response, 'message', '') or '').strip()
+        data = getattr(response, 'data', None)
+        detail = ''
+        if isinstance(data, dict):
+            for field in ('error', 'detail', 'reason'):
+                value = data.get(field)
+                if isinstance(value, str) and value.strip():
+                    detail = value.strip()
                     break
-            self._beta_populate_table()
-            self.status_bar.showMessage(f"Beta key {key_id} revoked", 3000)
+        status = getattr(response, 'status_code', 0)
+        parts = [part for part in (message, detail) if part]
+        if not parts:
+            parts = [f"The backend returned HTTP {status}."]
+        return "\n".join(parts)
+
+    @staticmethod
+    def _api_error_text(response: APIResponse) -> str:
+        """Build a readable error message from a failed API response."""
+        return CoreAI3DDashboard._beta_error_text(response)
+
+    def _run_email_send(self, recipient: str, key: str, description: str = "") -> None:
+        """Send a beta key email on a worker thread.
+
+        Resend/SMTP calls block, so they never run on the GUI thread.
+        """
+        self._stop_email_worker()
+
+        thread = QThread()
+        worker = AsyncWorker(
+            _call_blocking, self._send_beta_key_email, recipient, key, description
+        )
+        worker.moveToThread(thread)
+
+        def cleanup():
+            self._email_worker_thread = None
+            self._email_worker = None
+            try:
+                thread.quit()
+                if not thread.wait(2000):
+                    _LINGERING_THREADS.append(thread)
+            except RuntimeError:
+                pass
+
+        def handle_success(result):
+            cleanup()
+            sent, message = result if isinstance(result, tuple) else (False, str(result))
+            if sent:
+                self._notify("Beta Key Emailed", message)
+            else:
+                self._notify("Email Not Sent", message, level="warning")
+
+        def handle_error(err):
+            cleanup()
+            self._notify("Email Not Sent", f"Error: {err}", level="critical")
+
+        worker.finished.connect(handle_success, Qt.ConnectionType.QueuedConnection)
+        worker.error.connect(handle_error, Qt.ConnectionType.QueuedConnection)
+        thread.started.connect(worker.run)
+        thread.finished.connect(cleanup)
+
+        # Keep the thread and the worker referenced before the thread is
+        # started: otherwise the worker could be garbage collected while its
+        # thread is still starting up and the `started` -> `run` connection
+        # would die with it.
+        self._email_worker_thread = thread
+        self._email_worker = worker
+        thread.start()
+
+    def _stop_email_worker(self) -> None:
+        """Stop a running email worker thread, if any."""
+        thread = getattr(self, '_email_worker_thread', None)
+        if thread is None:
+            return
+        try:
+            if thread.isRunning():
+                thread.quit()
+                if not thread.wait(2000):
+                    _LINGERING_THREADS.append(thread)
+        except RuntimeError:
+            pass
+        self._email_worker_thread = None
+        self._email_worker = None
+
+    def _send_beta_key_email(self, recipient: str, key: str, description: str = "") -> Tuple[bool, str]:
+        """Send `key` to `recipient`.
+
+        The Resend API is used when it is configured; otherwise plain SMTP is
+        tried (SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD).  When the
+        Resend delivery fails and SMTP is configured, SMTP is used as a
+        fallback so a single broken transport does not lose the key.
+
+        Returns (sent, message).
+        """
+        resend_key = (self.config.resend_api_key or
+                      os.environ.get('RESEND_API_KEY', '')).strip()
+        smtp_configured = bool(os.environ.get('SMTP_HOST', '').strip())
+
+        if resend_key:
+            sent, message = self._send_beta_key_email_resend(
+                recipient, key, description)
+            if sent:
+                return sent, message
+            if smtp_configured:
+                logger.warning(
+                    f"Resend delivery failed ({message}); falling back to SMTP")
+                return self._send_beta_key_email_smtp(recipient, key, description)
+            return False, message
+
+        if smtp_configured:
+            return self._send_beta_key_email_smtp(recipient, key, description)
+
+        return False, (
+            "Email delivery is not configured. Set RESEND_API_KEY (or the "
+            "Resend API Key field in Settings), or SMTP_HOST/SMTP_PORT/"
+            "SMTP_USER/SMTP_PASSWORD, to enable it."
+        )
+
+    def _send_beta_key_email_resend(self, recipient: str, key: str,
+                                    description: str = "") -> Tuple[bool, str]:
+        """Send a beta key through the Resend REST API.
+
+        The request is made with the standard library so the worker thread
+        needs neither an extra dependency nor a running event loop.
+        """
+        import json
+        import urllib.error
+        import urllib.request
+
+        resend_key = (self.config.resend_api_key or
+                      os.environ.get('RESEND_API_KEY', '')).strip()
+        from_email = (self.config.resend_from_email or
+                      os.environ.get('RESEND_FROM_EMAIL', '')).strip()
+
+        if not from_email:
+            from_email = 'noreply@coreai3d.local'
+
+        payload = {
+            "from": from_email,
+            "to": [recipient],
+            "subject": "Your CoreAI3D beta access key",
+            "text": self._beta_key_instructions(key, description),
+        }
+
+        request = urllib.request.Request(
+            self.RESEND_API_URL,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={
+                "Authorization": f"Bearer {resend_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                response.read()
+        except urllib.error.HTTPError as e:
+            try:
+                detail = e.read().decode('utf-8', 'replace').strip()
+            except Exception:
+                detail = ''
+            logger.error(f"Resend API rejected the beta key email: {e} {detail}")
+            return False, f"Resend API error {e.code}" + (f": {detail}" if detail else ".")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to revoke key: {e}")
-        finally:
-            self.beta_revoke_btn.setEnabled(True)
+            logger.error(f"Failed to send beta key email: {e}")
+            return False, f"Failed to send the email: {e}"
+
+        return True, f"Beta key sent to {recipient}."
+
+    def _send_beta_key_email_smtp(self, recipient: str, key: str,
+                                  description: str = "") -> Tuple[bool, str]:
+        """Send a beta key through a plain SMTP server."""
+        import smtplib
+        from email.message import EmailMessage
+
+        host = os.environ.get('SMTP_HOST', '').strip()
+        try:
+            port = int(os.environ.get('SMTP_PORT', '587') or 587)
+        except (TypeError, ValueError):
+            port = 587
+        user = os.environ.get('SMTP_USER', '').strip()
+        password = os.environ.get('SMTP_PASSWORD', '').strip()
+        sender = (os.environ.get('SMTP_FROM', '').strip() or
+                  self.config.resend_from_email or user or
+                  'noreply@coreai3d.local')
+
+        message = EmailMessage()
+        message['Subject'] = 'Your CoreAI3D beta access key'
+        message['From'] = sender
+        message['To'] = recipient
+        message.set_content(self._beta_key_instructions(key, description))
+
+        try:
+            with smtplib.SMTP(host, port, timeout=30) as server:
+                try:
+                    server.starttls()
+                except smtplib.SMTPException:
+                    logger.debug("SMTP server does not support STARTTLS")
+                if user and password:
+                    server.login(user, password)
+                server.send_message(message)
+        except Exception as e:
+            logger.error(f"Failed to send beta key email via SMTP: {e}")
+            return False, f"Failed to send the email via SMTP: {e}"
+
+        return True, f"Beta key sent to {recipient}."
 
     def setup_connections(self):
         """Setup signal-slot connections"""
@@ -5230,12 +6742,12 @@ if __name__ == "__main__":
     def setup_timers(self):
         """Setup periodic update timers"""
         # System metrics timer (every 2 seconds)
-        self.metrics_timer = QTimer()
+        self.metrics_timer = self._create_gui_timer()
         self.metrics_timer.timeout.connect(self.update_system_metrics)
         self.metrics_timer.start(2000)
 
         # Health check timer (every 30 seconds)
-        self.health_timer = QTimer()
+        self.health_timer = self._create_gui_timer()
         self.health_timer.timeout.connect(self.check_system_health)
         self.health_timer.start(30000)
 
@@ -5341,7 +6853,7 @@ if __name__ == "__main__":
             logger.info(f"Passing API key to client: configured={bool(api_key)}, length={len(api_key)}")
 
             if not api_key:
-                logger.warning("No API key configured - client will work in offline mode only")
+                logger.debug("No API key configured - client will work in offline mode only")
             elif len(api_key) < 10:
                 logger.warning(f"API key is very short ({len(api_key)} chars) - this may cause authentication issues")
 
@@ -5458,7 +6970,7 @@ if __name__ == "__main__":
     def on_sandbox_error(self, title: str, message: str):
         """Handle sandbox error event"""
         self.sandbox_logs.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR: {message}")
-        QMessageBox.warning(self, title, message)
+        self._notify(title, message, level="warning")
         self.status_bar.showMessage(f"Docker error: {title}")
 
     def on_dataset_created(self, name: str, message: str):
@@ -5635,11 +7147,13 @@ if __name__ == "__main__":
             debug_output.appendPlainText("")
             debug_output.appendPlainText("Use the buttons above to test different connection aspects.")
 
-            debug_dialog.exec()
+            # Shown window-modal (not exec()) so the dashboard event loop
+            # keeps running while the tool is open.
+            debug_dialog.open()
 
         except Exception as e:
             logger.error(f"Error in manual connection debug: {str(e)}")
-            QMessageBox.warning(self, "Debug Error", f"Failed to open debug tool: {str(e)}")
+            self._notify("Debug Error", f"Failed to open debug tool: {str(e)}", level="warning")
 
     def _test_network_connectivity(self, output_widget: QPlainTextEdit, progress_bar: QProgressBar):
         """Test basic network connectivity"""
@@ -5782,12 +7296,9 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"Unexpected error during connection test: {str(e)}", exc_info=True)
             self.status_bar.showMessage("Connection test error")
-            QMessageBox.critical(
-                self, "Connection Error",
-                f"✗ Unexpected error during connection test!\n\n"
+            self._notify("Connection Error", f"✗ Unexpected error during connection test!\n\n"
                 f"Error: {str(e)}\n\n"
-                "Please check the application logs for more details."
-            )
+                "Please check the application logs for more details.", level="critical")
 
     async def _test_connection_async(self):
         """Async part of connection test"""
@@ -5807,37 +7318,29 @@ if __name__ == "__main__":
             result = task.result()
             self.status_bar.showMessage("Connection test completed")
             if result.success:
-                QMessageBox.information(
-                    self, "Connection Test Successful",
-                    "✓ API connection successful!\n\n"
+                self._notify("Connection Test Successful", "✓ API connection successful!\n\n"
                     "The CoreAI3D server is responding correctly.\n"
-                    "All systems are operational."
-                )
+                    "All systems are operational.", level="info")
             else:
                 error_details = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
-                QMessageBox.warning(
-                    self, "Connection Test Failed",
-                    f"✗ API connection failed!\n\n"
+                self._notify("Connection Test Failed", f"✗ API connection failed!\n\n"
                     f"Error: {error_details}\n\n"
                     "Please check:\n"
                     "• Server is running\n"
                     "• Network connectivity\n"
-                    "• API URL configuration"
-                )
+                    "• API URL configuration", level="warning")
         except Exception as e:
             self.status_bar.showMessage("Connection test error")
-            QMessageBox.critical(
-                self, "Connection Error",
-                f"✗ Unexpected error during connection test!\n\n"
+            self._notify("Connection Error", f"✗ Unexpected error during connection test!\n\n"
                 f"Error: {str(e)}\n\n"
-                "Please check the application logs for more details."
-            )
+                "Please check the application logs for more details.", level="critical")
 
     def update_system_metrics(self):
         """Update system metrics display"""
         try:
-            # Get system metrics
-            cpu_percent = psutil.cpu_percent(interval=1)
+            # Get system metrics.  psutil is called with interval=None so the
+            # GUI thread is never blocked while sampling the CPU.
+            cpu_percent = psutil.cpu_percent(interval=None)
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             network = psutil.net_io_counters()
@@ -5934,58 +7437,70 @@ if __name__ == "__main__":
 
     def create_dataset(self):
         """Create new dataset"""
-        name, ok = QInputDialog.getText(self, "New Dataset", "Dataset Name:")
-        if not ok or not name:
+        self._prompt_text("New Dataset", "Dataset Name:", self._on_dataset_name_entered)
+
+    def _on_dataset_name_entered(self, name: str) -> None:
+        """Continue the dataset wizard once the name is known."""
+        name = (name or "").strip()
+        if not name:
             return
+        self._prompt_text(
+            "New Dataset", "Description:",
+            lambda description: self._on_dataset_description_entered(name, description),
+        )
 
-        description, ok = QInputDialog.getText(self, "New Dataset", "Description:")
-        if not ok:
-            description = ""
-
+    def _on_dataset_description_entered(self, name: str, description: str) -> None:
+        """Continue the dataset wizard once the description is known."""
         data_types = ["Images", "Audio", "Video", "Text", "Mixed"]
-        data_type, ok = QInputDialog.getItem(self, "Data Type", "Select data type:", data_types, 0, False)
+        self._prompt_item(
+            "Data Type", "Select data type:", data_types,
+            lambda data_type: self._on_dataset_type_selected(
+                name, description or "", data_type
+            ),
+        )
 
-        if ok:
-            success = self.training_manager.create_dataset(name, description, data_type.lower())
-            if not success:
-                QMessageBox.warning(self, "Error", "Failed to create dataset")
+    def _on_dataset_type_selected(self, name: str, description: str, data_type: str) -> None:
+        """Create the dataset with the collected values."""
+        success = self.training_manager.create_dataset(name, description, data_type.lower())
+        if not success:
+            self._notify("Error", "Failed to create dataset", level="warning")
 
     def delete_dataset(self):
         """Delete selected dataset"""
         current_item = self.dataset_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "No Selection", "Please select a dataset to delete")
+            self._notify("No Selection", "Please select a dataset to delete", level="warning")
             return
 
         dataset_name = current_item.text()
-
-        reply = QMessageBox.question(
-            self, "Delete Dataset",
+        self._confirm(
+            "Delete Dataset",
             f"Are you sure you want to delete dataset '{dataset_name}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            lambda: self._do_delete_dataset(current_item, dataset_name),
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                dataset_path = os.path.join(self.config.data_dir, dataset_name)
-                shutil.rmtree(dataset_path)
+    def _do_delete_dataset(self, current_item, dataset_name: str) -> None:
+        """Remove the confirmed dataset from disk and from the dataset list."""
+        try:
+            dataset_path = os.path.join(self.config.data_dir, dataset_name)
+            shutil.rmtree(dataset_path)
 
-                del self.training_manager.datasets[dataset_name]
-                self.dataset_list.takeItem(self.dataset_list.row(current_item))
+            del self.training_manager.datasets[dataset_name]
+            self.dataset_list.takeItem(self.dataset_list.row(current_item))
 
-                self.dataset_info.clear()
-                self.file_list.clear()
+            self.dataset_info.clear()
+            self.file_list.clear()
 
-                self.status_bar.showMessage(f"Dataset '{dataset_name}' deleted")
+            self.status_bar.showMessage(f"Dataset '{dataset_name}' deleted")
 
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to delete dataset: {str(e)}")
+        except Exception as e:
+            self._notify("Error", f"Failed to delete dataset: {str(e)}", level="warning")
 
     def add_file_to_dataset(self):
         """Add file(s) or directory to selected dataset"""
         current_item = self.dataset_list.currentItem()
         if not current_item:
-            QMessageBox.warning(self, "No Selection", "Please select a dataset first")
+            self._notify("No Selection", "Please select a dataset first", level="warning")
             return
 
         dataset_name = current_item.text()
@@ -6003,19 +7518,20 @@ if __name__ == "__main__":
         dialog.layout().addWidget(select_dir_btn)
 
         # Show dialog and get selected files
-        if dialog.exec():
-            selected_files = dialog.selectedFiles()
-            if selected_files:
-                self._process_selected_files(dataset_name, selected_files)
+        dialog.filesSelected.connect(
+            lambda files: self._process_selected_files(dataset_name, files)
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
 
     def _select_directory_for_dataset(self, dialog, dataset_name):
         """Handle directory selection"""
-        directory = QFileDialog.getExistingDirectory(self, "Select Directory")
-        if directory:
-            # Close the file dialog
+        def on_directory(directory):
             dialog.reject()
-            # Process the directory
-            self._process_selected_directory(dataset_name, directory)
+            if directory:
+                self._process_selected_directory(dataset_name, directory)
+
+        self._select_directory("Select Directory", on_directory)
 
     def _process_selected_files(self, dataset_name, file_paths):
         """Process multiple selected files"""
@@ -6037,10 +7553,9 @@ if __name__ == "__main__":
         if added_count > 0:
             self.status_bar.showMessage(f"Added {added_count} file(s) to {dataset_name}")
             if failed_count > 0:
-                QMessageBox.warning(self, "Partial Success",
-                                  f"Added {added_count} file(s), failed to add {failed_count} file(s)")
+                self._notify("Partial Success", f"Added {added_count} file(s), failed to add {failed_count} file(s)", level="warning")
         else:
-            QMessageBox.warning(self, "Error", "Failed to add any files to dataset")
+            self._notify("Error", "Failed to add any files to dataset", level="warning")
 
     def _process_selected_directory(self, dataset_name, directory_path):
         """Process selected directory recursively"""
@@ -6068,13 +7583,12 @@ if __name__ == "__main__":
             if added_count > 0:
                 self.status_bar.showMessage(f"Added {added_count} file(s) from directory to {dataset_name}")
                 if failed_count > 0:
-                    QMessageBox.warning(self, "Partial Success",
-                                      f"Added {added_count} file(s), failed to add {failed_count} file(s)")
+                    self._notify("Partial Success", f"Added {added_count} file(s), failed to add {failed_count} file(s)", level="warning")
             else:
-                QMessageBox.warning(self, "Error", "No files were added from the selected directory")
+                self._notify("Error", "No files were added from the selected directory", level="warning")
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to process directory: {str(e)}")
+            self._notify("Error", f"Failed to process directory: {str(e)}", level="warning")
 
     def remove_file_from_dataset(self):
         """Remove file from selected dataset"""
@@ -6082,40 +7596,41 @@ if __name__ == "__main__":
         current_file = self.file_list.currentItem()
 
         if not current_dataset or not current_file:
-            QMessageBox.warning(self, "No Selection", "Please select both dataset and file")
+            self._notify("No Selection", "Please select both dataset and file", level="warning")
             return
 
         dataset_name = current_dataset.text()
         file_name = current_file.text()
 
-        reply = QMessageBox.question(
-            self, "Remove File",
+        self._confirm(
+            "Remove File",
             f"Remove '{file_name}' from dataset '{dataset_name}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            lambda: self._do_remove_file_from_dataset(current_file, dataset_name, file_name),
         )
 
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                # Remove from dataset metadata
-                if dataset_name in self.training_manager.datasets:
-                    dataset = self.training_manager.datasets[dataset_name]
-                    dataset['files'] = [
-                        f for f in dataset['files']
-                        if f['name'] != file_name
-                    ]
-                    self.training_manager._save_dataset_metadata(dataset_name)
+    def _do_remove_file_from_dataset(self, current_file, dataset_name: str, file_name: str) -> None:
+        """Remove the confirmed file from the dataset metadata and from disk."""
+        try:
+            # Remove from dataset metadata
+            if dataset_name in self.training_manager.datasets:
+                dataset = self.training_manager.datasets[dataset_name]
+                dataset['files'] = [
+                    f for f in dataset['files']
+                    if f['name'] != file_name
+                ]
+                self.training_manager._save_dataset_metadata(dataset_name)
 
-                # Remove physical file
-                dataset_path = os.path.join(self.config.data_dir, dataset_name)
-                file_path = os.path.join(dataset_path, file_name)
-                if os.path.exists(file_path):
-                    os.remove(file_path)
+            # Remove physical file
+            dataset_path = os.path.join(self.config.data_dir, dataset_name)
+            file_path = os.path.join(dataset_path, file_name)
+            if os.path.exists(file_path):
+                os.remove(file_path)
 
-                self.file_list.takeItem(self.file_list.row(current_file))
-                self.status_bar.showMessage(f"Removed {file_name} from {dataset_name}")
+            self.file_list.takeItem(self.file_list.row(current_file))
+            self.status_bar.showMessage(f"Removed {file_name} from {dataset_name}")
 
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to remove file: {str(e)}")
+        except Exception as e:
+            self._notify("Error", f"Failed to remove file: {str(e)}", level="warning")
 
     def _on_file_learning_mode_changed(self, index):
         """Toggle between directory and file list views"""
@@ -6126,25 +7641,29 @@ if __name__ == "__main__":
 
     def _browse_learning_directory(self):
         """Browse for a directory to learn from"""
-        directory = QFileDialog.getExistingDirectory(self, "Select Directory to Learn From")
-        if directory:
-            self.file_directory_edit.setText(directory)
+        self._select_directory(
+            "Select Directory to Learn From",
+            lambda directory: self.file_directory_edit.setText(directory) if directory else None,
+        )
 
     def _add_learning_files(self):
         """Add files to the learning list"""
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
+        self._select_files(
             "Select Files to Learn From",
-            "",
-            "All Supported Files (*.txt *.json *.xml *.csv *.py *.js *.c *.cpp *.h *.java *.md);;All Files (*)"
+            self._on_learning_files_selected,
+            file_filter="All Supported Files (*.txt *.json *.xml *.csv *.py *.js *.c *.cpp *.h *.java *.md);;All Files (*)",
         )
-        if files:
-            if not hasattr(self, '_learning_files'):
-                self._learning_files = []
-            for f in files:
-                if f not in self._learning_files:
-                    self._learning_files.append(f)
-                    self.file_learning_list.addItem(f)
+
+    def _on_learning_files_selected(self, files) -> None:
+        """Add the picked files to the learning list."""
+        if not files:
+            return
+        if not hasattr(self, '_learning_files'):
+            self._learning_files = []
+        for f in files:
+            if f not in self._learning_files:
+                self._learning_files.append(f)
+                self.file_learning_list.addItem(f)
 
     def _remove_learning_files(self):
         """Remove selected files from the learning list"""
@@ -6160,7 +7679,7 @@ if __name__ == "__main__":
     async def _learn_from_files(self):
         """Learn from selected files or directory"""
         if not self.client:
-            QMessageBox.warning(self, "Error", "Client not connected. Please wait for initialization.")
+            self._notify("Error", "Client not connected. Please wait for initialization.", level="warning")
             return
 
         dataset_name = self.file_dataset_name.text().strip() or "file_learned_dataset"
@@ -6172,7 +7691,7 @@ if __name__ == "__main__":
             if learning_mode == 0:
                 directory = self.file_directory_edit.text().strip()
                 if not directory:
-                    QMessageBox.warning(self, "Error", "Please select a directory first.")
+                    self._notify("Error", "Please select a directory first.", level="warning")
                     return
 
                 self.learn_files_btn.setEnabled(False)
@@ -6185,13 +7704,13 @@ if __name__ == "__main__":
                 )
 
                 if result.success:
-                    QMessageBox.information(self, "Success", f"Successfully learned from directory:\n{directory}")
+                    self._notify("Success", f"Successfully learned from directory:\n{directory}", level="info")
                 else:
-                    QMessageBox.warning(self, "Error", f"Failed to learn from directory: {result.message}")
+                    self._notify("Error", f"Failed to learn from directory: {result.message}", level="warning")
 
             else:
                 if not hasattr(self, '_learning_files') or not self._learning_files:
-                    QMessageBox.warning(self, "Error", "Please add files first.")
+                    self._notify("Error", "Please add files first.", level="warning")
                     return
 
                 self.learn_files_btn.setEnabled(False)
@@ -6204,12 +7723,12 @@ if __name__ == "__main__":
                 )
 
                 if result.success:
-                    QMessageBox.information(self, "Success", f"Successfully learned from {len(self._learning_files)} files")
+                    self._notify("Success", f"Successfully learned from {len(self._learning_files)} files", level="info")
                 else:
-                    QMessageBox.warning(self, "Error", f"Failed to learn from files: {result.message}")
+                    self._notify("Error", f"Failed to learn from files: {result.message}", level="warning")
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Error during learning: {str(e)}")
+            self._notify("Error", f"Error during learning: {str(e)}", level="warning")
         finally:
             self.learn_files_btn.setEnabled(True)
             self.learn_files_btn.setText("Learn from Files")
@@ -6219,7 +7738,7 @@ if __name__ == "__main__":
         """Run selected test with proper qasync async slot pattern"""
         # Prevent multiple test executions simultaneously
         if hasattr(self, '_test_running') and self._test_running:
-            QMessageBox.warning(self, "Test Running", "A test is already running. Please wait for it to complete.")
+            self._notify("Test Running", "A test is already running. Please wait for it to complete.", level="warning")
             return
             
         self._test_running = True
@@ -6227,7 +7746,7 @@ if __name__ == "__main__":
         try:
             if not self.client_initialized:
                 if not self.initialize_client():
-                    QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                    self._notify("Connection Error", "Failed to initialize client", level="warning")
                     return
 
             test_type = self.test_type_combo.currentText()
@@ -6292,14 +7811,14 @@ if __name__ == "__main__":
                     self.add_test_result(result)
 
                 else:
-                    QMessageBox.information(self, "Test", f"Test type '{test_type}' not implemented yet")
+                    self._notify("Test", f"Test type '{test_type}' not implemented yet", level="info")
 
                 # Update status when test completes
                 self.status_bar.showMessage("Test completed")
 
             except Exception as e:
                 logger.error(f"Test execution error: {str(e)}")
-                QMessageBox.warning(self, "Test Error", f"Test execution failed: {str(e)}")
+                self._notify("Test Error", f"Test execution failed: {str(e)}", level="warning")
                 self.status_bar.showMessage("Test failed")
                 
         finally:
@@ -6338,13 +7857,13 @@ if __name__ == "__main__":
 
         success = self.sandbox_manager.start_sandbox(config)
         if not success:
-            QMessageBox.warning(self, "Docker Error", "Failed to start Docker sandbox")
+            self._notify("Docker Error", "Failed to start Docker sandbox", level="warning")
 
     def stop_sandbox(self):
         """Stop Docker sandbox"""
         success = self.sandbox_manager.stop_sandbox()
         if not success:
-            QMessageBox.warning(self, "Docker Error", "Failed to stop Docker sandbox")
+            self._notify("Docker Error", "Failed to stop Docker sandbox", level="warning")
 
     def clear_sandbox_logs(self):
         """Clear sandbox logs"""
@@ -6393,7 +7912,7 @@ if __name__ == "__main__":
         """Run comprehensive API debugging with detailed request/response logging"""
         if not self.client_initialized:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         try:
@@ -6438,7 +7957,7 @@ if __name__ == "__main__":
 
         except Exception as e:
             self.api_debug_output.appendPlainText(f"CRITICAL ERROR: {str(e)}")
-            QMessageBox.warning(self, "Debug Error", f"API debug failed: {str(e)}")
+            self._notify("Debug Error", f"API debug failed: {str(e)}", level="warning")
 
     async def _test_api_connectivity(self):
         """Test basic API connectivity"""
@@ -6568,7 +8087,7 @@ if __name__ == "__main__":
             # Get current debug output
             debug_content = self.api_debug_output.toPlainText()
             if not debug_content:
-                QMessageBox.warning(self, "No Data", "No debug data to export")
+                self._notify("No Data", "No debug data to export", level="warning")
                 return
 
             # Generate filename with timestamp
@@ -6576,21 +8095,28 @@ if __name__ == "__main__":
             default_filename = f"api_debug_log_{timestamp}.txt"
 
             # Get save location
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export API Debug Log",
-                default_filename, "Text files (*.txt);;All files (*.*)"
+            self._select_save_file(
+                "Export API Debug Log",
+                lambda file_path: self._write_debug_log(file_path, debug_content),
+                default_name=default_filename,
+                file_filter="Text files (*.txt);;All files (*.*)",
             )
 
-            if file_path:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(debug_content)
-
-                QMessageBox.information(self, "Export Complete",
-                                      f"API debug log exported to:\n{file_path}")
-                self.status_bar.showMessage(f"Debug log exported to {file_path}")
-
         except Exception as e:
-            QMessageBox.warning(self, "Export Error", f"Failed to export debug log: {str(e)}")
+            self._notify("Export Error", f"Failed to export debug log: {str(e)}", level="warning")
+
+    def _write_debug_log(self, file_path: str, debug_content: str) -> None:
+        """Write the collected API debug output to `file_path`."""
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(debug_content)
+
+            self._notify("Export Complete", f"API debug log exported to:\n{file_path}", level="info")
+            self.status_bar.showMessage(f"Debug log exported to {file_path}")
+        except Exception as e:
+            self._notify("Export Error", f"Failed to export debug log: {str(e)}", level="warning")
 
     def calculate_health_score(self, cpu_percent, memory_percent, disk_percent):
         """Calculate overall system health score (0-100)"""
@@ -7053,22 +8579,22 @@ if __name__ == "__main__":
 
         except Exception as e:
             self.sandbox_logs.appendPlainText(f"CRITICAL ERROR: {str(e)}")
-            QMessageBox.warning(self, "Debug Error", f"System debug failed: {str(e)}")
+            self._notify("Debug Error", f"System debug failed: {str(e)}", level="warning")
 
     def browse_data_directory(self):
         """Browse for data directory"""
-        directory = QFileDialog.getExistingDirectory(self, "Select Data Directory")
-        if directory:
-            self.data_dir_edit.setText(directory)
+        self._select_directory(
+            "Select Data Directory",
+            lambda directory: self.data_dir_edit.setText(directory) if directory else None,
+        )
 
     def browse_data_file(self):
         """Browse for data file"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Data File",
-            "", "All Files (*.*);;CSV Files (*.csv);;JSON Files (*.json);;Text Files (*.txt)"
+        self._select_file(
+            "Select Data File",
+            lambda file_path: self.data_file_edit.setText(file_path) if file_path else None,
+            file_filter="All Files (*.*);;CSV Files (*.csv);;JSON Files (*.json);;Text Files (*.txt)",
         )
-        if file_path:
-            self.data_file_edit.setText(file_path)
 
     def save_settings(self):
         """Save settings to configuration"""
@@ -7081,6 +8607,10 @@ if __name__ == "__main__":
             self.config.sandbox_timeout = self.sandbox_timeout_edit.value()
             self.config.log_level = self.log_level_combo.currentText()
             self.config.enable_diagnostics = self.diagnostics_check.isChecked()
+            self.config.connection_timeout = float(self.connection_timeout_edit.value())
+            self.config.chat_timeout = int(self.chat_timeout_edit.value())
+            self.config.resend_api_key = self.resend_api_key_edit.text().strip()
+            self.config.resend_from_email = self.resend_from_email_edit.text().strip()
 
             # Save to settings file
             self._save_config()
@@ -7094,10 +8624,12 @@ if __name__ == "__main__":
                 self.initialize_client()
 
             self.status_bar.showMessage("Settings saved successfully")
-            QMessageBox.information(self, "Settings", "Settings saved successfully")
+            self._notify("Settings", "Settings saved successfully")
 
         except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save settings: {str(e)}")
+            logger.error(f"Failed to save settings: {e}")
+            self._notify("Save Error", f"Failed to save settings: {str(e)}",
+                         level="critical")
 
     def test_settings_connection(self):
         """Test the API connection using the values currently shown in the Settings tab.
@@ -7111,6 +8643,10 @@ if __name__ == "__main__":
         Performs two checks:
           1. HTTP GET against the API URL (with Bearer token if a key is entered).
           2. TCP connect against the WebSocket host:port (if a WS URL is entered).
+
+        The probes run on a background thread so the GUI never freezes while
+        the connection times out; the result is reported back on the GUI
+        thread.
         """
         # Read directly from the form widgets, NOT from self.config, so the test
         # reflects the user's current input even before Save.
@@ -7119,9 +8655,10 @@ if __name__ == "__main__":
         api_key = self.api_key_edit.text().strip()
 
         if not url:
-            QMessageBox.warning(
-                self, "Test Connection",
-                "Please enter an API URL in the Settings tab before testing."
+            self._notify(
+                "Test Connection",
+                "Please enter an API URL in the Settings tab before testing.",
+                level="warning"
             )
             return
 
@@ -7132,11 +8669,30 @@ if __name__ == "__main__":
             timeout = 10
         if timeout <= 0:
             timeout = 10
+        timeout = min(timeout, 30)
 
         self.test_settings_conn_btn.setEnabled(False)
         self.status_bar.showMessage(f"Testing connection to {url}...")
-        QApplication.processEvents()
 
+        def worker():
+            try:
+                result = self._probe_connection(url, ws_url, api_key, timeout)
+            except Exception as e:
+                result = {
+                    'api_ok': False,
+                    'ws_ok': None,
+                    'url': url,
+                    'ws_url': ws_url,
+                    'details': [f"  Error: {e}"],
+                    'ws_summary': '',
+                }
+            self._run_on_gui_thread(self._present_connection_result, result)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _probe_connection(self, url: str, ws_url: str, api_key: str, timeout: int) -> Dict[str, Any]:
+        """Probe the API and WebSocket endpoints. Runs off the GUI thread."""
+        import socket
         details = []
         api_ok = False
 
@@ -7166,6 +8722,8 @@ if __name__ == "__main__":
             details.append(f"  HTTP {e.code} {e.reason} (host is reachable)")
         except urllib.error.URLError as e:
             details.append(f"  URL Error: {e.reason}")
+        except socket.timeout:
+            details.append(f"  Timeout: no response within {timeout}s")
         except Exception as e:
             details.append(f"  Error: {e}")
 
@@ -7174,7 +8732,6 @@ if __name__ == "__main__":
         ws_summary = ""
         if ws_url:
             try:
-                import socket
                 parsed = urllib.parse.urlparse(ws_url)
                 host = parsed.hostname
                 port = parsed.port or (443 if parsed.scheme == 'wss' else 80)
@@ -7197,6 +8754,28 @@ if __name__ == "__main__":
                 details.append(f"  WebSocket URL error: {e}")
                 ws_summary = f"WebSocket URL: {ws_url}\n"
 
+        return {
+            'api_ok': api_ok,
+            'ws_ok': ws_ok,
+            'url': url,
+            'ws_url': ws_url,
+            'details': details,
+            'ws_summary': ws_summary,
+        }
+
+    def _present_connection_result(self, result: Dict[str, Any]) -> None:
+        """Show the outcome of a connection probe (runs on the GUI thread)."""
+        try:
+            self.test_settings_conn_btn.setEnabled(True)
+        except RuntimeError:
+            pass
+
+        api_ok = result.get('api_ok', False)
+        ws_ok = result.get('ws_ok')
+        url = result.get('url', '')
+        details = result.get('details', [])
+        ws_summary = result.get('ws_summary', '')
+
         # Build the result dialog. The HTTP test is the primary signal; the
         # WebSocket probe is a secondary reachability hint and never blocks
         # overall success on its own.
@@ -7214,7 +8793,7 @@ if __name__ == "__main__":
             body_lines.append("Details:")
             body_lines.extend(details)
             self.status_bar.showMessage("Connection test successful")
-            QMessageBox.information(self, title, "\n".join(body_lines))
+            self._notify(title, "\n".join(body_lines))
         else:
             title = "Connection Test Failed"
             body_lines = [
@@ -7236,9 +8815,165 @@ if __name__ == "__main__":
             ]
             body_lines.extend(details)
             self.status_bar.showMessage("Connection test failed")
-            QMessageBox.warning(self, title, "\n".join(body_lines))
+            self._notify(title, "\n".join(body_lines), level="warning")
 
-        self.test_settings_conn_btn.setEnabled(True)
+    def on_generate_api_key_clicked(self):
+        """Generate a new API key via the backend and populate the API Key field.
+
+        Performs the full login -> generate flow:
+          1. POST /auth/login  {"username":"admin","password":"admin123"}  -> session_id
+          2. POST /auth/apikey {"session_id":..., "description":...}      -> api_key
+
+        Uses a dedicated QThread + ApiKeyWorker with its own asyncio event
+        loop, completely independent of qasync. This avoids the
+        "Event loop is closed" error and ensures the UI never blocks.
+        """
+        if not self.client:
+            if not self.initialize_client():
+                self._notify(
+                    "Connection Error",
+                    "Failed to initialize the backend client. Is the CoreAI3D "
+                    "server running?",
+                    level="warning"
+                )
+                return
+
+        # Prevent double-click while a generation is in progress
+        if getattr(self, '_api_key_generating', False):
+            self.status_bar.showMessage("API key generation already in progress", 3000)
+            return
+
+        self._api_key_generating = True
+        self.generate_api_key_btn.setEnabled(False)
+        self.status_bar.showMessage("Logging in...")
+
+        # Clean up any previous worker/thread references
+        if getattr(self, '_api_key_worker_thread', None) is not None:
+            try:
+                if self._api_key_worker_thread.isRunning():
+                    self._api_key_worker_thread.quit()
+                    if not self._api_key_worker_thread.wait(2000):
+                        _LINGERING_THREADS.append(self._api_key_worker_thread)
+            except RuntimeError:
+                pass
+            self._api_key_worker_thread = None
+            self._api_key_worker = None
+
+        self._api_key_worker_thread = QThread()
+
+        async def login_and_generate():
+            """Coroutine: login then generate API key. Runs in worker thread.
+
+            A dedicated client is used because the shared client owns an
+            aiohttp session that is bound to the qasync loop on the GUI
+            thread and cannot be reused from the worker's event loop.
+            """
+            client = self._create_worker_client()
+            try:
+                # Step 1: Login to obtain a session_id
+                username = self.config.admin_email or "admin"
+                password = self.config.admin_password or "admin123"
+                login_result = await client.login(username, password)
+                if not login_result.success:
+                    return login_result  # Propagate the error response
+
+                # Step 2: Generate the API key using the obtained session_id
+                gen_result = await client.generate_api_key(
+                    description="Generated from Linux GUI Dashboard"
+                )
+                return gen_result
+            finally:
+                try:
+                    await client.close()
+                except Exception as e:
+                    logger.debug(f"Error closing API key client: {e}")
+
+        self._api_key_worker = ApiKeyWorker(login_and_generate)
+        self._api_key_worker.moveToThread(self._api_key_worker_thread)
+
+        def on_success(response):
+            self._api_key_generating = False
+            self.generate_api_key_btn.setEnabled(True)
+            self.status_bar.showMessage("Ready", 3000)
+
+            # Clean up thread
+            try:
+                self._api_key_worker_thread.quit()
+                if not self._api_key_worker_thread.wait(2000):
+                    _LINGERING_THREADS.append(self._api_key_worker_thread)
+            except RuntimeError:
+                pass
+            self._api_key_worker_thread = None
+            self._api_key_worker = None
+
+            if not response.success:
+                self._notify(
+                    "Generate API Key",
+                    f"Failed to generate API key: {self._api_error_text(response)}",
+                    level="warning"
+                )
+                return
+
+            # Robust key extraction — checks many locations in the response
+            new_key = CoreAI3DClient.parse_api_key(response)
+
+            if not new_key:
+                self._notify(
+                    "Generate API Key",
+                    "API key was generated but not found in the server response.\n\n"
+                    f"Raw response:\n{json.dumps(response.data, indent=2, default=str)}",
+                    level="warning"
+                )
+                return
+
+            self.api_key_edit.setText(new_key)
+            self.config.api_key = new_key
+            self.status_bar.showMessage("API key generated successfully", 3000)
+
+            # Show the key ONLY ONCE in a dialog with Copy + warning.
+            # open() keeps the dialog window-modal without blocking the event
+            # loop, so the GUI stays responsive.
+            dialog = ApiKeyDialog(new_key, self)
+            dialog.open()
+
+        def on_error(err):
+            self._api_key_generating = False
+            self.generate_api_key_btn.setEnabled(True)
+            self.status_bar.showMessage("Ready", 3000)
+
+            try:
+                self._api_key_worker_thread.quit()
+                if not self._api_key_worker_thread.wait(2000):
+                    _LINGERING_THREADS.append(self._api_key_worker_thread)
+            except RuntimeError:
+                pass
+            self._api_key_worker_thread = None
+            self._api_key_worker = None
+
+            # Never show an empty error dialog — always include the real message
+            error_text = str(err) if err else "Unknown error generating API key"
+            self._notify("Generate API Key", f"Error: {error_text}", level="critical")
+            logger.error(f"Generate API key error: {error_text}", exc_info=True)
+
+        self._api_key_worker.finished.connect(on_success)
+        self._api_key_worker.error.connect(on_error)
+        self._api_key_worker_thread.started.connect(self._api_key_worker.run)
+        self._api_key_worker.finished.connect(self._api_key_worker_thread.quit)
+        self._api_key_worker.error.connect(self._api_key_worker_thread.quit)
+        self._api_key_worker_thread.finished.connect(
+            lambda: setattr(self, '_api_key_worker_thread', None)
+        )
+        self._api_key_worker_thread.start()
+
+    def _copy_api_key_from_settings(self):
+        """Copy the API key from the settings field to the clipboard."""
+        key = self.api_key_edit.text().strip()
+        if not key:
+            self._notify("Copy API Key", "No API key to copy.", level="info")
+            return
+        cb = QApplication.clipboard()
+        cb.setText(key)
+        self.status_bar.showMessage("API key copied to clipboard", 3000)
 
     def refresh_all(self):
         """Refresh all data and displays"""
@@ -7250,13 +8985,10 @@ if __name__ == "__main__":
 
     def show_documentation(self):
         """Show application documentation"""
-        QMessageBox.information(
-            self, "Documentation",
-            "For detailed documentation, please see:\n\n"
+        self._notify("Documentation", "For detailed documentation, please see:\n\n"
             "README.md\n\n"
             "This file contains comprehensive usage instructions, "
-            "configuration details, and troubleshooting information."
-        )
+            "configuration details, and troubleshooting information.", level="info")
 
     def show_about(self):
         """Show about dialog"""
@@ -7273,7 +9005,11 @@ if __name__ == "__main__":
     def send_chat_message(self):
         """Send chat message to AI"""
         if not self.initialize_client():
-            QMessageBox.warning(self, "Connection Error", "Client not connected. Please wait for initialization or check server status.")
+            self._notify(
+                "Connection Error",
+                "Client not connected. Please wait for initialization or check server status.",
+                level="warning"
+            )
             return
 
         message = self.chat_input.text().strip()
@@ -7287,34 +9023,85 @@ if __name__ == "__main__":
         # Show thinking indicator
         self.thinking_label.setText("CoreAI3D is thinking...")
         self.thinking_label.setVisible(True)
+        if hasattr(self, 'chat_cancel_btn'):
+            self.chat_cancel_btn.setEnabled(True)
 
         # Add debug logging
-        logger.info(f"Sending chat message: {message}")
-        logger.info(f"Client connected: {self.client.is_connected() if self.client else False}")
+        logger.debug(f"Sending chat message: {message}")
+        logger.debug(f"Client connected: {self.client.is_connected() if self.client else False}")
 
         try:
             # Send message directly with qasync
             task = asyncio.create_task(self._send_chat_message_async(message))
+            self._chat_task = task
             task.add_done_callback(self._handle_chat_message_result)
 
         except Exception as e:
             logger.error(f"Exception in send_chat_message: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to send message: {str(e)}")
+            self._notify("Error", f"Failed to send message: {str(e)}", level="critical")
+
+    def cancel_chat_message(self):
+        """Abort the in-flight chat request (HTTP fallback path)."""
+        task = getattr(self, '_chat_task', None)
+        if task is None or task.done():
+            self._notify("Nothing to Cancel", "No chat request is in flight.",
+                         level="warning")
+            return
+        try:
+            task.cancel()
+        except Exception as e:
+            logger.error(f"Failed to cancel chat request: {e}")
+        self._chat_task = None
+        self.thinking_label.setVisible(False)
+        if hasattr(self, 'chat_cancel_btn'):
+            self.chat_cancel_btn.setEnabled(False)
+        self.status_bar.showMessage("Chat request cancelled", 3000)
 
     async def _send_chat_message_async(self, message: str):
-        """Async part of chat message sending"""
+        """Async part of chat message sending.
+
+        The HTTP fallback path is bounded by ``config.chat_timeout`` so a
+        stalled backend cannot leave the GUI waiting forever.  The WebSocket
+        delivery path is unaffected.
+        """
         async with self.global_async_lock:
-            logger.info("Making HTTP request to send chat message")
-            result = await self.client.send_chat_message(message)
-            logger.info(f"HTTP response received: success={result.success}, status={result.status_code}")
+            logger.debug("Making HTTP request to send chat message")
+            timeout = self._chat_timeout()
+            try:
+                result = await asyncio.wait_for(
+                    self.client.send_chat_message(message), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Chat request timed out after {timeout}s")
+                return APIResponse(
+                    success=False,
+                    data=None,
+                    message=f"Chat request timed out after {timeout:.0f}s",
+                    status_code=408,
+                    metadata={}
+                )
+            logger.debug(f"HTTP response received: success={result.success}, status={result.status_code}")
             if result.data:
-                logger.info(f"Response data: {result.data}")
+                logger.debug(f"Response data: {result.data}")
             return result
+
+    def _chat_timeout(self) -> float:
+        """Timeout applied to the HTTP chat fallback path."""
+        try:
+            timeout = float(self.config.chat_timeout)
+        except (TypeError, ValueError):
+            timeout = 30.0
+        return max(1.0, timeout)
 
     def _handle_chat_message_result(self, task):
         """Handle chat message result"""
         try:
             QTimer.singleShot(0, lambda: self.thinking_label.setVisible(False))
+            if hasattr(self, 'chat_cancel_btn'):
+                self.chat_cancel_btn.setEnabled(False)
+            if task.cancelled():
+                logger.debug("Chat request was cancelled")
+                return
             result = task.result()
             if result.success and result.data:
                 inner_data = result.data.get('data', result.data) if isinstance(result.data, dict) else result.data
@@ -7338,13 +9125,15 @@ if __name__ == "__main__":
                 error_msg = result.message or (result.data.get('error') if isinstance(result.data, dict) else None) or 'Unknown error'
                 logger.error(f"HTTP request failed: {error_msg}")
                 QTimer.singleShot(0, lambda e=error_msg: self.chat_history.append(f"Error: {e}"))
+        except asyncio.CancelledError:
+            logger.debug("Chat request cancelled")
         except Exception as e:
             logger.error(f"Exception in chat message handler: {str(e)}")
             QTimer.singleShot(0, lambda err=str(e): self.chat_history.append(f"Error: {err}"))
 
     def _handle_chat_response(self, data: Dict[str, Any]):
         """Handle chat response from WebSocket"""
-        logger.info(f"Handling chat response: {data}")
+        logger.debug(f"Handling chat response: {data}")
         content = (data.get('content') or data.get('message') or
                    data.get('response') or data.get('reply') or '')
         if content:
@@ -7369,7 +9158,7 @@ if __name__ == "__main__":
     def _on_chat_response_received(self, response: str):
         """Handle chat response signal and update UI"""
         QTimer.singleShot(0, lambda: self.thinking_label.setVisible(False))
-        logger.info(f"Chat response received via signal: {response}")
+        logger.debug(f"Chat response received via signal: {response}")
         import hashlib
         with self._chat_response_lock:
             key = (response, hashlib.md5(response.encode('utf-8', errors='ignore')).hexdigest())
@@ -7404,7 +9193,7 @@ if __name__ == "__main__":
         self._typing_text = text
         self._typing_index = 0
         self.chat_history.append("AI: ")
-        self._typing_timer = QTimer(self)
+        self._typing_timer = self._create_gui_timer(self)
         self._typing_timer.setInterval(20)
         def type_next_chunk():
             if self._typing_index >= len(self._typing_text):
@@ -7680,7 +9469,7 @@ if __name__ == "__main__":
             self.status_bar.showMessage("Model list refreshed")
         except Exception as e:
             logger.error(f"Error refreshing models: {str(e)}")
-            QMessageBox.warning(self, "Refresh Error", f"Failed to refresh models: {str(e)}")
+            self._notify("Refresh Error", f"Failed to refresh models: {str(e)}", level="warning")
 
     def on_model_selected(self):
         """Handle model selection"""
@@ -7712,7 +9501,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         logger.info("Starting model download process")
         current_row = self.model_table.currentRow()
         if current_row < 0:
-            QMessageBox.warning(self, "No Selection", "Please select a model to download")
+            self._notify("No Selection", "Please select a model to download", level="warning")
             return
 
         model_name = self.model_table.item(current_row, 0).text()
@@ -7722,7 +9511,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         logger.info(f"Selected model: {model_name}, type: {model_type}, status: {model_status}")
 
         if model_status == "Downloading":
-            QMessageBox.information(self, "Already Downloading", f"{model_name} is already being downloaded")
+            self._notify("Already Downloading", f"{model_name} is already being downloaded", level="info")
             return
 
         # Determine download source based on model type or user selection
@@ -7779,7 +9568,7 @@ capabilities, training data, performance metrics, and usage instructions."""
             }
 
             # Create timer for progress updates
-            self.download_timer = QTimer()
+            self.download_timer = self._create_gui_timer()
             self.download_timer.timeout.connect(self._update_simulated_progress)
             self.download_timer.start(200)  # Update every 200ms for smooth progress
 
@@ -7845,13 +9634,15 @@ capabilities, training data, performance metrics, and usage instructions."""
                                     progress = min(90, int((elapsed / 30.0) * 100))  # Assume 30 seconds
 
                                 # Update UI in main thread
-                                QTimer.singleShot(0, lambda p=progress: self._update_download_progress(row, model_name, p))
+                                self._run_on_gui_thread(
+                                    self._update_download_progress, row, model_name, progress
+                                )
 
                     # Complete download
-                    QTimer.singleShot(0, lambda: self._update_download_complete(row, model_name))
+                    self._run_on_gui_thread(self._update_download_complete, row, model_name)
 
                 except Exception as e:
-                    QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+                    self._run_on_gui_thread(self._download_error, row, model_name, str(e))
                     # Clean up progress data on error
                     if hasattr(self, 'download_progress_data'):
                         delattr(self, 'download_progress_data')
@@ -7943,7 +9734,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         logger.info("Cancelling model download")
         current_row = self.model_table.currentRow()
         if current_row < 0:
-            QMessageBox.warning(self, "No Selection", "Please select a downloading model to cancel")
+            self._notify("No Selection", "Please select a downloading model to cancel", level="warning")
             return
 
         model_name = self.model_table.item(current_row, 0).text()
@@ -7952,7 +9743,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         logger.info(f"Cancelling download for {model_name}, status: {model_status}")
 
         if model_status != "Downloading":
-            QMessageBox.warning(self, "Not Downloading", f"{model_name} is not currently downloading")
+            self._notify("Not Downloading", f"{model_name} is not currently downloading", level="warning")
             return
 
         # Stop download timer if running
@@ -8082,30 +9873,38 @@ capabilities, training data, performance metrics, and usage instructions."""
                             last_size = current_size
 
                             # Update progress in main thread
-                            QTimer.singleShot(0, lambda p=progress: self._update_kaggle_progress(row, model_name, p))
+                            self._run_on_gui_thread(
+                                self._update_kaggle_progress, row, model_name, progress
+                            )
                         else:
                             # File not created yet, show initial progress
                             elapsed = time.time() - self.download_progress_data['start_time']
                             if elapsed < 5:  # First 5 seconds
                                 progress = min(10, int((elapsed / 5.0) * 10))
-                                QTimer.singleShot(0, lambda p=progress: self._update_kaggle_progress(row, model_name, p))
+                                self._run_on_gui_thread(
+                                    self._update_kaggle_progress, row, model_name, progress
+                                )
 
                     # Check final result
                     if process.returncode == 0:
                         # Complete the progress
-                        QTimer.singleShot(0, lambda: self._update_kaggle_progress(row, model_name, 100))
-                        QTimer.singleShot(0, lambda: self._download_success(row, model_name))
+                        self._run_on_gui_thread(
+                            self._update_kaggle_progress, row, model_name, 100
+                        )
+                        self._run_on_gui_thread(self._download_success, row, model_name)
                     else:
                         stderr = process.stderr.read() if process.stderr else ""
                         error_msg = f"Kaggle download failed: {stderr}"
-                        QTimer.singleShot(0, lambda: self._download_error(row, model_name, error_msg))
+                        self._run_on_gui_thread(
+                            self._download_error, row, model_name, error_msg
+                        )
 
                     # Clean up progress data
                     if hasattr(self, 'download_progress_data'):
                         delattr(self, 'download_progress_data')
 
                 except Exception as e:
-                    QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+                    self._run_on_gui_thread(self._download_error, row, model_name, str(e))
                     # Clean up progress data on error
                     if hasattr(self, 'download_progress_data'):
                         delattr(self, 'download_progress_data')
@@ -8183,10 +9982,12 @@ capabilities, training data, performance metrics, and usage instructions."""
                         """Progress callback for HuggingFace downloads"""
                         if total > 0:
                             progress = min(95, int((size / total) * 100))
-                            QTimer.singleShot(0, lambda p=progress: self._update_hf_progress(row, model_name, p))
+                            self._run_on_gui_thread(
+                                self._update_hf_progress, row, model_name, progress
+                            )
 
                     # Start download with progress tracking
-                    QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, 0))
+                    self._run_on_gui_thread(self._update_hf_progress, row, model_name, 0)
 
                     # Start download - HuggingFace Hub doesn't have built-in progress callbacks
                     # We'll monitor file system changes for progress
@@ -8197,7 +9998,9 @@ capabilities, training data, performance metrics, and usage instructions."""
                             local_dir_use_symlinks=False
                         )
                     else:
-                        QTimer.singleShot(0, lambda: self._download_error(row, model_name, "Invalid model ID"))
+                        self._run_on_gui_thread(
+                            self._download_error, row, model_name, "Invalid model ID"
+                        )
                         return
 
                     # Monitor download progress by checking file sizes
@@ -8264,18 +10067,22 @@ capabilities, training data, performance metrics, and usage instructions."""
                                     stable_count = 0
 
                     # Complete the progress
-                    QTimer.singleShot(0, lambda: self._update_hf_progress(row, model_name, 100))
-                    QTimer.singleShot(0, lambda: self._download_success(row, model_name))
+                    self._run_on_gui_thread(
+                        self._update_hf_progress, row, model_name, 100
+                    )
+                    self._run_on_gui_thread(self._download_success, row, model_name)
 
                     # Clean up progress data
                     if hasattr(self, 'download_progress_data'):
                         delattr(self, 'download_progress_data')
 
                 except ImportError:
-                    QTimer.singleShot(0, lambda: self._download_error(row, model_name,
-                        "HuggingFace Hub not installed. Install with: pip install huggingface-hub"))
+                    self._run_on_gui_thread(
+                        self._download_error, row, model_name,
+                        "HuggingFace Hub not installed. Install with: pip install huggingface-hub"
+                    )
                 except Exception as e:
-                    QTimer.singleShot(0, lambda: self._download_error(row, model_name, str(e)))
+                    self._run_on_gui_thread(self._download_error, row, model_name, str(e))
                     # Clean up progress data on error
                     if hasattr(self, 'download_progress_data'):
                         delattr(self, 'download_progress_data')
@@ -8359,7 +10166,7 @@ capabilities, training data, performance metrics, and usage instructions."""
             # Log error
             self._log_download(f"✗ Failed to download {model_name}: {error_msg}")
 
-            QMessageBox.warning(self, "Download Error", f"Failed to download {model_name}:\n{error_msg}")
+            self._notify("Download Error", f"Failed to download {model_name}:\n{error_msg}", level="warning")
 
             # Reset progress
             self.download_progress.setValue(0)
@@ -8401,23 +10208,23 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 if not self.client:
                     if not self.initialize_client():
-                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        self._notify("Connection Error", "Failed to initialize client", level="warning")
                         return
 
                 # Get selected dataset
                 current_item = self.dataset_list.currentItem()
                 if not current_item:
-                    QMessageBox.warning(self, "No Dataset Selected", "Please select a dataset to load")
+                    self._notify("No Dataset Selected", "Please select a dataset to load", level="warning")
                     return
 
                 dataset_name = current_item.text()
                 if dataset_name not in self.training_manager.datasets:
-                    QMessageBox.warning(self, "Dataset Not Found", f"Dataset '{dataset_name}' not found")
+                    self._notify("Dataset Not Found", f"Dataset '{dataset_name}' not found", level="warning")
                     return
 
                 dataset_info = self.training_manager.datasets[dataset_name]
                 if not dataset_info.get('files'):
-                    QMessageBox.warning(self, "Empty Dataset", f"Dataset '{dataset_name}' has no files")
+                    self._notify("Empty Dataset", f"Dataset '{dataset_name}' has no files", level="warning")
                     return
 
                 # Support all file formats - use the first file from the dataset
@@ -8430,7 +10237,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                         break
 
                 if not data_file:
-                    QMessageBox.warning(self, "No Supported File", f"Dataset '{dataset_name}' has no supported file formats.\nSupported formats: {', '.join(supported_extensions)}")
+                    self._notify("No Supported File", f"Dataset '{dataset_name}' has no supported file formats.\nSupported formats: {', '.join(supported_extensions)}", level="warning")
                     return
 
                 # Show progress
@@ -8464,7 +10271,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_progress.setVisible(False)
                 self.training_progress.setValue(0)
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Dataset loading error: {str(e)}")
-                QMessageBox.warning(self, "Dataset Loading Error", str(e))
+                self._notify("Dataset Loading Error", str(e), level="warning")
             finally:
                 # Clean up task
                 with self.task_lock:
@@ -8955,51 +10762,92 @@ capabilities, training data, performance metrics, and usage instructions."""
     
                         
     def closeEvent(self, event):
-        """Handle application close event with proper async cleanup"""
+        """Handle application close event with proper cleanup.
+
+        Avoids the "Event loop is closed" error by:
+        - Stopping all QTimers on the main Qt thread (this method runs on main thread)
+        - Not calling asyncio.get_event_loop().is_running() after loop is gone
+        - Using client.disconnect() / client.close() properly
+        - Quitting worker threads before exit
+        - Gracefully handling RuntimeError when the event loop is already closed
+
+        The background WebSocket thread is closed as well: leaving it running
+        keeps the process alive and eventually aborts it on interpreter exit.
+        """
         try:
             logger.info("Starting application shutdown sequence")
 
-            # Cancel all active tasks first
-            self.cancel_all_tasks()
+            # ---- Stop ALL timers on the main Qt thread ----
+            timer_attrs = (
+                'metrics_timer', 'health_timer', 'neural_refresh_timer',
+                'download_timer', '_typing_timer',
+            )
+            for attr in timer_attrs:
+                timer = getattr(self, attr, None)
+                if timer is not None:
+                    try:
+                        if timer.isActive():
+                            timer.stop()
+                            logger.debug(f"Stopped timer: {attr}")
+                    except RuntimeError:
+                        # Underlying C++ object already deleted
+                        pass
 
-            # Stop health check timer to prevent new tasks during shutdown
-            if hasattr(self, 'health_timer') and self.health_timer.isActive():
-                self.health_timer.stop()
-                logger.debug("Health check timer stopped during shutdown")
+            # ---- Stop the background WebSocket thread ----
+            self._stop_websocket()
 
-            # Stop training if running (using global async lock)
-            async def stop_training_on_shutdown():
-                async with self.global_async_lock:
-                    if self.training_in_progress:
-                        logger.info("Stopping training during shutdown")
-                        self.training_in_progress = False
+            # ---- Quit in-progress worker threads ----
+            try:
+                self._stop_beta_worker()
+            except Exception as e:
+                logger.debug(f"Error stopping beta worker: {e}")
 
-            # Schedule training stop in event loop
-            if asyncio.get_event_loop().is_running():
-                asyncio.create_task(stop_training_on_shutdown())
+            try:
+                self._stop_email_worker()
+            except Exception as e:
+                logger.debug(f"Error stopping email worker: {e}")
 
-            # Stop sandbox if running
-            if hasattr(self, 'sandbox_manager') and self.sandbox_manager.is_running:
-                logger.info("Stopping sandbox manager")
-                self.sandbox_manager.stop_sandbox()
+            for attr in ('_api_key_worker_thread',):
+                thread = getattr(self, attr, None)
+                if thread is not None:
+                    try:
+                        if thread.isRunning():
+                            thread.quit()
+                            if not thread.wait(2000):  # Wait up to 2 seconds
+                                _LINGERING_THREADS.append(thread)
+                    except RuntimeError:
+                        pass
+                    setattr(self, attr, None)
 
-            # Close client connection using the existing qasync event loop
-            if hasattr(self, 'client_initialized') and self.client_initialized and self.client:
-                logger.info("Closing client connection")
+            # Disconnect client cleanly
+            if hasattr(self, 'client') and self.client is not None:
                 try:
-                    # Use the existing qasync event loop instead of creating a new one
-                    if hasattr(self.client, 'close'):
-                        # Schedule the close operation in the current event loop
-                        async def close_client():
-                            await self.client.close()
-
-                        # Use qasync-compatible approach for closing client
-                        # Schedule the close operation using asyncio.create_task() for qasync compatibility
-                        asyncio.create_task(close_client())
+                    if hasattr(self.client, 'disconnect'):
+                        # Try to run disconnect on a temporary event loop so it
+                        # actually completes rather than being orphaned.
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = None
+                        if loop is not None and loop.is_running():
+                            # Best effort: schedule disconnect; OS cleans up on exit
+                            asyncio.create_task(self.client.disconnect())
+                        else:
+                            # No running loop: create a temporary one
+                            temp_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(temp_loop)
+                            try:
+                                temp_loop.run_until_complete(self.client.disconnect())
+                            finally:
+                                temp_loop.close()
+                                # Never leave a closed loop installed as the
+                                # current loop: later asyncio calls would
+                                # raise "Event loop is closed".
+                                asyncio.set_event_loop(asyncio.new_event_loop())
                 except Exception as e:
                     logger.error(f"Error closing client: {str(e)}")
 
-            # Save configuration
+            # Save configuration (includes the window geometry)
             self._save_config()
 
             logger.info("CoreAI3D Dashboard closed successfully")
@@ -9008,6 +10856,26 @@ capabilities, training data, performance metrics, and usage instructions."""
         except Exception as e:
             logger.error(f"Error during shutdown: {str(e)}")
             event.accept()
+
+    def _stop_websocket(self) -> None:
+        """Close the WebSocket connection and stop its background thread."""
+        self._ws_shutdown = True
+        ws = getattr(self, 'ws', None)
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception as e:
+                logger.debug(f"Error closing WebSocket: {e}")
+            self.ws = None
+
+        thread = getattr(self, 'ws_thread', None)
+        if thread is not None:
+            try:
+                if thread.is_alive():
+                    thread.join(timeout=2.0)
+            except Exception as e:
+                logger.debug(f"Error joining WebSocket thread: {e}")
+            self.ws_thread = None
 
     async def _start_training_async(self):
         """Async part of training start"""
@@ -9041,16 +10909,16 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training completed successfully")
                 if result.data:
                     self.training_log.appendPlainText(f"Training results: {json.dumps(result.data, indent=2)}")
-                QMessageBox.information(self, "Training Complete", "Training completed successfully")
+                self._notify("Training Complete", "Training completed successfully", level="info")
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training failed: {error_msg}")
-                QMessageBox.warning(self, "Training Failed", error_msg)
+                self._notify("Training Failed", error_msg, level="warning")
         except Exception as e:
             self.training_progress.setVisible(False)
             self.training_progress.setValue(0)  # Reset progress on error
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
-            QMessageBox.warning(self, "Training Error", str(e))
+            self._notify("Training Error", str(e), level="warning")
 
     def _handle_training_result_direct(self, result):
         """Handle training result directly"""
@@ -9061,16 +10929,16 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training completed successfully")
                 if result.data:
                     self.training_log.appendPlainText(f"Training results: {json.dumps(result.data, indent=2)}")
-                QMessageBox.information(self, "Training Complete", "Training completed successfully")
+                self._notify("Training Complete", "Training completed successfully", level="info")
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training failed: {error_msg}")
-                QMessageBox.warning(self, "Training Failed", error_msg)
+                self._notify("Training Failed", error_msg, level="warning")
         except Exception as e:
             self.training_progress.setVisible(False)
             self.training_progress.setValue(0)  # Reset progress on error
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training error: {str(e)}")
-            QMessageBox.warning(self, "Training Error", str(e))
+            self._notify("Training Error", str(e), level="warning")
 
     @qasync.asyncSlot()
     async def stop_training(self):
@@ -9082,7 +10950,7 @@ capabilities, training data, performance metrics, and usage instructions."""
             try:
                 # Check if training is actually running (double-check with lock)
                 if not self.training_in_progress:
-                    QMessageBox.information(self, "No Training", "No training is currently running")
+                    self._notify("No Training", "No training is currently running", level="info")
                     return
 
                 # Register task
@@ -9102,7 +10970,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_in_progress = False
 
                 if not self.client:
-                    QMessageBox.warning(self, "Connection Error", "No active client connection")
+                    self._notify("Connection Error", "No active client connection", level="warning")
                     return
 
                 # Stop training directly with qasync
@@ -9114,7 +10982,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 raise  # Re-raise to ensure proper cleanup
             except Exception as e:
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
-                QMessageBox.warning(self, "Stop Error", str(e))
+                self._notify("Stop Error", str(e), level="warning")
             finally:
                 # Clean up task
                 with self.task_lock:
@@ -9139,14 +11007,14 @@ capabilities, training data, performance metrics, and usage instructions."""
             if result.success:
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training stopped successfully")
                 self.training_progress.setVisible(False)
-                QMessageBox.information(self, "Training Stopped", "Training stopped successfully")
+                self._notify("Training Stopped", "Training stopped successfully", level="info")
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to stop training: {error_msg}")
-                QMessageBox.warning(self, "Stop Failed", error_msg)
+                self._notify("Stop Failed", error_msg, level="warning")
         except Exception as e:
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
-            QMessageBox.warning(self, "Stop Error", str(e))
+            self._notify("Stop Error", str(e), level="warning")
 
     def _handle_stop_training_result_direct(self, result):
         """Handle stop training result directly"""
@@ -9154,14 +11022,14 @@ capabilities, training data, performance metrics, and usage instructions."""
             if result.success:
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Training stopped successfully")
                 self.training_progress.setVisible(False)
-                QMessageBox.information(self, "Training Stopped", "Training stopped successfully")
+                self._notify("Training Stopped", "Training stopped successfully", level="info")
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to stop training: {error_msg}")
-                QMessageBox.warning(self, "Stop Failed", error_msg)
+                self._notify("Stop Failed", error_msg, level="warning")
         except Exception as e:
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Stop training error: {str(e)}")
-            QMessageBox.warning(self, "Stop Error", str(e))
+            self._notify("Stop Error", str(e), level="warning")
 
     @qasync.asyncSlot()
     async def upload_file(self):
@@ -9185,7 +11053,7 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 if not self.client:
                     if not self.initialize_client():
-                        QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                        self._notify("Connection Error", "Failed to initialize client", level="warning")
                         return
 
                 # Get selected file type
@@ -9217,35 +11085,62 @@ capabilities, training data, performance metrics, and usage instructions."""
 
                 filter_text = file_filters.get(file_type, "All Files (*.*)")
 
-                # Open file dialog to select file
-                file_path, _ = QFileDialog.getOpenFileName(
-                    self, f"Select {file_type.upper()} File",
-                    "", filter_text
+                # Open file dialog to select file.  The dialog is shown
+                # modeless, so the coroutine waits for the user's choice
+                # instead of freezing the GUI.
+                loop = asyncio.get_event_loop()
+                file_picker = loop.create_future()
+
+                def on_file_selected(path):
+                    if not file_picker.done():
+                        file_picker.set_result(path)
+
+                def on_file_picker_cancelled():
+                    if not file_picker.done():
+                        file_picker.set_result("")
+
+                self._select_file(
+                    f"Select {file_type.upper()} File", on_file_selected,
+                    file_filter=filter_text, on_cancelled=on_file_picker_cancelled,
                 )
+
+                file_path = await file_picker
 
                 if not file_path:
                     return  # User cancelled
 
                 # Validate file exists and is readable
                 if not os.path.exists(file_path):
-                    QMessageBox.warning(self, "File Not Found", f"File does not exist: {file_path}")
+                    self._notify("File Not Found", f"File does not exist: {file_path}", level="warning")
                     return
 
                 if not os.access(file_path, os.R_OK):
-                    QMessageBox.warning(self, "Permission Denied", f"Cannot read file: {file_path}")
+                    self._notify("Permission Denied", f"Cannot read file: {file_path}", level="warning")
                     return
 
                 # Get dataset name from user
-                dataset_name, ok = QInputDialog.getText(
-                    self, "Dataset Name",
+                name_picker = loop.create_future()
+
+                def on_name_entered(text):
+                    if not name_picker.done():
+                        name_picker.set_result(text)
+
+                def on_name_cancelled():
+                    if not name_picker.done():
+                        name_picker.set_result("")
+
+                self._prompt_text(
+                    "Dataset Name",
                     f"Enter a name for this {file_type.upper()} dataset:",
-                    text=os.path.splitext(os.path.basename(file_path))[0]
+                    on_name_entered,
+                    default_text=os.path.splitext(os.path.basename(file_path))[0],
+                    on_cancelled=on_name_cancelled,
                 )
 
-                if not ok or not dataset_name.strip():
-                    return  # User cancelled
+                dataset_name = (await name_picker or "").strip()
 
-                dataset_name = dataset_name.strip()
+                if not dataset_name:
+                    return  # User cancelled
 
                 # Show progress
                 self.training_progress.setVisible(True)
@@ -9288,7 +11183,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 self.training_progress.setVisible(False)
                 self.training_progress.setValue(0)
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] File upload error: {str(e)}")
-                QMessageBox.warning(self, "Upload Error", str(e))
+                self._notify("Upload Error", str(e), level="warning")
             finally:
                 # Clean up task
                 with self.task_lock:
@@ -9332,19 +11227,18 @@ capabilities, training data, performance metrics, and usage instructions."""
                     self.training_log.appendPlainText(f"  - Calculated Output Size: {file_sizes['outputsize']}")
                     self.training_log.appendPlainText(f"  - Calculated Sample Size: {file_sizes['samplesize']}")
 
-                QMessageBox.information(self, "Upload Successful",
-                                      f"{format_desc} uploaded and validated successfully!\n\n"
+                self._notify("Upload Successful", f"{format_desc} uploaded and validated successfully!\n\n"
                                       f"File: {os.path.basename(data.get('file_path', 'Unknown'))}\n"
                                       f"Dataset: {data.get('dataset_name', 'Unknown')}\n"
-                                      f"Size: {data.get('file_size', 0) / 1024:.1f} KB")
+                                      f"Size: {data.get('file_size', 0) / 1024:.1f} KB", level="info")
             else:
                 error_msg = result.data.get('error', 'Unknown error') if result.data else 'Unknown error'
                 self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] File upload failed: {error_msg}")
-                QMessageBox.warning(self, "Upload Failed", error_msg)
+                self._notify("Upload Failed", error_msg, level="warning")
         except Exception as e:
             self.training_progress.setVisible(False)
             self.training_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] Upload result handling error: {str(e)}")
-            QMessageBox.warning(self, "Upload Error", str(e))
+            self._notify("Upload Error", str(e), level="warning")
 
     def clear_training_log(self):
         """Clear training log"""
@@ -9352,21 +11246,18 @@ capabilities, training data, performance metrics, and usage instructions."""
 
     def browse_predict_input_file(self):
         """Browse for prediction input file"""
-        import logging
-        logging.info("DEBUG: browse_predict_input_file method called")
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Input File",
-            "", "All Files (*.*)"
+        self._select_file(
+            "Select Input File",
+            lambda file_path: self.predict_file_path_edit.setText(file_path) if file_path else None,
+            file_filter="All Files (*.*)",
         )
-        if file_path:
-            self.predict_file_path_edit.setText(file_path)
 
     @qasync.asyncSlot()
     async def run_prediction(self):
         """Run prediction with selected model and input"""
         if not self.client:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         model_type = self.predict_model_combo.currentText()
@@ -9374,11 +11265,11 @@ capabilities, training data, performance metrics, and usage instructions."""
         input_type = self.predict_input_type_combo.currentText()
 
         if model_type == "Select Model...":
-            QMessageBox.warning(self, "No Model Selected", "Please select a model type")
+            self._notify("No Model Selected", "Please select a model type", level="warning")
             return
 
         if specific_model == "Select Specific Model...":
-            QMessageBox.warning(self, "No Model Selected", "Please select a specific model")
+            self._notify("No Model Selected", "Please select a specific model", level="warning")
             return
 
         # Get input data based on type
@@ -9388,17 +11279,17 @@ capabilities, training data, performance metrics, and usage instructions."""
         if input_type == "Text":
             input_data = self.predict_input_text.toPlainText().strip()
             if not input_data:
-                QMessageBox.warning(self, "No Input", "Please enter text input")
+                self._notify("No Input", "Please enter text input", level="warning")
                 return
         elif input_type in ["Image", "Audio"]:
             input_data = self.predict_file_path_edit.text().strip()
             if not input_data:
-                QMessageBox.warning(self, "No Input", "Please select a file")
+                self._notify("No Input", "Please select a file", level="warning")
                 return
         elif input_type == "File":
             file_path = self.predict_file_path_edit.text().strip()
             if not file_path:
-                QMessageBox.warning(self, "No Input", "Please select a file")
+                self._notify("No Input", "Please select a file", level="warning")
                 return
 
             # Check if it's a CSV file and parse it
@@ -9416,7 +11307,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                 parsed_csv_data = self.parse_csv_file(file_path, contains_header, contains_text)
                 if 'error' in parsed_csv_data:
                     self.predict_progress.setVisible(False)
-                    QMessageBox.warning(self, "CSV Parse Error", f"Failed to parse CSV file: {parsed_csv_data['error']}")
+                    self._notify("CSV Parse Error", f"Failed to parse CSV file: {parsed_csv_data['error']}", level="warning")
                     return
                 input_data = parsed_csv_data
 
@@ -9427,7 +11318,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         elif input_type == "URL":
             input_data = self.predict_file_path_edit.text().strip()
             if not input_data:
-                QMessageBox.warning(self, "No Input", "Please enter a URL")
+                self._notify("No Input", "Please enter a URL", level="warning")
                 return
 
         # Get checkbox values for data format options (only for non-CSV files)
@@ -9534,12 +11425,12 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Load a model using the specified identifier"""
         if not self.client:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         model_identifier = self.load_model_identifier_edit.text().strip()
         if not model_identifier:
-            QMessageBox.warning(self, "No Identifier", "Please enter a model identifier (dataset ID or name)")
+            self._notify("No Identifier", "Please enter a model identifier (dataset ID or name)", level="warning")
             return
 
         model_type = self.load_model_type_combo.currentText()
@@ -9922,31 +11813,37 @@ capabilities, training data, performance metrics, and usage instructions."""
 
     def download_fasttext_embeddings(self):
         """Download FastText embeddings file"""
+        # FastText crawl-300d-2M embeddings URL
+        url = "https://dl.fbaipublicfiles.com/fasttext/vectors-english/crawl-300d-2M.vec.zip"
+        filename = "crawl-300d-2M.vec.zip"
+
+        # Ensure models directory exists
+        models_dir = os.path.join(self.config.data_dir, "models")
+        os.makedirs(models_dir, exist_ok=True)
+
+        # Full path for download
+        download_path = os.path.join(models_dir, filename)
+
+        logger.info(f"Starting FastText embeddings download to: {download_path}")
+
+        # Check if file already exists
+        if os.path.exists(download_path):
+            self._confirm(
+                "File Exists",
+                f"FastText embeddings file already exists at {download_path}.\n"
+                "Do you want to overwrite it?",
+                lambda: self._start_fasttext_download(url, download_path),
+                on_cancelled=lambda: self.status_bar.showMessage(
+                    "Download cancelled - file already exists"
+                ),
+            )
+            return
+
+        self._start_fasttext_download(url, download_path)
+
+    def _start_fasttext_download(self, url: str, download_path: str) -> None:
+        """Start the FastText embeddings download in a background thread."""
         try:
-            # FastText crawl-300d-2M embeddings URL
-            url = "https://dl.fbaipublicfiles.com/fasttext/vectors-english/crawl-300d-2M.vec.zip"
-            filename = "crawl-300d-2M.vec.zip"
-
-            # Ensure models directory exists
-            models_dir = os.path.join(self.config.data_dir, "models")
-            os.makedirs(models_dir, exist_ok=True)
-
-            # Full path for download
-            download_path = os.path.join(models_dir, filename)
-
-            logger.info(f"Starting FastText embeddings download to: {download_path}")
-
-            # Check if file already exists
-            if os.path.exists(download_path):
-                reply = QMessageBox.question(
-                    self, "File Exists",
-                    f"FastText embeddings file already exists at {download_path}.\nDo you want to overwrite it?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                if reply != QMessageBox.StandardButton.Yes:
-                    self.status_bar.showMessage("Download cancelled - file already exists")
-                    return
-
             # Show progress
             self.download_progress.setVisible(True)
             self.download_progress.setRange(0, 100)
@@ -9965,7 +11862,7 @@ capabilities, training data, performance metrics, and usage instructions."""
 
         except Exception as e:
             logger.error(f"Error starting FastText download: {str(e)}")
-            QMessageBox.warning(self, "Download Error", f"Failed to start download: {str(e)}")
+            self._notify("Download Error", f"Failed to start download: {str(e)}", level="warning")
 
     def _download_fasttext_worker(self, url, download_path):
         """Worker thread for FastText download"""
@@ -10000,15 +11897,15 @@ capabilities, training data, performance metrics, and usage instructions."""
                         # Update progress
                         if total_size > 0:
                             progress = int((downloaded / total_size) * 100)
-                            QTimer.singleShot(0, lambda p=progress: self._update_fasttext_progress(p))
+                            self._run_on_gui_thread(self._update_fasttext_progress, progress)
 
             # Download complete
-            QTimer.singleShot(0, lambda: self._fasttext_download_success(download_path))
+            self._run_on_gui_thread(self._fasttext_download_success, download_path)
 
         except Exception as e:
             error_msg = f"Download failed: {str(e)}"
             logger.error(error_msg)
-            QTimer.singleShot(0, lambda msg=error_msg: self._fasttext_download_error(msg))
+            self._run_on_gui_thread(self._fasttext_download_error, error_msg)
 
     def _update_fasttext_progress(self, progress):
         """Update FastText download progress"""
@@ -10030,13 +11927,10 @@ capabilities, training data, performance metrics, and usage instructions."""
             self._log_download(f"✓ Successfully downloaded FastText embeddings ({file_size:.1f} MB)")
 
             # Show success message
-            QMessageBox.information(
-                self, "Download Complete",
-                f"FastText embeddings downloaded successfully!\n\n"
+            self._notify("Download Complete", f"FastText embeddings downloaded successfully!\n\n"
                 f"File: {os.path.basename(download_path)}\n"
                 f"Size: {file_size:.1f} MB\n"
-                f"Location: {download_path}"
-            )
+                f"Location: {download_path}", level="info")
 
             self.status_bar.showMessage("FastText embeddings download completed")
 
@@ -10054,10 +11948,7 @@ capabilities, training data, performance metrics, and usage instructions."""
             self._log_download(f"✗ FastText download failed: {error_msg}")
 
             # Show error message
-            QMessageBox.warning(
-                self, "Download Failed",
-                f"Failed to download FastText embeddings:\n\n{error_msg}"
-            )
+            self._notify("Download Failed", f"Failed to download FastText embeddings:\n\n{error_msg}", level="warning")
 
             self.status_bar.showMessage("FastText download failed")
 
@@ -10069,7 +11960,7 @@ capabilities, training data, performance metrics, and usage instructions."""
         """Refresh neural network data"""
         if not self.client:
             if not self.initialize_client():
-                QMessageBox.warning(self, "Connection Error", "Failed to initialize client")
+                self._notify("Connection Error", "Failed to initialize client", level="warning")
                 return
 
         try:
@@ -10363,6 +12254,9 @@ capabilities, training data, performance metrics, and usage instructions."""
         retry_delay = 5  # seconds
 
         for attempt in range(1, max_retries + 1):
+            if getattr(self, '_ws_shutdown', False):
+                logger.debug("WebSocket retry loop stopped (shutdown requested)")
+                break
             try:
                 logger.info(f"WebSocket connection attempt {attempt}/{max_retries}...")
                 self.ws.run_forever(
@@ -10370,6 +12264,8 @@ capabilities, training data, performance metrics, and usage instructions."""
                     ping_timeout=10
                 )
                 # If run_forever exits normally (clean close), don't retry
+                if getattr(self, '_ws_shutdown', False):
+                    break
                 if attempt < max_retries:
                     logger.info(f"WebSocket closed, retrying in {retry_delay}s...")
                     import time
@@ -10379,6 +12275,8 @@ capabilities, training data, performance metrics, and usage instructions."""
                 break
             except Exception as e:
                 logger.error(f"WebSocket connection error (attempt {attempt}): {str(e)}")
+                if getattr(self, '_ws_shutdown', False):
+                    break
                 if attempt < max_retries:
                     import time
                     time.sleep(retry_delay)
@@ -10446,7 +12344,7 @@ capabilities, training data, performance metrics, and usage instructions."""
                         if key not in self._shown_chat_response_keys:
                             self._shown_chat_response_keys.add(key)
                             QTimer.singleShot(0, lambda c=content: self.chat_history.append(f"AI: {c}"))
-                            logger.info(f"WebSocket chat response shown: {content[:80]}")
+                            logger.debug(f"WebSocket chat response shown: {content[:80]}")
                         else:
                             logger.debug(f"WebSocket chat response deduplicated: {content[:80]}")
                 logger.debug(f"Chat response received: {content[:100] if content else ''}")
@@ -10489,12 +12387,13 @@ def main():
         app.setApplicationVersion("1.3.0")
         app.setOrganizationName("CoreAI3D")
 
-        dashboard = CoreAI3DDashboard()
-        dashboard.show()
-
-        # Create unified Qt/asyncio event loop
+        # Create the unified Qt/asyncio event loop *before* the dashboard is
+        # built: qasync slots that fire during start-up need a current loop.
         loop = qasync.QEventLoop(app)
         asyncio.set_event_loop(loop)
+
+        dashboard = CoreAI3DDashboard()
+        dashboard.show()
 
         # Run the event loop and schedule client initialization
         with loop:

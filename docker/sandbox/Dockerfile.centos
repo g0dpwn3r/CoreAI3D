@@ -3,12 +3,14 @@ FROM rockylinux:8
 WORKDIR /root
 
 # Install EPEL repository for additional packages
-RUN dnf install -y epel-release && \
+RUN dnf clean all && \
+    dnf install -y epel-release && \
     dnf config-manager --enable epel && \
-    dnf clean all
+    dnf clean all && \
+    rm -rf /var/cache/yum /var/cache/dnf
 
 # Install essential packages for AI operations and system control
-RUN dnf update -y && dnf install -y --setopt=strict=0 \
+RUN dnf install -y \
     # Core utilities
     curl wget vim nano htop \
     # Development tools
@@ -49,7 +51,7 @@ RUN curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - && \
     dnf clean all
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox && \
-    echo "sandbox:sandbox" | chpasswd  sandbox && \
+    echo "sandbox:sandbox" | chpasswd && \
     usermod -aG wheel sandbox
 
 # Create workspace directory
@@ -87,7 +89,7 @@ RUN pip3 install --upgrade pip && \
 # Install Node.js packages for web automation
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_SKIP_DOWNLOAD=true
-RUN npm install -g --unsafe-perm \
+RUN npm install -g \
     cheerio \
     axios \
     ws

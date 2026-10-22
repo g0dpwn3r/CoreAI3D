@@ -867,7 +867,11 @@ std::string Language::webSearch(const std::string& query) {
         for (char c : query) {
             if (c == ' ') encodedQuery += '+';
             else if (std::isalnum(static_cast<unsigned char>(c))) encodedQuery += c;
-            else encodedQuery += '%' + std::string("0123456789ABCDEF"[((unsigned char)c >> 4)]) + std::string("0123456789ABCDEF"[((unsigned char)c & 0xF)]);
+            else {
+                encodedQuery += '%';
+                encodedQuery += "0123456789ABCDEF"[static_cast<unsigned char>(c) >> 4];
+                encodedQuery += "0123456789ABCDEF"[static_cast<unsigned char>(c) & 0xF];
+            }
         }
         
         std::string apiUrl = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + 

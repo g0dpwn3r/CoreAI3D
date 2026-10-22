@@ -14,10 +14,12 @@ RUN apt-get update && apt-get install -y \
     gnupg2 \
     software-properties-common \
     ca-certificates \
+    ubuntu-keyring \
     && dpkg --add-architecture i386 \
     && wget -nc https://dl.winehq.org/wine-builds/winehq.key \
-    && apt-key add winehq.key \
-    && add-apt-repository 'deb https://dl.winehq.org/wine-builds/ubuntu/ jammy main' \
+    && gpg --dearmor -o /usr/share/keyrings/winehq-archive-keyring.gpg winehq.key \
+    && echo "deb [signed-by=/usr/share/keyrings/winehq-archive-keyring.gpg] https://dl.winehq.org/wine-builds/ubuntu/ jammy main" > /etc/apt/sources.list.d/winehq.list \
+    && rm -f winehq.key \
     && apt-get update \
     && apt-get install -y --install-recommends winehq-stable \
     winbind \
@@ -82,10 +84,10 @@ RUN python3 -m pip install --upgrade pip && \
 # Install Node.js packages for web automation
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_SKIP_DOWNLOAD=true
-RUN npm install -g --unsafe-perm \
-        cheerio \
-        axios \
-        ws
+RUN npm install -g \
+    cheerio \
+    axios \
+    ws
 
 # Create sandbox user
 RUN useradd -m -s /bin/bash sandbox

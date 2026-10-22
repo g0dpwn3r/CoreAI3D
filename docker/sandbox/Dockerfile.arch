@@ -7,17 +7,17 @@ RUN rm -f /var/lib/pacman/db.lck && \
     pacman -Sy --noconfirm --needed archlinux-keyring && \
     pacman-key --init && \
     pacman-key --populate archlinux && \
-    pacman-key --refresh-keys && \
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
     rm -rf /var/lib/pacman/sync/*.db
 
-# Update system and install essential packages
+# Install essential packages
 RUN rm -f /var/lib/pacman/db.lck && \
-    pacman -Syu --noconfirm --needed && \
-    pacman -S --noconfirm --needed \
+    pacman -Syy --noconfirm --needed \
     curl wget gnupg ca-certificates base-devel file procps-ng net-tools gawk tar \
     python python-pip nodejs npm libffi sqlite supervisor \
     imagemagick sox boost-libs cmake git openssl zlib bzip2 readline \
-    libxml2 xmlsec ncurses xz tk make && \
+    libxml2 xmlsec ncurses xz tk make jack2 && \
     pacman -Scc --noconfirm && rm -rf /var/lib/pacman/sync/*.db
 
 # Create sandbox user
@@ -62,7 +62,7 @@ RUN python -m pip install --upgrade pip && \
 # Install Node.js packages for web automation
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_SKIP_DOWNLOAD=true
-RUN npm install -g --unsafe-perm \
+RUN npm install -g \
     puppeteer \
     cheerio \
     axios \

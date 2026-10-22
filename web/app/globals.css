@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', system-ui, sans-serif;
+  }
+
+  * {
+    @apply border-core-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-core-bg text-text-primary;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::selection {
+    @apply bg-electric-blue/30 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-core-bg;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-core-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-electric-blue/50;
+  }
+
+  input, textarea, select {
+    @apply font-sans;
+  }
+
+  textarea {
+    @apply resize-none;
+  }
+
+  button {
+    @apply font-sans;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-core-card/50 backdrop-blur-sm border border-core-border;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-electric-blue text-white rounded-lg font-medium
+           hover:bg-electric-blue/90 transition-colors
+           focus:outline-none focus:ring-2 focus:ring-electric-blue focus:ring-offset-2 focus:ring-offset-core-bg;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-core-cardHover text-text-primary border border-core-border rounded-lg font-medium
+           hover:bg-core-border transition-colors
+           focus:outline-none focus:ring-2 focus:ring-electric-blue focus:ring-offset-2 focus:ring-offset-core-bg;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-text-muted hover:text-text-primary hover:bg-core-cardHover rounded-lg font-medium
+           transition-colors
+           focus:outline-none focus:ring-2 focus:ring-electric-blue focus:ring-offset-2 focus:ring-offset-core-bg;
+  }
+
+  .input-base {
+    @apply w-full px-4 py-3 bg-core-card border border-core-border rounded-lg text-text-primary placeholder-text-muted
+           focus:border-electric-blue focus:outline-none focus:ring-1 focus:ring-electric-blue
+           transition-colors;
+  }
+
+  .card-base {
+    @apply bg-core-card border border-core-border rounded-xl;
+  }
+
+  .link-base {
+    @apply text-electric-blue hover:text-electric-blue/80 transition-colors underline-offset-2 hover:underline;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-in {
+    animation: animateIn 0.3s ease-out forwards;
+  }
+
+  @keyframes animateIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

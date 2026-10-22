@@ -1623,8 +1623,8 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                 Language* lang = trainingModule->getLanguage();
                 if (lang) {
                     responseMessage = lang->respond(message);
-                    usedWebSearch = lang->lastResponseUsedWebSearch;
-                    webSearchQuery = lang->lastWebSearchQuery;
+                    usedWebSearch = lang->getLastResponseUsedWebSearch();
+                    webSearchQuery = lang->getLastWebSearchQuery();
                 } else {
                     responseMessage = "I'm still initializing my language processing capabilities. Please try again in a moment.";
                 }
@@ -2451,7 +2451,7 @@ std::string APIServer::generateAPIKey() {
 
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hashLen = 0;
-    if (EVP_Digest(randomBytes, sizeof(randomBytes), hash, &hashLen, EVP_sha256(), nullptr) == nullptr) {
+    if (EVP_Digest(randomBytes, sizeof(randomBytes), hash, &hashLen, EVP_sha256(), nullptr) != 1) {
         return "";
     }
 
@@ -4377,6 +4377,29 @@ json APIServer::handleAuthAPI(const std::string& action, const json& parameters,
             }
             
             return response;
+        }
+        else if (method == "POST" && action == "validate_api_key") {
+            std::string apiKey = parameters.value("api_key", "");
+            
+            if (apiKey.empty()) {
+                return createErrorResponse("API key is required", 400);
+            }
+            
+            bool valid = false;
+            if (database) {
+                valid = database->validateAPIKey(apiKey);
+            }
+            else {
+                valid = APIServer::validateAPIKey(apiKey);
+            }
+            
+            if (valid) {
+                return createSuccessResponse("API key is valid",
+                    {{"valid", true}});
+            }
+            
+            return createErrorResponse("API key is invalid or expired", 401,
+                {{"valid", false}});
         }
         else {
             return createErrorResponse("Unknown auth action: " + action + " with method " + method, 400);

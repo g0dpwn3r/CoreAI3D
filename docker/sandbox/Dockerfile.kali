@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 'ca-certificates' is installed.
 ## 🛠️ FIX: Use a direct HTTP mirror to install certificates first
 # This avoids the SSL verification failure when installing ca-certificates.
-RUN echo "deb http://kali.download/kali kali-rolling main contrib non-free" > /etc/apt/sources.list \
+RUN echo "deb https://kali.download/kali kali-rolling main contrib non-free" > /etc/apt/sources.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y tzdata \
 RUN date
 
 # Install core packages
-RUN apt-get update && apt full-upgrade -y && apt upgrade -y && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
       curl wget vim nano htop \
       build-essential cmake git patch \
       procps psmisc lsof strace \
@@ -109,8 +109,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # 3. Install Node.js packages for web automation
-# (Adding --unsafe-perm ensures root doesn't drop privileges during global installs)
-RUN npm install -g --unsafe-perm \
+RUN npm install -g \
     puppeteer \
     cheerio \
     axios \

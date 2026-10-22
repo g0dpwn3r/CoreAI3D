@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 CoreAI3D Dashboard Startup Script
-Simple script to launch the Windows GUI Dashboard with proper error handling.
+Simple script to launch the CoreAI3D GUI Dashboard with proper error handling.
 """
 
 import sys
@@ -45,9 +45,8 @@ def check_dependencies():
     try:
         required_modules = [
             'PyQt6',
-            'psutil',
-            'aiohttp',
-            'websockets'
+            'keyring',
+            'cryptography',
         ]
 
         missing_modules = []
@@ -76,7 +75,7 @@ def check_dependencies():
 def main():
     """Main startup function"""
     print("CoreAI3D Dashboard Startup")
-    print("=" * 30)
+    print("=" * 35)
 
     # Setup environment
     if not setup_environment():

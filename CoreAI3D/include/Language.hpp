@@ -23,6 +23,9 @@ public:
     CoreAI* getCore();
     Training* getTrainer();
 
+    bool getLastResponseUsedWebSearch() const { return lastResponseUsedWebSearch; }
+    std::string getLastWebSearchQuery() const { return lastWebSearchQuery; }
+
     std::string currentLang = "en";
 
     static std::vector<float> flattenEmbeddings(const std::unordered_map<std::string, std::vector<float>>& embeddingsByLang);

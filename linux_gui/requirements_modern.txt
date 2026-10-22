@@ -1,0 +1,15 @@
+# CoreAI3D Modern GUI — Requirements
+
+# GUI framework
+PyQt6>=6.6.0
+
+# Secure key storage (preferred)
+keyring>=24.0.0
+
+# Encrypted file fallback for key storage
+cryptography>=42.0.0
+
+# Backend API client (already part of CoreAI3D)
+# aiohttp>=3.10.0
+# websockets>=13.0.0
+# qasync>=0.27.0

@@ -84,7 +84,7 @@ class CoreAI3DClient:
             'ws_url': default_ws_url(),
             'api_key': '',
             'session_id': '',
-            'timeout': 30.0,
+            'timeout': 90.0,
             'max_retries': 3,
             'retry_delay': 1.0,
             'max_concurrent': 10,
@@ -229,6 +229,10 @@ class CoreAI3DClient:
         self._is_connected = False
         self._reconnect_attempts = 0
         logger.info("Client disconnected successfully")
+
+    async def close(self):
+        """Alias for disconnect(), for code that calls client.close()."""
+        await self.disconnect()
 
     async def _connect_websocket(self):
         """Establish WebSocket connection with improved error handling and diagnostics"""
@@ -871,12 +875,126 @@ class CoreAI3DClient:
         }
         return await self.post('/training/load_dataset', data)
 
+    async def login(self, username: str, password: str) -> APIResponse:
+        """Log in to the backend and store the session_id.
+
+        POST /auth/login  {"username":..., "password":...}
+        Response contains "session_id" which is stored on self.config.
+        """
+        data = {'username': username, 'password': password}
+        response = await self.post('/auth/login', data)
+        if response.success and isinstance(response.data, dict):
+            session_id = response.data.get('session_id') or response.data.get('sessionId')
+            if session_id and str(session_id).strip():
+                self.config['session_id'] = str(session_id).strip()
+                logger.info(f"Login successful, session_id stored: {self.config['session_id'][:8]}...")
+            else:
+                logger.warning(f"Login response missing session_id: {response.data}")
+        return response
+
     async def generate_api_key(self, description: str = '') -> APIResponse:
-        """Generate a new SHA-256 API key (64 characters)"""
+        """Generate a new API key.
+
+        Requires a valid session_id (obtained via login()).
+        POST /auth/apikey  {"session_id":..., "description":...}
+        Response example: {"api_key": "...", "description":..., "created": true, "timestamp": "..."}
+        """
+        if not self.config.get('session_id'):
+            return APIResponse(
+                success=False,
+                data=None,
+                message="No session_id available. Call login() first.",
+                status_code=400,
+                metadata={}
+            )
         data = {
+            'session_id': self.config['session_id'],
             'description': description
         }
-        return await self.post('/auth/generate_api_key', data)
+        return await self.post('/auth/apikey', data)
+
+    @staticmethod
+    def parse_api_key(response: APIResponse) -> Optional[str]:
+        """Robustly extract an API key from an APIResponse.
+
+        Search order:
+          1. top-level: api_key, apiKey, apikey, key, secret, token, access_token
+          2. nested under: data, result, payload, response, keys
+          3. any non-empty string longer than 8 characters
+        Logs the complete raw JSON response if no key is found.
+        """
+        if response is None:
+            logger.warning("parse_api_key: response is None")
+            return None
+
+        data = response.data if isinstance(response.data, (dict, list)) else None
+        if data is None:
+            logger.warning(f"parse_api_key: no dict/list data in response (type={type(response.data).__name__}, data={response.data!r})")
+            return None
+
+        # Top-level keys
+        top_keys = (
+            "api_key", "apiKey", "apikey",
+            "key", "secret", "token",
+            "access_token", "accessToken",
+        )
+        if isinstance(data, dict):
+            for k in top_keys:
+                v = data.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+
+            # Nested containers
+            nested_keys = ("data", "result", "payload", "response", "keys")
+            for nk in nested_keys:
+                v = data.get(nk)
+                found = CoreAI3DClient._extract_key_from_container(v)
+                if found:
+                    return found
+
+            # Last resort: any string > 8 chars
+            for v in data.values():
+                if isinstance(v, str) and v.strip() and len(v) > 8:
+                    logger.debug(f"parse_api_key: using last-resort string key: {v[:12]}...")
+                    return v.strip()
+
+        elif isinstance(data, list):
+            for item in data:
+                found = CoreAI3DClient._extract_key_from_container(item)
+                if found:
+                    return found
+
+        logger.warning(
+            f"parse_api_key: no API key found in response.\n"
+            f"Raw response data:\n{json.dumps(response.data, indent=2, default=str)}"
+        )
+        return None
+
+    @staticmethod
+    def _extract_key_from_container(container: Any) -> Optional[str]:
+        """Recursively search a nested dict/list for an API key string."""
+        if container is None:
+            return None
+        top_keys = (
+            "api_key", "apiKey", "apikey",
+            "key", "secret", "token",
+            "access_token", "accessToken",
+        )
+        if isinstance(container, dict):
+            for k in top_keys:
+                v = container.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+            for v in container.values():
+                found = CoreAI3DClient._extract_key_from_container(v)
+                if found:
+                    return found
+        elif isinstance(container, list):
+            for item in container:
+                found = CoreAI3DClient._extract_key_from_container(item)
+                if found:
+                    return found
+        return None
 
     async def validate_api_key(self, api_key: str) -> APIResponse:
         """Validate an API key"""

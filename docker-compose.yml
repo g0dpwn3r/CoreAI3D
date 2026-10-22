@@ -3,8 +3,8 @@ services:
     image: mysql:latest
     container_name: coreai3d_mysql
     environment:
-      MYSQL_ROOT_PASSWORD: pmAkRV4lAAKsOfdWCUxP
-      MYSQL_DATABASE: CoreAI3D
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-pmAkRV4lAAKsOfdWCUxP}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-CoreAI3D}
     # Explicitly enable the X Plugin (X DevAPI / port 33060) and bind it on all
     # interfaces so other containers on the network can reach it.
     command:
@@ -47,11 +47,11 @@ services:
       # Primary host: Docker's embedded DNS resolves "mysql" to 172.29.0.5
       # because both containers are on the user-defined "skynet" bridge.
       # If DNS ever flakes, swap to the literal IP below (no rebuild needed).
-      DB_HOST: mysql
-      DB_PORT: 33060
-      DB_USER: root
-      DB_PASSWORD: pmAkRV4lAAKsOfdWCUxP
-      DB_SCHEMA: CoreAI3D
+      DB_HOST: ${MYSQL_HOST:-mysql}
+      DB_PORT: ${MYSQL_PORT:-33060}
+      DB_USER: ${MYSQL_USER:-root}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-pmAkRV4lAAKsOfdWCUxP}
+      DB_SCHEMA: ${MYSQL_DATABASE:-CoreAI3D}
     ports:
       - "1906:8080" # API Server
       - "1907:8081" # WebSocket Server
@@ -300,28 +300,33 @@ services:
       - LOG_LEVEL=INFO
     command: ["python3", "/app/train_linux_operations.py"]
 
-  admin-desktop:
+  web:
     build:
-      context: ./docker/admin-gui
-      dockerfile: Dockerfile.admin-gui
-    container_name: coreai3d_admin_gui
-    privileged: true  # Allows the X server and DBus to launch panels without kernel blocks
-    shm_size: "2gb"   # Expanded video memory allocation
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Amsterdam
-    volumes:
-      - .:/app
-      - webtop_desktop_config:/config 
-    ports:
-      - "3001:3001"
-    restart: unless-stopped
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: coreai3d_web
+    depends_on:
+      mysql:
+        condition: service_healthy
+      coreai3d:
+        condition: service_started
     networks:
       - skynet
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - COREAI3D_API_URL=http://coreai3d:8080
+      - DATABASE_URL=file:./data/coreai3d.db
+    ports:
+      - "3000:3000"
+    volumes:
+      - web_data:/app/data
+    restart: unless-stopped
+
 volumes:
     mysql_data:
     webtop_desktop_config:
+    web_data:
 
 networks:
   skynet:
