@@ -1,5 +1,6 @@
 ﻿#include "Language.hpp"
 #include <cstdio>
+#include <sstream>
 Language::Language(std::string& embedingFile, int& embeddingDim, std::string& dbHost, int& dbPort,
     std::string& dbUser, std::string& dbPassword,
     std::string& dbSchema, int sslDummy, std::string& lang, int& inputSize, int& outputSize, int& layers, int& neurons, int sessionId)
@@ -836,7 +837,7 @@ void Language::learnFromExchange(const std::string& userInput, const std::string
     }
 }
 
-bool Language::shouldSearchWeb(const std::string& message) {
+    bool Language::shouldSearchWeb(const std::string& message) {
     std::string lowerMsg = message;
     std::transform(lowerMsg.begin(), lowerMsg.end(), lowerMsg.begin(), ::tolower);
     
@@ -844,7 +845,10 @@ bool Language::shouldSearchWeb(const std::string& message) {
         "search for", "look up", "google", "find me", "search the web",
         "latest news", "latest on", "current", "recent", "what's new",
         "what is newest", "breaking news", "today", "this week",
-        "tell me about the latest", "what happened with", "recently"
+        "tell me about the latest", "what happened with", "recently",
+        "list", "name", "examples of", "give me", "show me", "tell me",
+        "who is", "what is", "where is", "when did", "how many",
+        "facts about", "information about", "details about"
     };
     
     for (const auto& trigger : searchTriggers) {
@@ -998,6 +1002,65 @@ std::string Language::summarizeWebResult(const std::string& query, const std::st
     }
     
     return conversationalResponse;
+}
+
+void Language::setLlmConfig(const std::string& provider, const std::string& baseUrl, const std::string& model, double temperature, int maxTokens) {
+    llmProvider = provider.empty() ? llmProvider : provider;
+    llmBaseUrl = baseUrl.empty() ? llmBaseUrl : baseUrl;
+    llmModel = model.empty() ? llmModel : model;
+    if (temperature > 0) llmTemperature = temperature;
+    if (maxTokens > 0) llmMaxTokens = maxTokens;
+}
+
+std::string Language::callOllama(const std::string& prompt, const std::string& context) {
+    if (llmProvider != "ollama") return "";
+    std::string url = llmBaseUrl;
+    if (!url.empty() && url.back() == '/') url.pop_back();
+    url += "/api/generate";
+
+    std::string body = "{";
+    body += "\"model\":\"" + llmModel + "\",";
+    std::string fullPrompt = prompt;
+    if (!context.empty()) fullPrompt = "Context:\n" + context + "\n\n" + prompt;
+    // escape backslashes and quotes minimally
+    std::string escaped;
+    for (char c : fullPrompt) {
+        if (c == '\\') escaped += "\\\\";
+        else if (c == '"') escaped += "\\\"";
+        else if (c == '\n') escaped += "\\n";
+        else escaped += c;
+    }
+    body += "\"prompt\":\"" + escaped + "\",";
+    body += "\"stream\":false,";
+    body += "\"options\":{\"temperature\":" + std::to_string(llmTemperature) + ",\"num_predict\":" + std::to_string(llmMaxTokens) + "}";
+    body += "}";
+
+    std::string cmd = "curl -s -X POST -H 'Content-Type: application/json' -d '" + body + "' '" + url + "' 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+    char buffer[4096];
+    std::string raw;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) raw += buffer;
+    pclose(pipe);
+
+    // parse "response":"..."
+    size_t pos = raw.find("\"response\":");
+    if (pos == std::string::npos) return "";
+    pos = raw.find('"', pos + 11);
+    if (pos == std::string::npos) return "";
+    ++pos;
+    std::string out;
+    while (pos < raw.size() && raw[pos] != '"') {
+        if (raw[pos] == '\\' && pos + 1 < raw.size()) {
+            char n = raw[pos+1];
+            if (n == 'n') { out += '\n'; pos += 2; continue; }
+            if (n == 't') { out += '\t'; pos += 2; continue; }
+            if (n == '"') { out += '"'; pos += 2; continue; }
+            if (n == '\\') { out += '\\'; pos += 2; continue; }
+        }
+        out += raw[pos++];
+    }
+    return out;
 }
 
 std::string Language::respond(const std::string& message) {
@@ -1664,6 +1727,141 @@ std::string Language::respond(const std::string& message) {
         }
         return false;
     };
+
+    // Generate a list of items for common categories, optionally filtered by starting letter.
+    auto generateList = [&](const std::string& category, char targetLetter, int count) -> std::string {
+        std::vector<std::string> items;
+
+        if (category.find("animal") != std::string::npos) {
+            items = {"Aardvark", "Albatross", "Alligator", "Alpaca", "Ant", "Anteater", "Antelope",
+                     "Baboon", "Badger", "Bat", "Bear", "Beaver", "Bee", "Bison", "Buffalo", "Butterfly",
+                     "Camel", "Caribou", "Cat", "Caterpillar", "Cattle", "Chameleon", "Cheetah", "Chicken",
+                     "Chimpanzee", "Cobra", "Cougar", "Cow", "Coyote", "Crab", "Crocodile", "Crow",
+                     "Deer", "Dingo", "Dinosaur", "Dog", "Dolphin", "Donkey", "Duck", "Eagle",
+                     "Elephant", "Elk", "Emu", "Falcon", "Ferret", "Fish", "Flamingo", "Fox", "Frog",
+                     "Giraffe", "Goat", "Goldfish", "Goose", "Gorilla", "Grasshopper", "Hamster",
+                     "Hare", "Hawk", "Hedgehog", "Hippopotamus", "Horse", "Human", "Hummingbird",
+                     "Hyena", "Iguana", "Impala", "Jaguar", "Jellyfish", "Kangaroo", "Kiwi", "Koala",
+                     "Leopard", "Lion", "Lizard", "Llama", "Lobster", "Monkey", "Moose", "Octopus",
+                     "Ostrich", "Otter", "Owl", "Panda", "Parrot", "Peacock", "Pelican", "Penguin",
+                     "Pig", "Pigeon", "Polar bear", "Porcupine", "Rabbit", "Raccoon", "Rat",
+                     "Raven", "Reindeer", "Rhinoceros", "Salmon", "Seal", "Shark", "Sheep", "Snake",
+                     "Spider", "Squirrel", "Tiger", "Turtle", "Wolf", "Zebra"};
+        }
+        else if (category.find("girl") != std::string::npos || category.find("name") != std::string::npos) {
+            items = {"Abigail", "Ava", "Amelia", "Avery", "Aria", "Ashley", "Alexis", "Anna", "Andrea", "Alice",
+                     "Bella", "Brooklyn", "Bailey", "Brooke", "Brianna", "Brooke", "Blake", "Brielle",
+                     "Catherine", "Charlotte", "Chloe", "Claire", "Claudia", "Camila", "Cora", "Cecilia",
+                     "Daisy", "Diana", "Delilah", "Danielle", "Deborah", "Dorothy", "Diane",
+                     "Eleanor", "Ella", "Emily", "Emma", "Elizabeth", "Ella", "Ella", "Evelyn", "Elena",
+                     "Faith", "Fiona", "Frances", "Felicia", "Fern", "Flora", "Freya",
+                     "Gabriella", "Grace", "Georgia", "Gemma", "Gabriela", "Gianna", "Gracie", "Genevieve",
+                     "Hannah", "Hailey", "Hazel", "Heidi", "Holly", "Hope", "Heather",
+                     "Isabella", "Ivy", "Iris", "Irene", "Isla", "Imogen", "Iris",
+                     "Jade", "Jane", "Jasmine", "Julia", "Jade", "Joan", "Jocelyn",
+                     "Katherine", "Kayla", "Kimberly", "Kylie", "Keira", "Kamila", "Kinsley",
+                     "Layla", "Lily", "Lucy", "Leah", "Laura", "Lillian", "Leilani", "Lucia",
+                     "Madison", "Mia", "Maya", "Mackenzie", "Margaret", "Maria", "Melanie",
+                     "Natalie", "Nora", "Naomi", "Nicole", "Nadia", "Nina",
+                     "Olivia", "Ophelia", "Oakley", "Olive", "Opal",
+                     "Penelope", "Piper", "Paige", "Paris", "Peyton", "Paulina",
+                     "Quinn", "Queenie", "Quiana",
+                     "Rachel", "Rebecca", "Ruby", "Rose", "Ruth", "Rachel", "Ramona",
+                     "Sarah", "Samantha", "Sophia", "Stella", "Savannah", "Scarlett", "Sadie",
+                     "Taylor", "Tessa", "Talia", "Teresa", "Tiffany", "Tyra",
+                     "Uma", "Ursula",
+                     "Victoria", "Violet", "Valerie", "Vanessa", "Vera",
+                     "Willa", "Winter", "Wendy",
+                     "Xena", "Ximena",
+                     "Yara", "Yvette", "Yolanda",
+                     "Zoe", "Zara", "Zoey"};
+        }
+        else if (category.find("programming") != std::string::npos || category.find("language") != std::string::npos) {
+            items = {"Python", "JavaScript", "Java", "C++", "C#", "PHP", "Ruby", "Swift", "Go", "Rust",
+                     "Kotlin", "TypeScript", "Perl", "R", "Scala", "Haskell", "Lua", "Dart", "Elixir", "Clojure"};
+        }
+        else if (category.find("country") != std::string::npos) {
+            items = {"Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Argentina", "Armenia",
+                     "Australia", "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados",
+                     "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia", "Botswana",
+                     "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cabo Verde", "Cambodia",
+                     "Cameroon", "Canada", "Central African Republic", "Chad", "Chile", "China",
+                     "Colombia", "Comoros", "Congo", "Costa Rica", "Croatia", "Cuba", "Cyprus",
+                     "Czech Republic", "Denmark", "Djibouti", "Dominica", "Dominican Republic",
+                     "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia",
+                     "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia",
+                     "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau",
+                     "Guyana", "Haiti", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran",
+                     "Iraq", "Ireland", "Israel", "Italy", "Ivory Coast", "Jamaica", "Japan", "Jordan",
+                     "Kazakhstan", "Kenya", "Kiribati", "Korea North", "Korea South", "Kosovo", "Kuwait",
+                     "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya",
+                     "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar", "Malawi", "Malaysia",
+                     "Maldives", "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius",
+                     "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro", "Morocco",
+                     "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand",
+                     "Nicaragua", "Niger", "Nigeria", "North Macedonia", "Norway", "Oman", "Pakistan",
+                     "Palau", "Palestine", "Panama", "Papua New Guinea", "Paraguay", "Peru",
+                     "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Rwanda",
+                     "Saint Kitts", "Saint Lucia", "Saint Vincent", "Samoa", "San Marino", "Sao Tome",
+                     "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore",
+                     "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa",
+                     "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland",
+                     "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo",
+                     "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu",
+                     "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States",
+                     "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam",
+                     "Yemen", "Zambia", "Zimbabwe"};
+        }
+        else if (category.find("fruit") != std::string::npos) {
+            items = {"Apple", "Apricot", "Avocado", "Banana", "Blackberry", "Blueberry", "Cherry",
+                     "Coconut", "Cranberry", "Date", "Dragonfruit", "Durian", "Fig", "Grape",
+                     "Grapefruit", "Guava", "Honeydew", "Kiwi", "Kumquat", "Lemon", "Lime",
+                     "Mango", "Melon", "Nectarine", "Orange", "Papaya", "Passion fruit", "Peach",
+                     "Pear", "Pineapple", "Plum", "Pomegranate", "Raspberry", "Strawberry",
+                     "Tangerine", "Watermelon"};
+        }
+        else if (category.find("color") != std::string::npos) {
+            items = {"Red", "Blue", "Green", "Yellow", "Orange", "Purple", "Pink", "Brown",
+                     "Black", "White", "Gray", "Gold", "Silver", "Navy", "Teal", "Maroon",
+                     "Olive", "Cyan", "Magenta", "Lime", "Indigo", "Violet", "Beige", "Coral"};
+        }
+        else if (category.find("car") != std::string::npos) {
+            items = {"Ford", "Toyota", "Honda", "Chevrolet", "Nissan", "Hyundai", "BMW", "Mercedes",
+                     "Audi", "Volkswagen", "Tesla", "Volvo", "Subaru", "Mazda", "Kia", "Lexus",
+                     "Porsche", "Ferrari", "Lamborghini", "Jeep", "Dodge", "Chrysler", "GMC"};
+        }
+        else if (category.find("planet") != std::string::npos) {
+            items = {"Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"};
+        }
+
+        // Filter by target letter if specified
+        std::vector<std::string> filtered;
+        for (const auto& item : items) {
+            if (targetLetter == '\0' || std::tolower(static_cast<unsigned char>(item[0])) == targetLetter) {
+                filtered.push_back(item);
+            }
+        }
+
+        if (filtered.empty()) {
+            return "I don't have any " + category + " starting with the letter '" +
+                   std::string(1, targetLetter) + "' in my list.";
+        }
+
+        // Build the response
+        std::ostringstream oss;
+        if (targetLetter != '\0') {
+            oss << "Here are " << count << " " << category << " starting with the letter '"
+                << static_cast<char>(std::toupper(static_cast<unsigned char>(targetLetter))) << "':\n";
+        } else {
+            oss << "Here are " << count << " " << category << ":\n";
+        }
+        int toShow = std::min(count, static_cast<int>(filtered.size()));
+        for (int i = 0; i < toShow; ++i) {
+            oss << (i + 1) << ". " << filtered[i] << "\n";
+        }
+        return oss.str();
+    };
+
     lastResponseUsedWebSearch = false;
     lastWebSearchQuery = "";
 
@@ -1671,9 +1869,24 @@ std::string Language::respond(const std::string& message) {
         lastResponseUsedWebSearch = true;
         lastWebSearchQuery = message;
         std::string searchResult = webSearch(message);
-        response = summarizeWebResult(message, searchResult);
-        learnFromExchange(message, response);
-        return response;
+        std::string summarized = summarizeWebResult(message, searchResult);
+        
+        // If web search didn't yield useful results, fall through to
+        // general knowledge handling instead of returning a dead end.
+        bool searchFailed = summarized.find("couldn't find relevant information") != std::string::npos ||
+                           summarized.find("I tried searching the web") != std::string::npos;
+        
+        if (!searchFailed && !summarized.empty()) {
+            std::string llmResponse = callOllama(message, searchResult);
+            if (!llmResponse.empty()) {
+                response = llmResponse;
+            } else {
+                response = summarized;
+            }
+            learnFromExchange(message, response);
+            return response;
+        }
+        // Fall through to general knowledge responses below
     }
 
     for (const auto& topic : topicBank) {
@@ -1753,77 +1966,146 @@ std::string Language::respond(const std::string& message) {
     }
     if (lowerMsg.find("what is") != std::string::npos || lowerMsg.find("what are") != std::string::npos ||
         lowerMsg.find("define") != std::string::npos || lowerMsg.find("explain") != std::string::npos) {
-        response = "That's an interesting question about \"" + message + "\". Let me share what I know:\n"
-                   "I'd need to analyze this topic further to give you a comprehensive answer. "
-                   "Could you specify which aspect you're most interested in? For example:\n"
-                   "- A high-level overview or detailed technical explanation\n"
-                   "- Practical applications or theoretical foundations\n"
-                   "- Comparison with related concepts\n"
-                   "The more specific you are, the more helpful my response will be!";
+        // Try web search first for factual questions
+        std::string searchResult = webSearch(message);
+        if (!searchResult.empty()) {
+            lastResponseUsedWebSearch = true;
+            lastWebSearchQuery = message;
+            response = summarizeWebResult(message, searchResult);
+            learnFromExchange(message, response);
+            return response;
+        }
+        response = "I don't have specific information about \"" + message + "\" in my knowledge base. "
+                   "I'll do my best to help if you can tell me more about what you're looking for.";
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("why") != std::string::npos) {
-        response = "Great analytical question! Understanding 'why' helps build deeper knowledge.\n"
-                   "For your question about \"" + message + "\", the answer typically involves:\n"
-                   "- Historical context and evolution of the concept\n"
-                   "- Underlying principles and cause-effect relationships\n"
-                   "- Practical implications and real-world applications\n"
-                   "Could you tell me more about the specific context? I can provide a more targeted explanation.";
+        std::string searchResult = webSearch(message);
+        if (!searchResult.empty()) {
+            lastResponseUsedWebSearch = true;
+            lastWebSearchQuery = message;
+            response = summarizeWebResult(message, searchResult);
+            learnFromExchange(message, response);
+            return response;
+        }
+        response = "That's a good question about \"" + message + "\". Unfortunately I don't have enough "
+                   "information in my knowledge base to give you a complete explanation.";
         learnFromExchange(message, response);
         return response;
     }
     if (lowerMsg.find("advice") != std::string::npos || lowerMsg.find("recommend") != std::string::npos ||
         lowerMsg.find("should i") != std::string::npos || lowerMsg.find("best") != std::string::npos) {
-        response = "Here's my recommendation regarding \"" + message + "\":\n"
+        response = "Here's my take on \"" + message + "\":\n"
                    "1. Consider your specific requirements and constraints\n"
                    "2. Research multiple approaches and their trade-offs\n"
                    "3. Start with a well-established, proven solution\n"
-                   "4. Iterate and improve based on real-world feedback\n"
-                   "What specific factors matter most to you? I can tailor my advice to your situation.";
+                   "4. Iterate and improve based on real-world feedback";
         learnFromExchange(message, response);
         return response;
     }
     if (!classification.empty() && classification.find("Core:") == std::string::npos) {
         if (classification == "Wisdom" || classification == "Knowledge") {
-            response = "That's a thoughtful question about \"" + message + "\". "
-                       "Based on my analysis, this seems like an area where deeper understanding is valuable. "
-                       "I'd recommend exploring this topic through multiple angles - "
-                       "theoretical foundations, practical applications, and expert perspectives. "
-                       "What specific aspect would you like to explore further?";
+            response = "That's a good question about \"" + message + "\". "
+                       "Let me give you a direct answer based on what I know.";
         } else if (classification == "Positive") {
-            response = "That's a great point! Regarding \"" + message + "\", I appreciate the positive angle. "
-                       "Would you like me to expand on any particular aspect or provide additional information?";
+            response = "Thanks for sharing that! Regarding \"" + message + "\", "
+                       "I'm glad you're feeling positive about it.";
         } else if (classification == "Critical" || classification == "Negative") {
-            response = "I understand you're raising an important concern about \"" + message + "\". "
-                       "Let me help address this: could you provide more context about the specific issue? "
-                       "The more details you share, the better I can assist in finding a solution.";
+            response = "I understand you have concerns about \"" + message + "\". "
+                       "Let me help address this directly.";
         } else {
-            response = "I've processed your message about \"" + message + "\". "
-                       "I'm here to help with a wide range of topics including cybersecurity, programming, "
-                       "mathematics, science, and technology. Could you tell me more specifically what you'd like to know?";
+            response = "I'm here to help with \"" + message + "\". "
+                       "I can assist with programming, cybersecurity, mathematics, science, "
+                       "technology, and many other topics.";
         }
+        learnFromExchange(message, response);
+        return response;
     } else {
-        if (response.empty() && conversationCount > 2) {
-            std::string searchResult = webSearch(message);
-            if (!searchResult.empty()) {
-                lastResponseUsedWebSearch = true;
-                lastWebSearchQuery = message;
-                response = summarizeWebResult(message, searchResult);
-                learnFromExchange(message, response);
-                return response;
+        // General knowledge fallback: attempt to answer the user's question
+        // directly instead of deflecting with meta-questions.
+
+        std::string lower = message;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+        // Handle list-type requests: "name 5 X with letter Y", "list X", etc.
+        if (lower.find("name ") != std::string::npos ||
+            lower.find("list ") != std::string::npos ||
+            lower.find("give me ") != std::string::npos ||
+            lower.find("examples of ") != std::string::npos) {
+            // Try to extract a category and letter from the request
+            std::string category = "";
+            char targetLetter = '\0';
+            int count = 5;
+
+            // Extract number if present (e.g. "5 animals", "name 5 girls")
+            size_t numPos = lower.find_first_of("0123456789");
+            if (numPos != std::string::npos) {
+                try {
+                    count = std::stoi(lower.substr(numPos, 2));
+                    if (count < 1) count = 1;
+                    if (count > 20) count = 20;
+                } catch (...) { count = 5; }
+            }
+
+            // Extract letter if present (e.g. "with the letter p", "start with P")
+            size_t letterPos = lower.find("letter ");
+            if (letterPos != std::string::npos && letterPos + 7 < lower.size()) {
+                targetLetter = std::tolower(static_cast<unsigned char>(lower[letterPos + 7]));
+            } else {
+                // Also try "start with X" pattern
+                size_t startWithPos = lower.find("start with ");
+                if (startWithPos != std::string::npos && startWithPos + 11 < lower.size()) {
+                    char c = lower[startWithPos + 11];
+                    if (std::isalpha(static_cast<unsigned char>(c))) {
+                        targetLetter = std::tolower(static_cast<unsigned char>(c));
+                    }
+                }
+            }
+
+            // Extract category - look for common category keywords
+            std::vector<std::string> categoryKeywords = {
+                "animals", "animal", "girls names", "girl names", "names",
+                "programming languages", "languages", "countries", "cities",
+                "fruits", "colors", "cars", "planets"
+            };
+            for (const auto& kw : categoryKeywords) {
+                if (lower.find(kw) != std::string::npos) {
+                    category = kw;
+                    break;
+                }
+            }
+
+            // Generate the list
+            response = generateList(category, targetLetter, count);
+        }
+        // Handle general factual questions
+        else if (lower.find("what ") != std::string::npos ||
+                 lower.find("who ") != std::string::npos ||
+                 lower.find("where ") != std::string::npos ||
+                 lower.find("when ") != std::string::npos ||
+                 lower.find("how ") != std::string::npos ||
+                 lower.find("why ") != std::string::npos) {
+            response = "That's a good question about \"" + message + "\". "
+                       "I don't have specific information about that in my knowledge base right now.";
+        }
+        // Handle conversational/greeting input
+        else if (lower.length() < 20 &&
+                 (lower.find("hi") != std::string::npos || lower.find("hello") != std::string::npos ||
+                  lower.find("hey") != std::string::npos || lower.find("good morning") != std::string::npos)) {
+            response = "Hello! I'm CoreAI3D, your AI assistant. I can help with programming, "
+                       "cybersecurity, mathematics, science, technology, and many other topics. "
+                       "What would you like to know or work on?";
+        }
+        // Last resort: try local LLM via Ollama, then concise fallback
+        else {
+            std::string llmResponse = callOllama(message, "");
+            if (!llmResponse.empty()) {
+                response = llmResponse;
+            } else {
+                response = "I couldn't generate a detailed response right now. Please try again or ask a more specific question.";
             }
         }
-        std::vector<std::string> fallbackResponses = {
-            "That's an interesting thought. Tell me more about where you're coming from with this - I'd love to understand your perspective better.",
-            "I'm thinking about this with you. Could you give me a bit more context? The more I understand what you're working toward, the better I can help.",
-            "Hmm, this is worth exploring. What specifically would be most useful for me to dig into here?",
-            "I'm intrigued by this. Help me understand what aspect matters most to you right now, and we'll go deeper together.",
-            "Good question - let's break this down. What's the core thing you're trying to figure out or accomplish?"
-        };
-        
-        int idx = std::hash<std::string>{}(message + std::to_string(std::time(nullptr))) % fallbackResponses.size();
-        response = fallbackResponses[idx];
     }
     learnFromExchange(message, response);
     return response;

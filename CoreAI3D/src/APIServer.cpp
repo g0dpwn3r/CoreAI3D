@@ -127,6 +127,16 @@ bool APIServer::initialize(const std::string& configPath,
                     if (dbConfig.contains("create_tables")) this->createTables = dbConfig["create_tables"];
                 }
 
+                // Load LLM configuration
+                if (config.contains("llm")) {
+                    auto llmConfig = config["llm"];
+                    if (llmConfig.contains("provider")) llmProvider = llmConfig["provider"];
+                    if (llmConfig.contains("base_url")) llmBaseUrl = llmConfig["base_url"];
+                    if (llmConfig.contains("model")) llmModel = llmConfig["model"];
+                    if (llmConfig.contains("temperature")) llmTemperature = llmConfig["temperature"];
+                    if (llmConfig.contains("max_tokens")) llmMaxTokens = llmConfig["max_tokens"];
+                }
+
                 std::cout << "Configuration loaded from " << configPath << std::endl;
             } else {
                 std::cout << "Configuration file not found, using defaults" << std::endl;
@@ -343,17 +353,18 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             if (pathParts[1] == apiVersion) {
                 startIndex = 2;
                 std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Version-matched endpoint, startIndex = 2" << std::endl;
-            } else {
-                // Handle endpoints without version (e.g., /api/status, /api/health)
-                // Check if the second part is a known endpoint that doesn't require version
-                if (potentialEndpoint == "status" || potentialEndpoint == "health" ||
-                    potentialEndpoint == "ws" || potentialEndpoint == "ai" ||
-                    potentialEndpoint == "predict" || potentialEndpoint == "training") {
-                    startIndex = 1; // Skip only "api" prefix
-                    std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Version-less endpoint matched: " << potentialEndpoint << ", startIndex = 1" << std::endl;
                 } else {
-                    std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown endpoint: " << potentialEndpoint << ", startIndex = 0" << std::endl;
-                }
+                    // Handle endpoints without version (e.g., /api/status, /api/health)
+                    // Check if the second part is a known endpoint that doesn't require version
+                    if (potentialEndpoint == "status" || potentialEndpoint == "health" ||
+                        potentialEndpoint == "ws" || potentialEndpoint == "ai" ||
+                        potentialEndpoint == "predict" || potentialEndpoint == "training" ||
+                        potentialEndpoint == "chat") {
+                        startIndex = 1; // Skip only "api" prefix
+                        std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Version-less endpoint matched: " << potentialEndpoint << ", startIndex = 1" << std::endl;
+                    } else {
+                        std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Unknown endpoint: " << potentialEndpoint << ", startIndex = 0" << std::endl;
+                    }
             }
         }
 
@@ -513,6 +524,175 @@ json APIServer::processAPIRequest(const std::string& endpoint, const std::string
             }
 #endif
             return createSuccessResponse("API key generated", {{"api_key", apiKey}});
+        }
+        else if (module == "beta") {
+            std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to beta module, action=" << action << std::endl;
+
+            if (method == "POST" && action == "generate") {
+                int count = requestData.value("count", 1);
+                std::string description = requestData.value("description", "");
+                std::string email = requestData.value("email", "");
+                std::string expires_at = requestData.value("expires_at", "");
+                int max_uses = requestData.value("max_uses", 0);
+
+                if (count < 1) count = 1;
+                if (count > 100) count = 100;
+
+                json keys = json::array();
+                for (int i = 0; i < count; ++i) {
+                    std::string betaKey = generateBetaKey();
+
+                    // Never return an empty key; if generation failed, skip it.
+                    if (betaKey.empty()) {
+                        continue;
+                    }
+
+                    if (database) {
+                        try {
+                            database->saveBetaKey(betaKey, description, email, expires_at, max_uses);
+                        }
+                        catch (const std::exception& ex) {
+                            // A database failure must not prevent the key from
+                            // being returned to the caller. Log and continue.
+                            std::cerr << "Warning: failed to persist beta key: "
+                                      << ex.what() << std::endl;
+                        }
+                    }
+
+                    keys.push_back(betaKey);
+                }
+
+                if (keys.empty()) {
+                    return createErrorResponse("Failed to generate any beta keys", 500);
+                }
+
+                json data = {
+                    {"keys", keys},
+                    {"count", static_cast<int>(keys.size())},
+                    {"message", "Beta key(s) generated successfully"}
+                };
+
+                if (!keys.empty()) {
+                    data["key"] = keys[0];
+                    data["beta_key"] = keys[0];
+                }
+                if (!email.empty()) {
+                    data["email"] = email;
+                }
+
+                return data;
+            }
+            else if (method == "GET" && action == "list") {
+                json keys = json::array();
+                if (database) {
+                    auto betaKeys = database->getBetaKeys();
+                    for (const auto& info : betaKeys) {
+                        keys.push_back({
+                            {"id", info.id},
+                            {"key", info.key},
+                            {"description", info.description},
+                            {"email", info.email},
+                            {"max_uses", info.max_uses},
+                            {"uses", info.uses},
+                            {"active", info.is_active},
+                            {"used_at", info.used_at},
+                            {"created_at", info.created_at}
+                        });
+                    }
+                }
+
+                return json{
+                    {"keys", keys}
+                };
+            }
+            else if (method == "POST" && action == "validate") {
+                std::string key = requestData.value("key", "");
+
+                if (key.empty()) {
+                    return createErrorResponse("Beta key is required", 400);
+                }
+
+                bool valid = false;
+                if (database) {
+                    valid = database->validateBetaKey(key);
+                }
+                else {
+                    valid = !key.empty();
+                }
+
+                if (valid) {
+                    return json{
+                        {"valid", true},
+                        {"key", key},
+                        {"message", "Beta key is valid"}
+                    };
+                }
+
+                return json{
+                    {"valid", false},
+                    {"error", "Beta key is invalid, expired, revoked or already used"}
+                };
+            }
+            else if (method == "POST" && action == "use") {
+                std::string key = requestData.value("key", "");
+                std::string userId = requestData.value("user_id", "");
+
+                if (key.empty() || userId.empty()) {
+                    return json{
+                        {"success", false},
+                        {"error", "Beta key and user ID are required"}
+                    };
+                }
+
+                bool used = false;
+                if (database) {
+                    used = database->useBetaKey(key, userId);
+                }
+                else {
+                    used = !key.empty() && !userId.empty();
+                }
+
+                if (used) {
+                    return json{
+                        {"success", true},
+                        {"key", key},
+                        {"message", "Beta key marked as used"}
+                    };
+                }
+
+                return json{
+                    {"success", false},
+                    {"error", "Beta key could not be marked as used"}
+                };
+            }
+            else if (method == "POST" && action == "toggle") {
+                std::string keyIdStr = requestData.value("id", "");
+                bool enable = requestData.value("enable", true);
+
+                if (keyIdStr.empty()) {
+                    return createErrorResponse("Key ID is required", 400);
+                }
+
+                if (database) {
+                    auto betaKeys = database->getBetaKeys();
+                    for (const auto& info : betaKeys) {
+                        if (info.id == keyIdStr) {
+                            if (!enable) {
+                                database->deactivateBetaKey(info.key);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                return json{
+                    {"id", keyIdStr},
+                    {"enable", enable}
+                };
+            }
+            else {
+                return createErrorResponse("Unknown beta action: " + action + " with method " + method, 400);
+            }
         }
         else if (module == "sessions") {
             std::cout << "[DIAGNOSTIC] APIServer::processAPIRequest: Routing to sessions module" << std::endl;
@@ -1584,7 +1764,14 @@ json APIServer::handleSessionsAPI(const std::string& action, const json& paramet
 
 json APIServer::handleChatAPI(const std::string& action, const json& parameters, const std::string& method) {
     try {
-        if (action == "message" && method == "POST") {
+        // When /api/chat is called without an explicit action (e.g. POST /api/chat),
+        // the router defaults action to "status". Treat POST with no action as "message".
+        std::string effectiveAction = action;
+        if (effectiveAction == "status" && method == "POST") {
+            effectiveAction = "message";
+        }
+
+        if (effectiveAction == "message" && method == "POST") {
             // Handle chat message sending
             std::string message = parameters.value("message", "");
             std::string messageType = parameters.value("messageType", "text");
@@ -1619,10 +1806,11 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             std::string responseMessage;
             bool usedWebSearch = false;
             std::string webSearchQuery;
-            if (trainingModule) {
-                Language* lang = trainingModule->getLanguage();
-                if (lang) {
-                    responseMessage = lang->respond(message);
+                if (trainingModule) {
+                    Language* lang = trainingModule->getLanguage();
+                    if (lang) {
+                        lang->setLlmConfig(llmProvider, llmBaseUrl, llmModel, llmTemperature, llmMaxTokens);
+                        responseMessage = lang->respond(message);
                     usedWebSearch = lang->getLastResponseUsedWebSearch();
                     webSearchQuery = lang->getLastWebSearchQuery();
                 } else {
@@ -1665,7 +1853,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             }
             return response;
         }
-        else if (action == "history" && method == "GET") {
+        else if (effectiveAction == "history" && method == "GET") {
             // Handle chat history retrieval
             std::string sessionId = parameters.value("sessionId", "");
             int limit = parameters.value("limit", 50);
@@ -1712,7 +1900,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             };
             return response;
         }
-        else if (action == "clear" && method == "POST") {
+        else if (effectiveAction == "clear" && method == "POST") {
             // Handle chat history clearing
             std::string sessionId = parameters.value("sessionId", "");
 
@@ -1740,7 +1928,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
             };
             return response;
         }
-        else if (action == "session" && method == "POST") {
+        else if (effectiveAction == "session" && method == "POST") {
             // Create new chat session
             std::string sessionName = parameters.value("sessionName", "New Chat Session");
             std::string userId = parameters.value("userId", "anonymous");
@@ -2346,6 +2534,22 @@ void APIServer::handleRequest(http::request<http::string_body>&& req, tcp::socke
         // Parse request
         std::string endpoint = std::string(req.target());
         std::string method = std::string(req.method_string());
+
+        // Handle CORS preflight (OPTIONS) requests
+        if (method == "OPTIONS") {
+            http::response<http::string_body> res{http::status::ok, req.version()};
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::access_control_allow_origin, corsOrigin);
+            res.set(http::field::access_control_allow_methods, "GET, POST, OPTIONS, PUT, DELETE");
+            res.set(http::field::access_control_allow_headers, "Content-Type, Authorization, X-Session-ID");
+            res.set(http::field::access_control_allow_credentials, "true");
+            res.set(http::field::content_type, "application/json");
+            res.content_length(0);
+            res.prepare_payload();
+            http::write(socket, res);
+            return;
+        }
+
         json requestData;
 
         if (req.body().size() > 0) {
@@ -2355,13 +2559,33 @@ void APIServer::handleRequest(http::request<http::string_body>&& req, tcp::socke
         // Process request
         json responseData = processAPIRequest(endpoint, method, requestData);
 
+        // Determine the HTTP status code from the response content.
+        // processAPIRequest may return error JSON objects (via
+        // createErrorResponse or the catch-all handler) that carry
+        // "status": "error" plus an optional "error_code". We must not
+        // always report HTTP 200, otherwise the client sees success=true
+        // with an error body that contains no beta key -- leading to
+        // "The key was generated but the server response did not contain it."
+        unsigned int statusCode = 200;
+        if (responseData.is_object()) {
+            if (responseData.contains("status") && responseData["status"] == "error") {
+                if (responseData.contains("error_code") && responseData["error_code"].is_number_integer()) {
+                    statusCode = static_cast<unsigned int>(responseData["error_code"].get<int>());
+                } else {
+                    statusCode = 500;
+                }
+            }
+        }
+
         // Create response
-        std::string response = createResponse(responseData);
+        std::string response = createResponse(responseData, statusCode);
 
         // Send response
-        http::response<http::string_body> res{http::status::ok, req.version()};
+        http::response<http::string_body> res{http::status(statusCode), req.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "application/json");
+        res.set(http::field::access_control_allow_origin, corsOrigin);
+        res.set(http::field::access_control_allow_credentials, "true");
         res.keep_alive(req.keep_alive());
         res.body() = response;
         res.prepare_payload();
@@ -2386,12 +2610,87 @@ json APIServer::parseRequestBody(const std::string& body) {
     }
 }
 
+// Sanitize all string values in a JSON object to remove control characters
+// (U+0000 through U+001F) and invalid UTF-8 byte sequences that would cause
+// nlohmann::json::dump() to throw an exception. Replaces invalid bytes with
+// a space and escapes control characters by stripping them.
+void APIServer::sanitizeJsonStrings(json& j) {
+    if (j.is_string()) {
+        std::string s = j.get<std::string>();
+        std::string clean;
+        clean.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            unsigned char c = static_cast<unsigned char>(s[i]);
+            // Replace C0 control characters (0x00-0x1F) and 0x7F (DEL) with space
+            if (c < 0x20 || c == 0x7F) {
+                clean += ' ';
+                continue;
+            }
+            // Detect and drop invalid UTF-8 lead bytes
+            if (c >= 0x80 && c <= 0xBF) {
+                // Continuation byte without a lead - drop it
+                continue;
+            }
+            if (c == 0xC0 || c == 0xC1) {
+                // Overlong sequence lead - drop it
+                continue;
+            }
+            if (c >= 0xF5 && c <= 0xFF) {
+                // Invalid lead byte - drop it
+                continue;
+            }
+            // Count expected continuation bytes for valid lead bytes
+            int expected = 0;
+            if (c >= 0xC0 && c <= 0xDF) expected = 1;
+            else if (c >= 0xE0 && c <= 0xEF) expected = 2;
+            else if (c >= 0xF0 && c <= 0xF4) expected = 3;
+            clean += s[i];
+            // Validate continuation bytes
+            for (int k = 0; k < expected; ++k) {
+                if (i + k + 1 < s.size()) {
+                    unsigned char nc = static_cast<unsigned char>(s[i + k + 1]);
+                    if (nc < 0x80 || nc > 0xBF) {
+                        // Invalid continuation - stop here, truncate
+                        i += k + 1;
+                        goto done;
+                    }
+                }
+            }
+            i += expected;
+        }
+        done:
+        j = clean;
+    } else if (j.is_object()) {
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            sanitizeJsonStrings(it.value());
+        }
+    } else if (j.is_array()) {
+        for (auto& elem : j) {
+            sanitizeJsonStrings(elem);
+        }
+    }
+}
+
 std::string APIServer::createResponse(const json& responseData, unsigned int statusCode) {
-    json response = {
-        {"status", statusCode == 200 ? "success" : "error"},
-        {"data", responseData},
-        {"timestamp", getTimestampString()}
-    };
+    json response;
+    response["status"] = statusCode == 200 ? "success" : "error";
+    response["timestamp"] = getTimestampString();
+
+    if (responseData.is_object()) {
+        // Merge top-level fields from responseData directly into the response.
+        // This avoids double-wrapping so clients can access fields like
+        // valid, success, keys, key, beta_key directly at the top level
+        // without navigating through a nested "data" wrapper.
+        for (auto it = responseData.begin(); it != responseData.end(); ++it) {
+            response[it.key()] = it.value();
+        }
+    } else {
+        response["data"] = responseData;
+    }
+
+    // Sanitize all string values to remove control characters and invalid
+    // UTF-8 bytes (e.g. 0x0F) that would cause nlohmann::json::dump() to throw.
+    sanitizeJsonStrings(response);
     return response.dump();
 }
 
@@ -2402,6 +2701,8 @@ void APIServer::sendErrorResponse(tcp::socket& socket, const std::string& error,
     http::response<http::string_body> res{http::status(statusCode), 11};
     res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
     res.set(http::field::content_type, "application/json");
+    res.set(http::field::access_control_allow_origin, corsOrigin);
+    res.set(http::field::access_control_allow_credentials, "true");
     res.body() = response;
     res.prepare_payload();
 
@@ -2460,6 +2761,23 @@ std::string APIServer::generateAPIKey() {
         hexStream << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
     }
     return hexStream.str();
+}
+
+std::string APIServer::generateBetaKey() {
+    // Generates a CA3D- prefixed beta key (e.g. CA3D-A1B2C3D4E5F6G7H8I9J0)
+    // that matches the format expected by coreai3d.nl registration.
+    static const char charset[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    unsigned char randomBytes[32];
+    if (RAND_bytes(randomBytes, sizeof(randomBytes)) != 1) {
+        return "";
+    }
+    std::ostringstream os;
+    os << "CA3D-";
+    for (int i = 0; i < 20; ++i) {
+        os << charset[randomBytes[i] % (sizeof(charset) - 1)];
+    }
+    return os.str();
 }
 
 bool APIServer::validateAPIKey(const std::string& apiKey) {

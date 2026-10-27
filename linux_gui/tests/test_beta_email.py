@@ -30,6 +30,7 @@ class _ResendHandler(BaseHTTPRequestHandler):
             'path': self.path,
             'authorization': self.headers.get('Authorization'),
             'content_type': self.headers.get('Content-Type'),
+            'user_agent': self.headers.get('User-Agent'),
             'payload': payload,
         })
 
@@ -96,10 +97,18 @@ class TestBetaEmailDelivery:
         request = resend_server.requests[0]
         assert request['authorization'] == 'Bearer re_test_key'
         assert request['content_type'] == 'application/json'
+        # Resend requires a User-Agent header; without it the API returns
+        # 403 error code 1010 before the request ever reaches the API.
+        assert request['user_agent'] == 'CoreAI3D-LinuxGUI/1.3.0'
         assert request['payload']['to'] == ['user@example.com']
         assert request['payload']['from'] == 'noreply@coreai3d.local'
         assert 'secret-key-1' in request['payload']['text']
-        assert 'COREAI3D_API_KEY' in request['payload']['text']
+        assert 'coreai3d.nl/register' in request['payload']['text']
+        # The email must contain only the beta key, not API key material.
+        assert 'COREAI3D_API_KEY' not in request['payload']['text']
+        assert 'COREAI3D_API_URL' not in request['payload']['text']
+        # The HTML part should also carry the beta key.
+        assert 'secret-key-1' in request['payload']['html']
 
     def test_resend_error_is_reported(self, dashboard, resend_server):
         """A rejected request surfaces the provider error."""

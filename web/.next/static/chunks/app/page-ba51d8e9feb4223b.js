@@ -1,0 +1,21 @@
+(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[931],{5304:function(e,t,r){Promise.resolve().then(r.bind(r,6774))},6774:function(e,t,r){"use strict";r.r(t),r.d(t,{default:function(){return s}});var n=r(7437),a=r(2265),i=r(6463),u=r(3259),o=r(3274);function s(){let e=(0,i.useRouter)(),t=(0,i.usePathname)(),{user:r,loading:s}=(0,u.a)();return(0,a.useEffect)(()=>{s||(r?("/"===t||"/login"===t||"/register"===t)&&e.push("/chat"):"/login"!==t&&"/register"!==t&&e.push("/login"))},[r,s,e,t]),(0,n.jsx)("div",{className:"min-h-screen flex items-center justify-center bg-core-bg",children:(0,n.jsx)(o.Z,{className:"w-8 h-8 text-electric-blue animate-spin"})})}},3259:function(e,t,r){"use strict";r.d(t,{AuthProvider:function(){return u},a:function(){return o}});var n=r(7437),a=r(2265);let i=(0,a.createContext)(void 0);function u(e){let{children:t}=e,[r,u]=(0,a.useState)(null),[o,s]=(0,a.useState)(!0),c=async()=>{try{let e=await fetch("/api/auth/validate",{credentials:"include"}),t=await e.json();t.valid?u(t.user):u(null)}catch(e){u(null)}finally{s(!1)}};(0,a.useEffect)(()=>{c()},[]);let l=async(e,t)=>{let r=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({email:e,password:t})}),n=await r.json();if(!r.ok)throw Error(n.error||"Login failed");u(n.user)},d=async(e,t,r)=>{let n=await fetch("/api/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({email:e,password:t,beta_key:r})}),a=await n.json();if(!n.ok)throw Error(a.error||"Registration failed");u(a.user)};return(0,n.jsx)(i.Provider,{value:{user:r,loading:o,login:l,register:d,logout:()=>{fetch("/api/auth/logout",{method:"POST",credentials:"include"}).catch(()=>{}),u(null)},refresh:c},children:t})}function o(){let e=(0,a.useContext)(i);if(!e)throw Error("useAuth must be used within AuthProvider");return e}},8030:function(e,t,r){"use strict";r.d(t,{Z:function(){return s}});var n=r(2265);/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */let a=e=>e.replace(/([a-z0-9])([A-Z])/g,"$1-$2").toLowerCase(),i=function(){for(var e=arguments.length,t=Array(e),r=0;r<e;r++)t[r]=arguments[r];return t.filter((e,t,r)=>!!e&&""!==e.trim()&&r.indexOf(e)===t).join(" ").trim()};/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */var u={xmlns:"http://www.w3.org/2000/svg",width:24,height:24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"};/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */let o=(0,n.forwardRef)((e,t)=>{let{color:r="currentColor",size:a=24,strokeWidth:o=2,absoluteStrokeWidth:s,className:c="",children:l,iconNode:d,...h}=e;return(0,n.createElement)("svg",{ref:t,...u,width:a,height:a,stroke:r,strokeWidth:s?24*Number(o)/Number(a):o,className:i("lucide",c),...h},[...d.map(e=>{let[t,r]=e;return(0,n.createElement)(t,r)}),...Array.isArray(l)?l:[l]])}),s=(e,t)=>{let r=(0,n.forwardRef)((r,u)=>{let{className:s,...c}=r;return(0,n.createElement)(o,{ref:u,iconNode:t,className:i("lucide-".concat(a(e)),s),...c})});return r.displayName="".concat(e),r}},3274:function(e,t,r){"use strict";r.d(t,{Z:function(){return n}});/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */let n=(0,r(8030).Z)("LoaderCircle",[["path",{d:"M21 12a9 9 0 1 1-6.219-8.56",key:"13zald"}]])},6463:function(e,t,r){"use strict";var n=r(1169);r.o(n,"usePathname")&&r.d(t,{usePathname:function(){return n.usePathname}}),r.o(n,"useRouter")&&r.d(t,{useRouter:function(){return n.useRouter}}),r.o(n,"useSearchParams")&&r.d(t,{useSearchParams:function(){return n.useSearchParams}})}},function(e){e.O(0,[971,23,744],function(){return e(e.s=5304)}),_N_E=e.O()}]);

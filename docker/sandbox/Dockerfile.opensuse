@@ -3,16 +3,17 @@ FROM opensuse/leap:15.5
 WORKDIR /root
 
 # Install essential packages
-RUN zypper refresh && zypper install --non-interactive -y \
-    curl wget gpg2 ca-certificates patch gzip \
-    make gcc gcc-c++ file procps net-tools gawk tar \
-    python3 python3-pip python3-devel \
-    libffi-devel sqlite3 supervisor \
-    ImageMagick sox \
-    cmake git \
-    libopenssl-devel zlib-devel libbz2-devel readline-devel \
-    sqlite3-devel ncurses-devel xz-devel tk-devel \
-    libxml2-devel \
+RUN zypper refresh && \
+    zypper --non-interactive install -y \
+        curl wget gpg2 ca-certificates patch gzip \
+        make gcc gcc-c++ file procps net-tools gawk tar \
+        python3 python3-pip python3-devel \
+        libffi-devel sqlite3 supervisor \
+        ImageMagick sox \
+        cmake git \
+        libopenssl-devel zlib-devel libbz2-devel readline-devel \
+        sqlite3-devel ncurses-devel xz-devel tk-devel \
+        libxml2-devel \
     && zypper clean --all
 
 # Install Node.js (official binary tarball for broad compatibility)

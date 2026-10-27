@@ -52,11 +52,20 @@ export default function ModelsPage() {
     }
   };
 
+  const getCapabilityBadgeBg = (cap: string) => {
+    switch (cap) {
+      case 'reasoning': return 'bg-electric-blue-light/20';
+      case 'code': return 'bg-electric-blue/20';
+      case 'multimodal': return 'bg-electric-blue/20';
+      default: return 'bg-electric-blue/20';
+    }
+  };
+
   const getCapabilityColor = (cap: string) => {
     switch (cap) {
-      case 'reasoning': return 'text-purple-400';
-      case 'code': return 'text-yellow-400';
-      case 'multimodal': return 'text-pink-400';
+      case 'reasoning': return 'text-electric-blue-light';
+      case 'code': return 'text-electric-blue';
+      case 'multimodal': return 'text-electric-blue';
       default: return 'text-electric-blue';
     }
   };
@@ -116,11 +125,12 @@ export default function ModelsPage() {
                     key={cap}
                     className={cn(
                       'flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full',
-                      `bg-${getCapabilityColor(cap).replace('text-', '').replace('-400', '-500/20')} ${getCapabilityColor(cap)}`
+                      getCapabilityBadgeBg(cap),
+                      getCapabilityColor(cap)
                     )}
                   >
                     {getCapabilityIcon(cap)}
-                    <span className="capitalize">{cap}</span>
+                    <span className="capitalize">{cap.replace('-', ' ')}</span>
                   </span>
                 ))}
               </div>
