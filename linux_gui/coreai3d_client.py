@@ -1041,6 +1041,14 @@ class CoreAI3DClient:
         """POST /beta/toggle -- enable (true) or disable/revoke (false) a key by id."""
         return await self.post('/beta/toggle', {'id': key_id, 'enable': enable})
 
+    async def validate_beta_key(self, key: str) -> APIResponse:
+        """POST /beta/validate -- check whether a beta key is valid and unused."""
+        return await self.post('/beta/validate', {'key': key})
+
+    async def use_beta_key(self, key: str, user_id: str) -> APIResponse:
+        """POST /beta/use -- mark a beta key as used by a given user."""
+        return await self.post('/beta/use', {'key': key, 'user_id': user_id})
+
     # Neural Network API
     async def get_neural_topology(self) -> APIResponse:
         return await self.get('/neural/topology')

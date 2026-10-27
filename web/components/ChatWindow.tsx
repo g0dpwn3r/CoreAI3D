@@ -106,7 +106,6 @@ export function ChatWindow({
 
       let assistantContent = '';
       let assistantId = generateId();
-      let hasSwitchedToGenerating = false;
 
       setMessages(prev => [...prev, {
         id: assistantId,
@@ -134,19 +133,7 @@ export function ChatWindow({
                 continue;
               }
               
-              if (parsed.type === 'generating') {
-                if (!hasSwitchedToGenerating) {
-                  hasSwitchedToGenerating = true;
-                  setStreamState('generating');
-                }
-                continue;
-              }
-              
               if (parsed.type === 'token' && parsed.content) {
-                if (!hasSwitchedToGenerating) {
-                  hasSwitchedToGenerating = true;
-                  setStreamState('generating');
-                }
                 assistantContent += parsed.content;
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantId 
@@ -167,10 +154,6 @@ export function ChatWindow({
                 throw new Error(parsed.error);
               }
             } catch {
-              if (!hasSwitchedToGenerating) {
-                hasSwitchedToGenerating = true;
-                setStreamState('generating');
-              }
               assistantContent += data;
               setMessages(prev => prev.map(msg => 
                 msg.id === assistantId 
@@ -181,6 +164,9 @@ export function ChatWindow({
           }
         }
       }
+
+      setStreamState('idle');
+      setIsLoading(false);
     } catch (error) {
       console.error('Chat error:', error);
       setMessages(prev => prev.filter(msg => msg.id !== tempId));
@@ -273,16 +259,18 @@ export function ChatWindow({
             isStreaming={message.isStreaming}
           />
         ))}
-
-       {(streamState === 'thinking' || streamState === 'generating') && (
-          <MessageBubble
-            role="assistant"
-            content=""
-            isStreaming={true}
-          >
-            <ThinkingIndicator state={streamState} />
-          </MessageBubble>
-        )}
+       {isLoading && messages.length > 0 && (() => {
+          const last = messages[messages.length - 1];
+          return last?.role === 'assistant' && last?.isStreaming === true && (last?.content ?? '') === '';
+        })() && (
+           <MessageBubble
+             role="assistant"
+             content=""
+             isStreaming={true}
+           >
+             <ThinkingIndicator state={streamState as 'thinking' | 'generating'} />
+           </MessageBubble>
+         )}
         <div ref={messagesEndRef} />
       </div>
 

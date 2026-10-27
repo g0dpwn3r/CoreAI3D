@@ -64,6 +64,13 @@ private:
     bool enableLogging;
     std::string logFilePath;
 
+    // LLM configuration
+    std::string llmProvider = "ollama";
+    std::string llmBaseUrl = "http://localhost:11434";
+    std::string llmModel = "qwen2.5:7b-instruct";
+    double llmTemperature = 0.7;
+    int llmMaxTokens = 512;
+
     // Database configuration
     std::string dbHost;
     unsigned int dbPort;
@@ -103,6 +110,10 @@ protected:
     virtual std::string createResponse(const json& responseData, unsigned int statusCode = 200);
     virtual void sendErrorResponse(tcp::socket& socket, const std::string& error, unsigned int statusCode = 400);
 
+    // Sanitize all string values in a JSON object to remove control characters
+    // and invalid UTF-8 bytes that would cause nlohmann::json::dump() to throw.
+    static void sanitizeJsonStrings(json& j);
+
     // JWT validation for protected endpoints
     virtual bool validateJWTToken(const std::string& authHeader, int64_t& outUserId, std::string& outUsername);
 
@@ -119,6 +130,7 @@ public:
     // Authentication
     virtual bool authenticateRequest(const std::string& sessionId, const json& request);
     virtual std::string generateAPIKey();
+    virtual std::string generateBetaKey();
     virtual bool validateAPIKey(const std::string& apiKey);
     virtual json login(const std::string& username, const std::string& password);
 

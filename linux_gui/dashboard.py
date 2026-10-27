@@ -5870,7 +5870,10 @@ if __name__ == "__main__":
             elif operation == 'toggle':
                 coro = client.toggle_beta_key(**kwargs)
             elif operation == 'validate':
-                coro = client.validate_api_key(kwargs.get('api_key', ''))
+                coro = client.validate_beta_key(kwargs.get('key', ''))
+            elif operation == 'use':
+                coro = client.use_beta_key(kwargs.get('key', ''),
+                                           kwargs.get('user_id', ''))
             else:
                 return APIResponse(
                     success=False, data=None,
@@ -5987,29 +5990,74 @@ if __name__ == "__main__":
         """Extract the plaintext beta keys from a /beta/generate response."""
         keys: List[str] = []
         if response is None or not isinstance(response.data, dict):
+            logger.debug(f"_parse_beta_key_response: response.data is not a dict: {response.data!r}")
             return keys
 
         data = response.data
+        # The backend wraps the payload under "data" (see createSuccessResponse),
+        # so check both the top level and the nested "data" object.
+        search_objs: List[Dict[str, Any]] = [data]
+        nested = data.get("data")
+        if isinstance(nested, dict):
+            search_objs.append(nested)
+
+        logger.debug(
+            f"_parse_beta_key_response: search_objs={search_objs}, "
+            f"data.keys={list(data.keys()) if isinstance(data, dict) else 'N/A'}"
+        )
+
         candidates: List[Any] = []
-        for field in ('keys', 'beta_keys', 'key_list'):
-            value = data.get(field)
-            if isinstance(value, list):
-                candidates.extend(value)
-        for field in ('key', 'beta_key', 'api_key'):
-            value = data.get(field)
-            if isinstance(value, str) and value.strip():
-                candidates.append(value)
+        for obj in search_objs:
+            for field in ('keys', 'beta_keys', 'key_list'):
+                value = obj.get(field)
+                if isinstance(value, list):
+                    logger.debug(f"_parse_beta_key_response: found list field '{field}': {value}")
+                    candidates.extend(value)
+            for field in ('key', 'beta_key', 'api_key'):
+                value = obj.get(field)
+                if isinstance(value, str) and value.strip():
+                    logger.debug(f"_parse_beta_key_response: found string field '{field}': {value[:12]}...")
+                    candidates.append(value)
+                elif value is not None:
+                    logger.debug(
+                        f"_parse_beta_key_response: field '{field}' present but not usable: "
+                        f"type={type(value).__name__}, value={value!r}"
+                    )
 
         for item in candidates:
             if isinstance(item, str):
                 if item.strip():
                     keys.append(item.strip())
+                else:
+                    logger.debug(f"_parse_beta_key_response: candidate string is empty/whitespace: {item!r}")
             elif isinstance(item, dict):
                 for field in ('key', 'beta_key', 'api_key', 'value'):
                     value = item.get(field)
                     if isinstance(value, str) and value.strip():
                         keys.append(value.strip())
                         break
+
+        # Fallback: scan all string values in the response for a CA3D- prefixed
+        # beta key, in case the backend uses an unexpected field name.
+        if not keys:
+            for obj in search_objs:
+                for field, value in obj.items():
+                    if isinstance(value, str) and value.startswith("CA3D-") and value.strip():
+                        logger.debug(
+                            f"_parse_beta_key_response: fallback found CA3D- key in field '{field}': "
+                            f"{value[:12]}..."
+                        )
+                        keys.append(value.strip())
+                    elif isinstance(value, list):
+                        for entry in value:
+                            if isinstance(entry, str) and entry.startswith("CA3D-") and entry.strip():
+                                logger.debug(
+                                    f"_parse_beta_key_response: fallback found CA3D- key in list field "
+                                    f"'{field}': {entry[:12]}..."
+                                )
+                                keys.append(entry.strip())
+
+        logger.debug(f"_parse_beta_key_response: returning {len(keys)} keys: {[k[:12] for k in keys]}")
         return keys
 
     @staticmethod
@@ -6026,7 +6074,12 @@ if __name__ == "__main__":
 
     @staticmethod
     def _beta_key_instructions(key: str, description: str = "") -> str:
-        """Build the human readable instructions shipped with a beta key."""
+        """Build the human readable instructions shipped with a beta key.
+
+        Contains ONLY the beta key (the value expected by coreai3d.nl
+        registration) plus clean, minimal instructions. No API key material is
+        included.
+        """
         lines = [
             "CoreAI3D Beta Access Key",
             "",
@@ -6037,16 +6090,139 @@ if __name__ == "__main__":
         lines += [
             "",
             "How to use this key:",
-            "  1. Set the key as COREAI3D_API_KEY in your environment:",
-            "       export COREAI3D_API_KEY=\"<key>\"",
-            "  2. Point the client at your CoreAI3D backend:",
-            "       export COREAI3D_API_URL=\"http://127.0.0.1:1906/api/v1\"",
-            "  3. Use it as a bearer token:",
-            "       curl -H \"Authorization: Bearer <key>\" $COREAI3D_API_URL/health",
+            "  1. Go to https://coreai3d.nl/register",
+            "  2. Enter the beta key above when prompted.",
+            "  3. Complete the account registration form.",
             "",
-            "This key is shown only once - store it somewhere safe.",
+            "Each beta key can only be used once. Store it somewhere safe.",
         ]
         return "\n".join(lines)
+
+    def _beta_key_instructions_html(self, key: str, description: str = "") -> str:
+        """Build an HTML version of the beta key instructions.
+
+        Mirrors the CoreAI3D web theme: dark background (#000000), dark cards
+        (#0f0f0f), subtle borders (#1a1a1a), electric blue accents (#3b82f6)
+        and Inter / system-ui typography.
+        """
+        desc_html = ""
+        if description:
+            desc_html = (
+                f"<tr>"
+                f"<td style='padding:8px 12px;border-bottom:1px solid #1a1a1a;"
+                f"color:#9ca3af;font-size:13px;'>{'Description'.upper()}</td>"
+                f"<td style='padding:8px 12px;border-bottom:1px solid #1a1a1a;"
+                f"color:#ffffff;font-size:14px;'>{description}</td>"
+                f"</tr>"
+            )
+        return f"""<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your CoreAI3D beta access key</title>
+  </head>
+  <body style="margin:0;padding:0;background:#000000;color:#ffffff;
+               font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,
+                            'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+               line-height:1.6;-webkit-text-size-adjust:100%;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+           style="background:#000000;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                 style="max-width:600px;background:#0f0f0f;border:1px solid #1a1a1a;
+                        border-radius:12px;overflow:hidden;">
+            <!-- Header -->
+            <tr>
+              <td align="center" style="background:#000000;padding:24px;
+                        border-bottom:1px solid #1a1a1a;">
+                <table role="presentation" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td style="width:10px;height:10px;background:#3b82f6;
+                              border-radius:50%;display:inline-block;"></td>
+                    <td style="width:8px;"></td>
+                    <td style="width:10px;height:10px;background:#60a5fa;
+                              border-radius:50%;display:inline-block;"></td>
+                    <td style="width:8px;"></td>
+                    <td style="width:10px;height:10px;background:#3b82f6;
+                              border-radius:50%;display:inline-block;"></td>
+                  </tr>
+                </table>
+                <h1 style="margin:16px 0 0 0;font-size:20px;font-weight:700;
+                           color:#ffffff;letter-spacing:-0.02em;">
+                  CoreAI3D<span style="color:#3b82f6;">Beta</span> Access Key
+                </h1>
+                <p style="margin:8px 0 0 0;font-size:14px;color:#9ca3af;">
+                  Keep this key safe — it is shown only once.
+                </p>
+              </td>
+            </tr>
+            <!-- Key card -->
+            <tr>
+              <td style="padding:24px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td style="padding:8px 12px;border-bottom:1px solid #1a1a1a;
+                              color:#9ca3af;font-size:13px;>{'Beta Key'.upper()}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #1a1a1a;
+                              color:#ffffff;font-size:15px;text-align:right;
+                              font-family:ui-monospace,SFMono-Regular,Menlo,
+                                    Monaco,Consolas,monospace;">
+                      {key}
+                    </td>
+                  </tr>
+                  {desc_html}
+                </table>
+              </td>
+            </tr>
+            <!-- How to use -->
+            <tr>
+              <td style="padding:0 24px 24px 24px;">
+                <h2 style="margin:0 0 12px 0;font-size:15px;font-weight:700;
+                           color:#ffffff;letter-spacing:-0.01em;">
+                  How to use this key
+                </h2>
+                <ol style="margin:0;padding-left:20px;color:#d1d5db;
+                           font-size:14px;">
+                  <li style="margin-bottom:8px;">Go to
+                    <a href="https://coreai3d.nl/register" style="color:#60a5fa;text-decoration:underline;">
+                      https://coreai3d.nl/register
+                    </a>
+                  </li>
+                  <li style="margin-bottom:8px;">Enter the beta key below when prompted:
+                    <br>
+                    <code style="display:block;margin-top:6px;color:#9ca3af;
+                                 background:#111111;padding:10px 14px;
+                                 border-radius:8px;overflow-wrap:break-word;">
+                      {key}
+                    </code>
+                  </li>
+                  <li style="margin-bottom:8px;">Complete the account registration form.
+                    Each beta key can only be used once.
+                  </li>
+                </ol>
+                <p style="margin:20px 0 0 0;font-size:13px;color:#9ca3af;
+                          border-top:1px solid #1a1a1a;padding-top:16px;">
+                  Store this key somewhere safe — it is shown only once.
+                </p>
+              </td>
+            </tr>
+            <!-- Footer -->
+            <tr>
+              <td align="center" style="padding:16px 24px;
+                        border-top:1px solid #1a1a1a;">
+                <p style="margin:0;font-size:12px;color:#9ca3af;">
+                  © CoreAI3D — Beta Program
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
 
     def _populate_beta_keys_table(self, records: List[Dict[str, Any]]) -> None:
         """Fill the beta keys table from the records returned by the backend."""
@@ -6077,6 +6253,12 @@ if __name__ == "__main__":
                 if column == 0:
                     item.setToolTip(value)
                 table.setItem(row, column, item)
+
+        # Auto-select the first (most recent) key so Copy / Send / Revoke are
+        # immediately usable after a generation or refresh.
+        if table.rowCount() > 0:
+            table.selectRow(0)
+            table.setCurrentItem(table.item(0, 0))
 
     @staticmethod
     def _format_beta_active(value: Any) -> str:
@@ -6116,7 +6298,7 @@ if __name__ == "__main__":
         self._run_beta_operation(
             'validate',
             self._on_beta_key_validated,
-            api_key=api_key,
+            key=api_key,
         )
 
     def on_clear_beta_key_clicked(self):
@@ -6242,7 +6424,7 @@ if __name__ == "__main__":
         self._run_beta_operation(
             'validate',
             self._on_beta_key_validated_restored,
-            api_key=api_key,
+            key=api_key,
         )
 
     def _on_beta_key_validated_restored(self, response: APIResponse) -> None:
@@ -6308,6 +6490,14 @@ if __name__ == "__main__":
 
     def _on_email_key_generated(self, response: APIResponse) -> None:
         """Handle the result of the 'Generate Email Key' request."""
+        # DEBUG: log the raw response for troubleshooting key extraction
+        logger.debug(
+            f"_on_email_key_generated RAW: success={response.success}, "
+            f"status_code={response.status_code}, "
+            f"message={response.message!r}, "
+            f"data={response.data!r}, "
+            f"data_type={type(response.data).__name__}"
+        )
         if not response.success:
             self._notify(
                 "Beta Key Generation Failed",
@@ -6333,6 +6523,13 @@ if __name__ == "__main__":
             f"Beta key for {email} generated successfully.",
         )
 
+        # The beta key is for coreai3d.nl account access, NOT for the
+        # CoreAI3D backend API. Keep it separate from config.api_key.
+        # It is stored in config.beta_key via QSettings on validation.
+        self.status_bar.showMessage(
+            f"Beta key generated for {email} (copied to clipboard)", 3000
+        )
+
         # Sending the mail is a blocking network call: run it on a worker.
         self._run_email_send(
             email, key, self.beta_email_desc_input.text().strip()
@@ -6354,6 +6551,12 @@ if __name__ == "__main__":
 
     def _on_beta_keys_generated(self, response: APIResponse) -> None:
         """Handle the result of the 'Generate Beta Keys' request."""
+        logger.debug(
+            f"_on_beta_keys_generated raw response: success={response.success}, "
+            f"status_code={response.status_code}, "
+            f"message={response.message!r}, "
+            f"data={response.data!r}"
+        )
         if not response.success:
             self._notify(
                 "Beta Key Generation Failed",
@@ -6369,6 +6572,12 @@ if __name__ == "__main__":
                 f"Generated {len(keys)} beta key(s)."
             )
             self._copy_to_clipboard(keys[0], "First generated beta key copied to clipboard")
+
+            # Beta keys are for coreai3d.nl account access, NOT for the
+            # CoreAI3D backend API. Keep them separate from config.api_key.
+            self.status_bar.showMessage(
+                f"Generated {len(keys)} beta key(s) (first copied to clipboard)", 3000
+            )
         else:
             self._notify(
                 "Beta Keys Generated",
@@ -6643,6 +6852,12 @@ if __name__ == "__main__":
 
         The request is made with the standard library so the worker thread
         needs neither an extra dependency nor a running event loop.
+
+        Resend requires the ``from`` address to use a verified domain.  The
+        built-in default ``noreply@resend.dev`` is a domain Resend verifies
+        for all accounts, so it works without any domain setup.  Override it
+        with ``RESEND_FROM_EMAIL`` (or the Settings field) once you have
+        verified your own domain.
         """
         import json
         import urllib.error
@@ -6654,37 +6869,82 @@ if __name__ == "__main__":
                       os.environ.get('RESEND_FROM_EMAIL', '')).strip()
 
         if not from_email:
-            from_email = 'noreply@coreai3d.local'
+            from_email = 'noreply@resend.dev'
 
         payload = {
             "from": from_email,
             "to": [recipient],
             "subject": "Your CoreAI3D beta access key",
             "text": self._beta_key_instructions(key, description),
+            "html": self._beta_key_instructions_html(key, description),
         }
+
+        body = json.dumps(payload).encode('utf-8')
+        headers = {
+            "Authorization": f"Bearer {resend_key}",
+            "Content-Type": "application/json",
+            # Resend blocks requests that omit a User-Agent header (403 error
+            # code 1010) before they ever reach the API.
+            "User-Agent": "CoreAI3D-LinuxGUI/1.3.0",
+        }
+
+        # Diagnostic log of the full request (API key is masked).
+        masked_key = (resend_key[:8] + "...") if resend_key else "<none>"
+        logger.debug(
+            "Resend request: POST %s\n"
+            "  headers: %s\n"
+            "  body: %s",
+            self.RESEND_API_URL,
+            {k: (v if k != "Authorization" else f"Bearer {masked_key}")
+             for k, v in headers.items()},
+            body.decode('utf-8', 'replace'),
+        )
 
         request = urllib.request.Request(
             self.RESEND_API_URL,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={
-                "Authorization": f"Bearer {resend_key}",
-                "Content-Type": "application/json",
-            },
+            data=body,
+            headers=headers,
             method="POST",
         )
 
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                response.read()
+                response_body = response.read().decode('utf-8', 'replace')
+                logger.debug("Resend response (%s): %s",
+                             response.status, response_body)
         except urllib.error.HTTPError as e:
             try:
                 detail = e.read().decode('utf-8', 'replace').strip()
             except Exception:
                 detail = ''
-            logger.error(f"Resend API rejected the beta key email: {e} {detail}")
-            return False, f"Resend API error {e.code}" + (f": {detail}" if detail else ".")
+            logger.error(
+                "Resend API rejected the beta key email: HTTP %s %s\n"
+                "  request URL: %s\n"
+                "  request headers: %s\n"
+                "  request body: %s\n"
+                "  response body: %s",
+                e.code, e.reason,
+                self.RESEND_API_URL,
+                {k: (v if k != "Authorization" else f"Bearer {masked_key}")
+                 for k, v in headers.items()},
+                body.decode('utf-8', 'replace'),
+                detail,
+            )
+            return False, (
+                f"Resend API error {e.code}: {detail}"
+                if detail else f"Resend API error {e.code}"
+            )
         except Exception as e:
-            logger.error(f"Failed to send beta key email: {e}")
+            logger.error(
+                "Failed to send beta key email via Resend: %s\n"
+                "  request URL: %s\n"
+                "  request headers: %s\n"
+                "  request body: %s",
+                e, self.RESEND_API_URL,
+                {k: (v if k != "Authorization" else f"Bearer {masked_key}")
+                 for k, v in headers.items()},
+                body.decode('utf-8', 'replace'),
+            )
             return False, f"Failed to send the email: {e}"
 
         return True, f"Beta key sent to {recipient}."

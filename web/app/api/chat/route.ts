@@ -78,11 +78,15 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'thinking', conversation_id: conversationId })}\n\n`));
           thinkingSent = true;
 
+          // Collect all raw chunks from the backend
+          const rawChunks: string[] = [];
+
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
             const chunk = new TextDecoder().decode(value);
+            rawChunks.push(chunk);
             const lines = chunk.split('\n').filter(line => line.trim());
 
             for (const line of lines) {
@@ -114,6 +118,31 @@ export async function POST(request: NextRequest) {
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: data })}\n\n`));
                 }
               }
+            }
+          }
+
+          // If the backend returned regular JSON (not SSE), parse it and send the response as a token
+          if (!fullResponse && rawChunks.length > 0) {
+            const rawText = rawChunks.join('');
+            try {
+              const parsed = JSON.parse(rawText);
+              if (parsed.response) {
+                if (isThinking) {
+                  isThinking = false;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'generating' })}\n\n`));
+                }
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: parsed.response })}\n\n`));
+                fullResponse = parsed.response;
+              } else if (parsed.message) {
+                if (isThinking) {
+                  isThinking = false;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'generating' })}\n\n`));
+                }
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: parsed.message })}\n\n`));
+                fullResponse = parsed.message;
+              }
+            } catch {
+              // Not JSON either, skip
             }
           }
 

@@ -428,6 +428,21 @@ void Database::createTables() {
         // api_keys table is created lazily by saveAPIKey() with the correct schema.
         // See the CREATE TABLE IF NOT EXISTS in saveAPIKey().
 
+        // beta_keys table stores CA3D- prefixed beta keys used for coreai3d.nl registration.
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".beta_keys ("
+                        "id INT AUTO_INCREMENT PRIMARY KEY,"
+                        "`beta_key` VARCHAR(255) NOT NULL UNIQUE,"
+                        "description TEXT NULL,"
+                        "email VARCHAR(255) NULL,"
+                        "max_uses INT NOT NULL DEFAULT 1,"
+                        "uses INT NOT NULL DEFAULT 0,"
+                        "is_active TINYINT(1) NOT NULL DEFAULT 1,"
+                        "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                        "used_at TIMESTAMP NULL DEFAULT NULL,"
+                        "INDEX idx_beta_key (`beta_key`),"
+                        "INDEX idx_email (email)"
+                        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci").execute();
+
         std::cout << "Created main database tables in schema " << dbSchema << std::endl;
         createPredictionResultsTable();
     } catch (const std::exception& ex) {
@@ -1187,6 +1202,150 @@ std::vector<std::pair<std::string, std::string>> Database::getAPIKeys() {
     std::cout << "Database stub: getAPIKeys() -> empty list" << std::endl;
 #endif
     return keys;
+};
+
+// Beta key management methods
+void Database::saveBetaKey(const std::string& key, const std::string& description,
+                           const std::string& email, const std::string& expires_at,
+                           int max_uses) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("CREATE TABLE IF NOT EXISTS " + dbSchema + ".beta_keys ("
+                        "id INT AUTO_INCREMENT PRIMARY KEY,"
+                        "`beta_key` VARCHAR(255) NOT NULL UNIQUE,"
+                        "description TEXT NULL,"
+                        "email VARCHAR(255) NULL,"
+                        "max_uses INT NOT NULL DEFAULT 1,"
+                        "uses INT NOT NULL DEFAULT 0,"
+                        "is_active TINYINT(1) NOT NULL DEFAULT 1,"
+                        "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                        "used_at TIMESTAMP NULL DEFAULT NULL,"
+                        "INDEX idx_beta_key (`beta_key`),"
+                        "INDEX idx_email (email)"
+                        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci").execute();
+
+        session->sql("INSERT INTO " + dbSchema + ".beta_keys (`beta_key`, description, email, max_uses, uses, is_active) "
+                        "VALUES (?, ?, ?, ?, 0, TRUE) "
+                        "ON DUPLICATE KEY UPDATE description = VALUES(description), email = VALUES(email), "
+                        "max_uses = VALUES(max_uses), is_active = VALUES(is_active)")
+                    .bind(key)
+                    .bind(description)
+                    .bind(email)
+                    .bind(max_uses)
+                    .execute();
+
+        std::cout << "Saved beta key: " << key.substr(0, 8) << "..." << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error saving beta key: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: saveBetaKey('" << key.substr(0, 8) << "...')" << std::endl;
+#endif
+};
+
+std::vector<Database::BetaKeyInfo> Database::getBetaKeys() {
+    ensureConnection();
+    std::vector<BetaKeyInfo> keys;
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT id, `beta_key`, description, email, max_uses, uses, "
+                                    "is_active, created_at, used_at FROM " + dbSchema +
+                                    ".beta_keys ORDER BY created_at DESC")
+                        .execute();
+
+        mysqlx::Row row;
+        while ((row = result.fetchOne())) {
+            BetaKeyInfo info;
+            info.id = std::to_string(row[0].get<int64_t>());
+            info.key = row[1].isNull() ? "" : row[1].get<std::string>();
+            info.description = row[2].isNull() ? "" : row[2].get<std::string>();
+            info.email = row[3].isNull() ? "" : row[3].get<std::string>();
+            info.max_uses = row[4].get<int32_t>();
+            info.uses = row[5].get<int32_t>();
+            info.is_active = row[6].get<bool>();
+            info.created_at = row[7].isNull() ? "" : row[7].get<std::string>();
+            info.used_at = row[8].isNull() ? "" : row[8].get<std::string>();
+            keys.push_back(info);
+        };
+    } catch (const std::exception& ex) {
+        std::cerr << "Error getting beta keys: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation - return empty list
+    std::cout << "Database stub: getBetaKeys() -> empty list" << std::endl;
+#endif
+    return keys;
+};
+
+bool Database::validateBetaKey(const std::string& key) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("SELECT COUNT(*) FROM " + dbSchema + ".beta_keys "
+                                    "WHERE `beta_key` = ? AND is_active = TRUE AND used_at IS NULL")
+                        .bind(key)
+                        .execute();
+
+        auto row = result.fetchOne();
+        if (row) {
+            return row[0].get<int64_t>() > 0;
+        };
+        return false;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error validating beta key: " << ex.what() << std::endl;
+        return false;
+    };
+#else
+    // Stub implementation - accept any non-empty key
+    std::cout << "Database stub: validateBetaKey('" << key.substr(0, 8) << "...') -> " << (!key.empty()) << std::endl;
+    return !key.empty();
+#endif
+};
+
+bool Database::useBetaKey(const std::string& key, const std::string& userId) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        auto result = session->sql("UPDATE " + dbSchema + ".beta_keys "
+                                    "SET used_at = CURRENT_TIMESTAMP, is_active = FALSE "
+                                    "WHERE `beta_key` = ? AND used_at IS NULL AND is_active = TRUE")
+                    .bind(key)
+                    .execute();
+
+        return result.getAffectedItemsCount() > 0;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error using beta key: " << ex.what() << std::endl;
+        return false;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: useBetaKey('" << key.substr(0, 8) << "...', userId=" << userId << ")" << std::endl;
+    return !key.empty() && !userId.empty();
+#endif
+};
+
+void Database::deactivateBetaKey(const std::string& key) {
+    ensureConnection();
+#ifdef USE_MYSQL
+    try {
+        session->sql("UPDATE " + dbSchema + ".beta_keys "
+                        "SET is_active = FALSE WHERE `beta_key` = ?")
+                    .bind(key)
+                    .execute();
+
+        std::cout << "Deactivated beta key: " << key.substr(0, 8) << "..." << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Error deactivating beta key: " << ex.what() << std::endl;
+        throw;
+    };
+#else
+    // Stub implementation
+    std::cout << "Database stub: deactivateBetaKey('" << key.substr(0, 8) << "...')" << std::endl;
+#endif
 };
 
 // Chat history management methods

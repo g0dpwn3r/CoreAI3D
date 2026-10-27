@@ -132,6 +132,26 @@ public:
     void deactivateAPIKey(const std::string& apiKey);
     std::vector<std::pair<std::string, std::string>> getAPIKeys();
 
+    // Beta key management methods (CA3D- prefixed keys used for coreai3d.nl registration)
+    struct BetaKeyInfo {
+        std::string id;
+        std::string key;          // maps to `beta_key` database column
+        std::string description;
+        std::string email;
+        int max_uses;
+        int uses;
+        bool is_active;
+        std::string used_at;
+        std::string created_at;
+    };
+    void saveBetaKey(const std::string& key, const std::string& description = "",
+                     const std::string& email = "", const std::string& expires_at = "",
+                     int max_uses = 0);
+    std::vector<BetaKeyInfo> getBetaKeys();
+    bool validateBetaKey(const std::string& key);
+    bool useBetaKey(const std::string& key, const std::string& userId);
+    void deactivateBetaKey(const std::string& key);
+
     // Chat history management methods
     void ensureChatSessionExists(int sessionId, const std::string& sessionName = "");
     void saveChatMessage(int sessionId, const std::string& speaker, const std::string& message);
