@@ -317,6 +317,11 @@ services:
       - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       - COREAI3D_API_URL=http://coreai3d:8080
       - DATABASE_URL=file:./data/coreai3d.db
+      - FREELLM_API_URL=${FREELLM_API_URL:-http://172.29.0.10:3001/v1}
+      - FREELLM_API_KEY=${FREELLM_API_KEY:-freellmapi-0170a75611e1c467b3c287fb34bd582f0cf2a15927e3a19b}
+      - FREELLM_DEFAULT_MODEL=${FREELLM_DEFAULT_MODEL:-auto:smart}
+      - FREELLM_HUD_MODEL=${FREELLM_HUD_MODEL:-auto:smart}
+      - NEXT_PUBLIC_FREELLM_MODELS=${NEXT_PUBLIC_FREELLM_MODELS:-true}
     ports:
       - "3000:3000"
     volumes:

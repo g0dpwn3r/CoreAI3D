@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
               message,
               model: model || 'coreai3d',
               conversation_id: conversationId,
+              files: files || [],
               stream: true,
             }),
           });

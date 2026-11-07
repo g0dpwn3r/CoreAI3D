@@ -135,6 +135,7 @@ bool APIServer::initialize(const std::string& configPath,
                     if (llmConfig.contains("model")) llmModel = llmConfig["model"];
                     if (llmConfig.contains("temperature")) llmTemperature = llmConfig["temperature"];
                     if (llmConfig.contains("max_tokens")) llmMaxTokens = llmConfig["max_tokens"];
+                    if (llmConfig.contains("api_key")) llmApiKey = llmConfig["api_key"];
                 }
 
                 std::cout << "Configuration loaded from " << configPath << std::endl;
@@ -1809,7 +1810,7 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                 if (trainingModule) {
                     Language* lang = trainingModule->getLanguage();
                     if (lang) {
-                        lang->setLlmConfig(llmProvider, llmBaseUrl, llmModel, llmTemperature, llmMaxTokens);
+                        lang->setLlmConfig(llmProvider, llmBaseUrl, llmModel, llmTemperature, llmMaxTokens, llmApiKey);
                         responseMessage = lang->respond(message);
                     usedWebSearch = lang->getLastResponseUsedWebSearch();
                     webSearchQuery = lang->getLastWebSearchQuery();

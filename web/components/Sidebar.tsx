@@ -13,7 +13,8 @@ import {
   CreditCard,
   Users,
   Key,
-  LogOut
+  LogOut,
+  Globe
 } from 'lucide-react';
 import { useState } from 'react';
 import Link from 'next/link';
@@ -42,6 +43,7 @@ interface SidebarProps {
 
 const NAV_ITEMS = [
   { href: '/chat', label: 'Chat', icon: MessageSquare },
+  { href: '/globe', label: 'Globe', icon: Globe },
   { href: '/models', label: 'Models', icon: BookOpen },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
 ] as const;

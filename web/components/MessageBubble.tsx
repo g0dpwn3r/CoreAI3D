@@ -1,8 +1,9 @@
 'use client';
 
-import { cn, formatDateTime } from '@/lib/utils';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { Copy, Check } from 'lucide-react';
-import { useState, ReactNode } from 'react';
+import { cn, formatDateTime } from '@/lib/utils';
+import { useState } from 'react';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -10,7 +11,7 @@ interface MessageBubbleProps {
   timestamp?: string;
   onCopy?: () => void;
   isStreaming?: boolean;
-  children?: ReactNode; // <--- Add this property
+  children?: React.ReactNode;
 }
 
 export function MessageBubble({ role, content, timestamp, isStreaming, onCopy, children }: MessageBubbleProps) {
@@ -26,7 +27,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, onCopy, c
   return (
     <div
       className={cn(
-        'flex gap-3 max-w-3xl animate-fade-in',
+        'flex gap-3 max-w-3xl animate-fade-in group',
         role === 'user' ? 'flex-row-reverse justify-end' : 'flex-row'
       )}
     >
@@ -44,13 +45,17 @@ export function MessageBubble({ role, content, timestamp, isStreaming, onCopy, c
               : 'bg-core-card border border-core-border rounded-tl-sm'
           )}
         >
-          <div className="whitespace-pre-wrap text-base leading-relaxed">
-            {content}
-            {isStreaming && <span className="inline-block w-1 h-5 bg-electric-blue animate-pulse ml-1 align-bottom" />}
-          </div>
+          {role === 'assistant' ? (
+            <MarkdownRenderer content={content} />
+          ) : (
+            <div className="whitespace-pre-wrap text-base leading-relaxed">{content}</div>
+          )}
+          {isStreaming && (
+            <span className="inline-block w-1.5 h-5 bg-electric-blue animate-pulse ml-1 align-bottom rounded-sm" />
+          )}
           {children}
         </div>
-        
+
         <div className="flex items-center gap-2 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
           {role === 'assistant' && (
             <button

@@ -12,6 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 'ca-certificates' is installed.
 ## 🛠️ FIX: Use a direct HTTP mirror to install certificates first
 # This avoids the SSL verification failure when installing ca-certificates.
+RUN apt-get -o Acquire::Check-Valid-Until=false update
 RUN echo "deb https://kali.download/kali kali-rolling main contrib non-free" > /etc/apt/sources.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates apt-transport-https \

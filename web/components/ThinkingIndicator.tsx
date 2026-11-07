@@ -4,14 +4,13 @@ import { cn } from '@/lib/utils';
 
 interface ThinkingIndicatorProps {
   state: 'thinking' | 'generating';
+  detail?: string;
   className?: string;
 }
 
-export function ThinkingIndicator({ state, className }: ThinkingIndicatorProps) {
-  const dots = state === 'thinking' ? 'Thinking' : 'Generating';
-  
+export function ThinkingIndicator({ state, detail, className }: ThinkingIndicatorProps) {
   return (
-    <div 
+    <div
       className={cn(
         'flex items-center gap-2 text-electric-blueLight/80 font-medium',
         'animate-thinking',
@@ -25,9 +24,12 @@ export function ThinkingIndicator({ state, className }: ThinkingIndicatorProps) 
         <span className="w-2 h-2 rounded-full bg-electric-blue animate-bounce" style={{ animationDelay: '150ms' }}></span>
         <span className="w-2 h-2 rounded-full bg-electric-blue animate-bounce" style={{ animationDelay: '300ms' }}></span>
       </div>
-      <span>{dots}</span>
+      <span className="text-sm">
+        {state === 'thinking' ? 'Thinking' : 'Generating'}
+        {detail && <span className="text-text-muted ml-1">— {detail}</span>}
+      </span>
       {state === 'thinking' && (
-        <span className="text-text-muted text-sm">...</span>
+        <span className="text-text-muted text-sm animate-pulse">...</span>
       )}
     </div>
   );

@@ -70,6 +70,7 @@ private:
     std::string llmModel = "qwen2.5:7b-instruct";
     double llmTemperature = 0.7;
     int llmMaxTokens = 512;
+    std::string llmApiKey;
 
     // Database configuration
     std::string dbHost;

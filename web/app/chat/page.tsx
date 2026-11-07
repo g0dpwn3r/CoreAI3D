@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { chatApi, modelsApi } from '@/lib/api-client';
 import { Loader2, Menu, X, ChevronLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { freellm } from '@/lib/freellm';
 
 function ChatPageFallback() {
   return (
@@ -63,8 +64,29 @@ function ChatPageContent() {
         chatApi.getConversations(),
         modelsApi.list(),
       ]);
+      let models = modelsData.models;
+      if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FREELLM_MODELS === 'true') {
+        try {
+          const freellmModels = await freellm.models();
+          models = [
+            ...modelsData.models,
+            ...freellmModels.map((m) => ({
+              ...m,
+              provider: 'freellm',
+              name: m.name || m.id,
+              description: m.description || `FreeLLMAPI route: ${m.id}`,
+              capabilities: m.capabilities || [],
+              context_window: m.context_window || 0,
+              max_output: m.max_output || 0,
+              is_default: false,
+            })),
+          ];
+        } catch {
+          // FreeLLMAPI unreachable; keep CoreAI3D models only.
+        }
+      }
       setConversations(convData.conversations);
-      setModels(modelsData.models);
+      setModels(models);
       
       if (!currentConversationId && convData.conversations.length > 0) {
         setCurrentConversationId(convData.conversations[0].id);
