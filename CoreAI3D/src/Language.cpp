@@ -1004,12 +1004,97 @@ std::string Language::summarizeWebResult(const std::string& query, const std::st
     return conversationalResponse;
 }
 
-void Language::setLlmConfig(const std::string& provider, const std::string& baseUrl, const std::string& model, double temperature, int maxTokens) {
+void Language::setLlmConfig(const std::string& provider, const std::string& baseUrl, const std::string& model, double temperature, int maxTokens, const std::string& apiKey) {
     llmProvider = provider.empty() ? llmProvider : provider;
     llmBaseUrl = baseUrl.empty() ? llmBaseUrl : baseUrl;
     llmModel = model.empty() ? llmModel : model;
     if (temperature > 0) llmTemperature = temperature;
     if (maxTokens > 0) llmMaxTokens = maxTokens;
+    if (!apiKey.empty()) llmApiKey = apiKey;
+}
+
+std::string Language::callFreeLLMApi(const std::string& prompt, const std::string& context) {
+    if (llmProvider != "freellmapi" && llmProvider != "freeLLMApi") return "";
+    std::string url = llmBaseUrl;
+    if (!url.empty() && url.back() == '/') url.pop_back();
+    url += "/v1/chat/completions";
+
+    // Build OpenAI-compatible chat completions body.
+    std::string fullPrompt = prompt;
+    if (!context.empty()) fullPrompt = "Context:\n" + context + "\n\n" + prompt;
+
+    std::string escaped;
+    for (char c : fullPrompt) {
+        if (c == '\\') escaped += "\\\\";
+        else if (c == '"') escaped += "\\\"";
+        else if (c == '\n') escaped += "\\n";
+        else if (c == '\r') escaped += "\\r";
+        else if (c == '\t') escaped += "\\t";
+        else escaped += c;
+    }
+
+    std::string body = "{";
+    body += "\"model\":\"" + llmModel + "\",";
+    body += "\"messages\":[{\"role\":\"user\",\"content\":\"" + escaped + "\"}],";
+    body += "\"temperature\":" + std::to_string(llmTemperature) + ",";
+    body += "\"max_tokens\":" + std::to_string(llmMaxTokens);
+    body += "}";
+
+    std::string cmd = "curl -s -X POST -H 'Content-Type: application/json'";
+    if (!llmApiKey.empty()) {
+        std::string authHeader = " -H 'Authorization: Bearer " + llmApiKey + "'";
+        cmd += authHeader;
+    }
+    cmd += " -d '" + body + "' '" + url + "' 2>/dev/null";
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+    char buffer[8192];
+    std::string raw;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) raw += buffer;
+    pclose(pipe);
+
+    if (raw.empty()) return "";
+
+    // Parse OpenAI-style: choices[0].message.content
+    std::string contentMarker = "\"content\":\"";
+    size_t pos = raw.find("\"choices\"");
+    if (pos == std::string::npos) return "";
+    pos = raw.find(contentMarker, pos);
+    if (pos == std::string::npos) return "";
+    pos += contentMarker.size();
+    std::string out;
+    while (pos < raw.size() && raw[pos] != '"') {
+        if (raw[pos] == '\\' && pos + 1 < raw.size()) {
+            char n = raw[pos+1];
+            if (n == 'n') { out += '\n'; pos += 2; continue; }
+            if (n == 't') { out += '\t'; pos += 2; continue; }
+            if (n == '"') { out += '"'; pos += 2; continue; }
+            if (n == '\\') { out += '\\'; pos += 2; continue; }
+            if (n == 'r') { out += '\r'; pos += 2; continue; }
+            if (n == 'u' && pos + 5 < raw.size()) {
+                // \uXXXX — decode UTF-16 code unit (best-effort)
+                std::string hex = raw.substr(pos+2, 4);
+                try {
+                    unsigned code = (unsigned)std::stoul(hex, nullptr, 16);
+                    if (code < 0x80) {
+                        out += static_cast<char>(code);
+                    } else if (code < 0x800) {
+                        out += static_cast<char>(0xC0 | (code >> 6));
+                        out += static_cast<char>(0x80 | (code & 0x3F));
+                    } else {
+                        out += static_cast<char>(0xE0 | (code >> 12));
+                        out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+                        out += static_cast<char>(0x80 | (code & 0x3F));
+                    }
+                } catch (...) {}
+                pos += 6;
+                continue;
+            }
+        }
+        out += raw[pos++];
+    }
+    return out;
 }
 
 std::string Language::callOllama(const std::string& prompt, const std::string& context) {
@@ -1877,7 +1962,12 @@ std::string Language::respond(const std::string& message) {
                            summarized.find("I tried searching the web") != std::string::npos;
         
         if (!searchFailed && !summarized.empty()) {
-            std::string llmResponse = callOllama(message, searchResult);
+            std::string llmResponse;
+            if (llmProvider == "freellmapi" || llmProvider == "freeLLMApi") {
+                llmResponse = callFreeLLMApi(message, searchResult);
+            } else {
+                llmResponse = callOllama(message, searchResult);
+            }
             if (!llmResponse.empty()) {
                 response = llmResponse;
             } else {
@@ -2097,9 +2187,14 @@ std::string Language::respond(const std::string& message) {
                        "cybersecurity, mathematics, science, technology, and many other topics. "
                        "What would you like to know or work on?";
         }
-        // Last resort: try local LLM via Ollama, then concise fallback
+        // Last resort: try configured LLM (Ollama or FreeLLMApi), then concise fallback
         else {
-            std::string llmResponse = callOllama(message, "");
+            std::string llmResponse;
+            if (llmProvider == "freellmapi" || llmProvider == "freeLLMApi") {
+                llmResponse = callFreeLLMApi(message, "");
+            } else {
+                llmResponse = callOllama(message, "");
+            }
             if (!llmResponse.empty()) {
                 response = llmResponse;
             } else {

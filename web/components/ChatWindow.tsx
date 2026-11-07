@@ -38,6 +38,8 @@ export function ChatWindow({
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,6 +90,17 @@ export function ChatWindow({
     }]);
 
     try {
+      const fileContents = await Promise.all(
+        attachedFiles.map(async (file) => {
+          const text = await file.text();
+          return {
+            name: file.name,
+            type: file.type,
+            content: text,
+          };
+        })
+      );
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -96,6 +109,7 @@ export function ChatWindow({
           message: userMessage,
           model,
           conversation_id: conversationId,
+          files: fileContents,
         }),
       });
 
@@ -130,10 +144,19 @@ export function ChatWindow({
               const parsed = JSON.parse(data);
               
               if (parsed.type === 'thinking') {
+                setStreamState('thinking');
+                continue;
+              }
+              
+              if (parsed.type === 'generating') {
+                setStreamState('generating');
                 continue;
               }
               
               if (parsed.type === 'token' && parsed.content) {
+                if (streamState !== 'generating') {
+                  setStreamState('generating');
+                }
                 assistantContent += parsed.content;
                 setMessages(prev => prev.map(msg => 
                   msg.id === assistantId 
@@ -155,6 +178,7 @@ export function ChatWindow({
               }
             } catch {
               assistantContent += data;
+              setStreamState('generating');
               setMessages(prev => prev.map(msg => 
                 msg.id === assistantId 
                   ? { ...msg, content: assistantContent, isStreaming: true }
@@ -240,12 +264,10 @@ export function ChatWindow({
             <h1 className="text-3xl font-bold text-text-primary mb-2">Welcome to CoreAI3D</h1>
             <p className="text-text-muted max-w-md mb-8">
               Start a conversation by selecting a model and typing a message below.
-              CoreAI3D features calculus-based activation functions for enhanced reasoning.
             </p>
             <div className="flex flex-wrap gap-3 justify-center text-sm text-text-muted">
               <span className="px-3 py-1 bg-core-cardHover border border-core-border rounded-full">Try: "Explain calculus activation"</span>
               <span className="px-3 py-1 bg-core-cardHover border border-core-border rounded-full">Try: "Write a Python script"</span>
-              <span className="px-3 py-1 bg-core-cardHover border border-core-border rounded-full">Try: "Analyze this code"</span>
             </div>
           </div>
         )}
@@ -259,18 +281,20 @@ export function ChatWindow({
             isStreaming={message.isStreaming}
           />
         ))}
-       {isLoading && messages.length > 0 && (() => {
+        {isLoading && messages.length > 0 && (() => {
           const last = messages[messages.length - 1];
           return last?.role === 'assistant' && last?.isStreaming === true && (last?.content ?? '') === '';
         })() && (
-           <MessageBubble
-             role="assistant"
-             content=""
-             isStreaming={true}
-           >
-             <ThinkingIndicator state={streamState as 'thinking' | 'generating'} />
-           </MessageBubble>
-         )}
+          <MessageBubble
+            role="assistant"
+            content=""
+            isStreaming={true}
+          >
+            <div className="mt-2">
+              <ThinkingIndicator state={streamState as 'thinking' | 'generating'} detail={streamState === 'thinking' ? 'Reasoning' : 'Writing'} />
+            </div>
+          </MessageBubble>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -280,7 +304,7 @@ export function ChatWindow({
             {attachedFiles.map((file, index) => (
               <span key={index} className="flex items-center gap-1 px-2 py-1 bg-core-card border border-core-border rounded-lg text-sm">
                 <FileText className="w-4 h-4 text-electric-blue" />
-                {file.name}
+                <span className="truncate max-w-[120px]">{file.name}</span>
                 <button onClick={() => removeFile(index)} className="text-text-muted hover:text-red-400">
                   <X className="w-3 h-3" />
                 </button>
@@ -291,16 +315,45 @@ export function ChatWindow({
 
         <div className="flex items-end gap-3">
           <div className="flex items-center gap-1 p-1 bg-core-card border border-core-border rounded-lg">
-            <label className="p-2 text-text-muted hover:text-electric-blue cursor-pointer">
-              <input type="file" multiple onChange={handleFileChange} className="hidden" accept=".txt,.md,.py,.js,.ts,.json,.pdf,.png,.jpg,.jpeg" />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2 text-text-muted hover:text-electric-blue cursor-pointer"
+              aria-label="Attach file"
+            >
               <Paperclip className="w-5 h-5" />
-            </label>
-            <label className="p-2 text-text-muted hover:text-electric-blue cursor-pointer">
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileChange}
+              className="hidden"
+              accept=".txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.pdf,.csv,.xml,.yaml,.yml,.cpp,.c,.h,.java,.go,.rs,.php,.rb,.sh,.sql"
+            />
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              className="p-2 text-text-muted hover:text-electric-blue cursor-pointer"
+              aria-label="Attach image"
+            >
               <Image className="w-5 h-5" />
-            </label>
-            <label className="p-2 text-text-muted hover:text-electric-blue cursor-pointer">
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              multiple
+              onChange={handleFileChange}
+              className="hidden"
+              accept="image/*"
+            />
+            <button
+              type="button"
+              className="p-2 text-text-muted hover:text-electric-blue cursor-pointer"
+              aria-label="Voice input"
+            >
               <Mic className="w-5 h-5" />
-            </label>
+            </button>
           </div>
 
           <div className="flex-1 relative">

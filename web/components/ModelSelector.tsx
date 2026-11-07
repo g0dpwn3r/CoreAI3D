@@ -12,6 +12,7 @@ interface Model {
   context_window: number;
   max_output: number;
   is_default: boolean;
+  provider?: string;
 }
 
 interface ModelSelectorProps {
@@ -107,6 +108,11 @@ export function ModelSelector({ models, selectedModel, onSelect, className }: Mo
                       Default
                     </span>
                   )}
+                  {model.provider === 'freellm' && (
+                    <span className="px-1.5 py-0.5 text-xs bg-green-900/30 text-green-400 border border-green-900/50 rounded-full">
+                      FreeLLM
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-text-muted line-clamp-1">{model.description}</p>
                 <div className="flex flex-wrap gap-1 mt-1">
@@ -121,8 +127,8 @@ export function ModelSelector({ models, selectedModel, onSelect, className }: Mo
                   )}
                 </div>
                 <div className="flex gap-4 mt-2 text-xs text-text-muted">
-                  <span>Context: {model.context_window.toLocaleString()}</span>
-                  <span>Max output: {model.max_output.toLocaleString()}</span>
+                  <span>Context: {model.context_window?.toLocaleString?.() ?? '—'}</span>
+                  <span>Max output: {(model.max_output ?? model.context_window ?? '—').toLocaleString?.() ?? '—'}</span>
                 </div>
               </button>
             ))}

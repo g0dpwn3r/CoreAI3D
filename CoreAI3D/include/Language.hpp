@@ -38,7 +38,8 @@ public:
     int chat();
     std::string respond(const std::string& message);
     std::string callOllama(const std::string& prompt, const std::string& context = "");
-    void setLlmConfig(const std::string& provider, const std::string& baseUrl, const std::string& model, double temperature, int maxTokens);
+    std::string callFreeLLMApi(const std::string& prompt, const std::string& context = "");
+    void setLlmConfig(const std::string& provider, const std::string& baseUrl, const std::string& model, double temperature, int maxTokens, const std::string& apiKey = "");
     void learnFromExchange(const std::string& userInput, const std::string& aiResponse);
     std::unordered_map<std::string, std::vector<float>> embeddingsByLang;
 
@@ -84,6 +85,7 @@ private:
     std::string llmModel = "qwen2.5:7b-instruct";
     double llmTemperature = 0.7;
     int llmMaxTokens = 512;
+    std::string llmApiKey;
     std::string webSearch(const std::string& query);
     std::string summarizeWebResult(const std::string& query, const std::string& rawResult);
     bool shouldSearchWeb(const std::string& message);
