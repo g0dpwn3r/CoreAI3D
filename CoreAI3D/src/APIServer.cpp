@@ -1821,6 +1821,38 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                 responseMessage = "I'm currently unable to process your request. The AI training module is not available.";
             }
 
+            // Extract code/data blocks from the response for structured artifact rendering
+            json artifacts = json::array();
+            {
+                std::string remaining = responseMessage;
+                int artifactIndex = 0;
+                size_t pos = 0;
+                while ((pos = remaining.find("```", pos)) != std::string::npos) {
+                    size_t langStart = pos + 3;
+                    size_t langEnd = remaining.find("\n", langStart);
+                    if (langEnd == std::string::npos) break;
+                    std::string language = remaining.substr(langStart, langEnd - langStart);
+                    // trim
+                    while (!language.empty() && (language.front() == ' ' || language.front() == '\t')) language.erase(0, 1);
+                    while (!language.empty() && (language.back() == ' ' || language.back() == '\t')) language.pop_back();
+
+                    size_t codeStart = langEnd + 1;
+                    size_t codeEnd = remaining.find("```", codeStart);
+                    if (codeEnd == std::string::npos) break;
+                    std::string code = remaining.substr(codeStart, codeEnd - codeStart);
+                    if (!code.empty() && code.back() == '\n') code.pop_back();
+
+                    json artifact;
+                    artifact["id"] = "artifact-" + std::to_string(artifactIndex);
+                    artifact["language"] = language;
+                    artifact["code"] = code;
+                    artifact["filename"] = "snippet-" + std::to_string(artifactIndex + 1) + "." + (language.empty() ? "txt" : language);
+                    artifacts.push_back(artifact);
+                    artifactIndex++;
+                    pos = codeEnd + 3;
+                }
+            }
+
             // Save AI response to database if available
             if (database && !sessionId.empty()) {
                 try {
@@ -1848,6 +1880,9 @@ json APIServer::handleChatAPI(const std::string& action, const json& parameters,
                 {"timestamp", getTimestampString()},
                 {"status", "success"}
             };
+            if (!artifacts.empty()) {
+                response["artifacts"] = artifacts;
+            }
             if (usedWebSearch) {
                 response["web_searched"] = true;
                 response["search_query"] = webSearchQuery;

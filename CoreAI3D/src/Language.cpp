@@ -1287,6 +1287,39 @@ std::string Language::respond(const std::string& message) {
         learnFromExchange(message, response);
         return response;
     }
+    // Route technical/programming queries through the configured LLM (FreeLLMAPI/Ollama)
+    // instead of hardcoded topic-bank responses, so the model can generate real code.
+    bool isTechnicalQuery = false;
+    {
+        static const std::vector<std::string> techIndicators = {
+            "code", "program", "function", "class", "implement", "write",
+            "python", "c++", "java", "javascript", "typescript", "rust", "go",
+            "sql", "html", "css", "bash", "shell", "api", "library",
+            "algorithm", "data structure", "debug", "error", "compile",
+            "spreadsheet", "csv", "json", "yaml", "xml", "table",
+            "how to", "how do i", "explain", "example", "tutorial"
+        };
+        for (const auto& ind : techIndicators) {
+            if (lowerMsg.find(ind) != std::string::npos) {
+                isTechnicalQuery = true;
+                break;
+            }
+        }
+    }
+    if (isTechnicalQuery) {
+        std::string llmResponse;
+        if (llmProvider == "freellmapi" || llmProvider == "freeLLMApi") {
+            llmResponse = callFreeLLMApi(message, "");
+        } else {
+            llmResponse = callOllama(message, "");
+        }
+        if (!llmResponse.empty()) {
+            response = llmResponse;
+            learnFromExchange(message, response);
+            return response;
+        }
+    }
+
     if (lowerMsg.find("c++") != std::string::npos && lowerMsg.find("hello") != std::string::npos) {
         response = "Here's a C++ Hello World program:\n\n"
                    "#include <iostream>\n"
