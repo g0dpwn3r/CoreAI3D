@@ -274,6 +274,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxtst6 \
     libdbus-1-3 \
     libudev1 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/${PROJECT_NAME}/build/${PROJECT_NAME}/${EXECUTABLE_NAME} /app/${PROJECT_NAME}
