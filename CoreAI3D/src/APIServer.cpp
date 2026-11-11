@@ -2657,8 +2657,10 @@ void APIServer::sanitizeJsonStrings(json& j) {
         clean.reserve(s.size());
         for (size_t i = 0; i < s.size(); ++i) {
             unsigned char c = static_cast<unsigned char>(s[i]);
-            // Replace C0 control characters (0x00-0x1F) and 0x7F (DEL) with space
-            if (c < 0x20 || c == 0x7F) {
+            // Replace C0 control characters (0x00-0x1F) and 0x7F (DEL) with space,
+            // but preserve \n (0x0A) and \t (0x09) which nlohmann::json::dump()
+            // will properly escape as \n and \t in the JSON output.
+            if ((c < 0x20 || c == 0x7F) && c != 0x0A && c != 0x09) {
                 clean += ' ';
                 continue;
             }
