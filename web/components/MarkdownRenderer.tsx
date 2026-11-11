@@ -35,7 +35,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
                       return <CodeCanvas
                         language={lang}
                         filename={`snippet-${index + 1}.${lang}`}
-                        code={codeText.replace(/\n$/, '')}
+                        code={codeText}
                       />;
                     }
                     return (

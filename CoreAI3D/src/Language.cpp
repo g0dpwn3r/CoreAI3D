@@ -1148,6 +1148,447 @@ std::string Language::callOllama(const std::string& prompt, const std::string& c
     return out;
 }
 
+// --- Code generation intelligence (Phase 2/6) ---
+bool Language::isCodeGenerationRequest(const std::string& message) {
+    std::string lower = message;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    
+    // Patterns that indicate a code generation request
+    static const std::vector<std::string> codeRequestPatterns = {
+        "write a", "create a", "generate a", "make a", "build a",
+        "code for", "program for", "script for", "source for",
+        "write me a", "create me a", "make me a",
+        "write some", "create some",
+        "hello world", "hello, world",
+        "fix this", "fix the following",
+        "complete the", "finish the",
+        "implement a", "implement the",
+        "develop a", "develop the",
+        "draft a", "draft the",
+        "compose a", "compose the",
+        "produce a", "produce the",
+        "give me a", "give me some",
+        "need a", "need some",
+        "want a", "want some",
+        "show me a", "show me some",
+        "list of", "enumerate",
+        "code:", "program:", "script:"
+    };
+    
+    // Language identifiers
+    static const std::vector<std::string> languages = {
+        "python", "c++", "cpp", "c", "java", "javascript", "js", "typescript", "ts",
+        "php", "html", "css", "bash", "shell", "sql", "json", "yaml", "yml",
+        "rust", "go", "c#", "csharp", "ruby", "swift", "kotlin", "scala",
+        "perl", "lua", "dart", "r", "matlab", "groovy", "gradle",
+        "dockerfile", "makefile", "assembly", "asm", "verilog", "vhdl",
+        "elixir", "clojure", "haskell", "f#", "fsharp", "ocaml", "elixir",
+        "objective-c", "objc", "swift", "dart", "fortran", "pascal",
+        "ada", "cobol", "lisp", "scheme", "racket", "smalltalk", "prolog"
+    };
+    
+    // Check for explicit code file requests
+    static const std::string filePatterns[] = {
+        ".cpp", ".c", ".h", ".hpp", ".py", ".js", ".ts", ".jsx", ".tsx",
+        ".java", ".php", ".html", ".css", ".sh", ".bash", ".sql", ".json",
+        ".yaml", ".yml", ".rs", ".go", ".cs", ".rb", ".swift", ".kt",
+        ".scala", ".pl", ".lua", ".dart", ".r", ".m", ".mm",
+        "main.cpp", "main.c", "main.py", "main.js", "main.java",
+        "main.rs", "main.go", "main.php", "main.rb", "main.swift",
+        "main.kt", "main.cs", "main.ts", "main.jsx", "main.tsx"
+    };
+    
+    // Check for "file" keyword with extension
+    if (lower.find("file") != std::string::npos) {
+        for (const auto& ext : std::vector<std::string>(filePatterns, filePatterns + sizeof(filePatterns)/sizeof(filePatterns[0]))) {
+            if (lower.find(ext) != std::string::npos) return true;
+        }
+    }
+    
+    // Check for code request patterns combined with language identifiers
+    bool hasCodeRequest = false;
+    for (const auto& pattern : codeRequestPatterns) {
+        if (lower.find(pattern) != std::string::npos) {
+            hasCodeRequest = true;
+            break;
+        }
+    }
+    
+    bool hasLanguage = false;
+    for (const auto& lang : languages) {
+        if (lower.find(lang) != std::string::npos) {
+            hasLanguage = true;
+            break;
+        }
+    }
+    
+    // If it has both a code request pattern and a language, it's a code generation request
+    if (hasCodeRequest && hasLanguage) return true;
+    
+    // Check for "fix this" followed by code-like content
+    if (lower.find("fix this") != std::string::npos || lower.find("fix the following") != std::string::npos) {
+        return true;
+    }
+    
+    // Check for explicit code block markers
+    if (lower.find("```") != std::string::npos) return true;
+    
+    return false;
+}
+
+std::string Language::detectRequestedLanguage(const std::string& message) {
+    std::string lower = message;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    
+    // Language detection patterns - ordered by specificity
+    struct LangPattern {
+        std::string lang;
+        std::vector<std::string> patterns;
+    };
+    
+    std::vector<LangPattern> langPatterns = {
+        {"python", {"python", "py"}},
+        {"cpp", {"c++", "cpp", "c plus plus"}},
+        {"c", {"c language", " c ", " c\n", "c "}},
+        {"javascript", {"javascript", "js", "nodejs", "node.js"}},
+        {"typescript", {"typescript", "ts"}},
+        {"java", {"java"}},
+        {"php", {"php"}},
+        {"html", {"html", "html5"}},
+        {"css", {"css"}},
+        {"bash", {"bash", "shell", "sh", "zsh"}},
+        {"sql", {"sql"}},
+        {"json", {"json"}},
+        {"yaml", {"yaml", "yml"}},
+        {"rust", {"rust", "rs"}},
+        {"go", {"golang", "go"}},
+        {"csharp", {"c#", "csharp", "c sharp"}},
+        {"ruby", {"ruby", "rb"}},
+        {"swift", {"swift"}},
+        {"kotlin", {"kotlin", "kt"}},
+        {"scala", {"scala"}},
+        {"perl", {"perl", "pl"}},
+        {"lua", {"lua"}},
+        {"dart", {"dart"}},
+        {"r", {" r ", "r language"}},
+        {"matlab", {"matlab"}},
+        {"dockerfile", {"dockerfile"}},
+        {"makefile", {"makefile", "make file"}},
+    };
+    
+    for (const auto& lp : langPatterns) {
+        for (const auto& pattern : lp.patterns) {
+            if (lower.find(pattern) != std::string::npos) {
+                return lp.lang;
+            }
+        }
+    }
+    
+    return "text";
+}
+
+std::string Language::generateCode(const std::string& request) {
+    std::string lang = detectRequestedLanguage(request);
+    std::string lower = request;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    
+    std::string code;
+    std::string filename;
+    
+    // Generate language-specific code templates
+    if (lang == "python") {
+        filename = "hello.py";
+        if (lower.find("hello") != std::string::npos) {
+            code = R"(# Hello World in Python
+# This is a simple Python program
+
+def greet(name: str = "World") -> str:
+    """Return a greeting message."""
+    return f"Hello, {name}!"
+
+if __name__ == "__main__":
+    message = greet()
+    print(message)
+)";
+        } else if (lower.find("fibonacci") != std::string::npos) {
+            code = R"(# Fibonacci sequence in Python
+
+def fibonacci(n: int) -> list[int]:
+    """Generate the first n Fibonacci numbers."""
+    fib = [0, 1]
+    for i in range(2, n):
+        fib.append(fib[-1] + fib[-2])
+    return fib[:n]
+
+if __name__ == "__main__":
+    result = fibonacci(10)
+    print(f"First 10 Fibonacci numbers: {result}")
+)";
+        } else {
+            code = R"(# Python program
+# A simple Python script
+
+def main():
+    print("Hello from Python!")
+
+if __name__ == "__main__":
+    main()
+)";
+        }
+    } else if (lang == "cpp") {
+        filename = "main.cpp";
+        if (lower.find("hello") != std::string::npos) {
+            code = R"(#include <iostream>
+
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    return 0;
+}
+)";
+        } else if (lower.find("class") != std::string::npos) {
+            code = R"(#include <iostream>
+#include <string>
+
+class Person {
+private:
+    std::string name;
+    int age;
+
+public:
+    Person(const std::string& n, int a) : name(n), age(a) {}
+
+    void greet() const {
+        std::cout << "Hello, my name is " << name << " and I am " << age << " years old." << std::endl;
+    }
+
+    int getAge() const { return age; }
+    const std::string& getName() const { return name; }
+};
+
+int main() {
+    Person p("Alice", 30);
+    p.greet();
+    return 0;
+}
+)";
+        } else {
+            code = R"(#include <iostream>
+
+int main() {
+    std::cout << "Hello from C++!" << std::endl;
+    return 0;
+}
+)";
+        }
+    } else if (lang == "c") {
+        filename = "main.c";
+        code = R"(#include <stdio.h>
+
+int main() {
+    printf("Hello, World!\n");
+    return 0;
+}
+)";
+    } else if (lang == "java") {
+        filename = "Main.java";
+        code = R"(public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+)";
+    } else if (lang == "javascript" || lang == "js") {
+        filename = "hello.js";
+        code = R"(// Hello World in JavaScript
+
+function greet(name = "World") {
+    return `Hello, ${name}!`;
+}
+
+console.log(greet());
+)";
+    } else if (lang == "typescript" || lang == "ts") {
+        filename = "hello.ts";
+        code = R"(// Hello World in TypeScript
+
+function greet(name: string = "World"): string {
+    return `Hello, ${name}!`;
+}
+
+console.log(greet());
+)";
+    } else if (lang == "php") {
+        filename = "hello.php";
+        code = R"(<?php
+// Hello World in PHP
+
+function greet(string $name = "World"): string {
+    return "Hello, " . $name . !";
+}
+
+echo greet();
+echo "\n";
+?>
+)";
+    } else if (lang == "html") {
+        filename = "index.html";
+        code = R"(<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World</title>
+</head>
+<body>
+    <h1>Hello, World!</h1>
+</body>
+</html>
+)";
+    } else if (lang == "css") {
+        filename = "styles.css";
+        code = R"(/* Hello World styles */
+
+body {
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    background-color: #f0f0f0;
+}
+
+h1 {
+    color: #333;
+    font-size: 2rem;
+}
+)";
+    } else if (lang == "bash" || lang == "sh") {
+        filename = "hello.sh";
+        code = R"(#!/bin/bash
+# Hello World in Bash
+
+echo "Hello, World!"
+)";
+    } else if (lang == "sql") {
+        filename = "hello.sql";
+        code = R"(-- Hello World in SQL
+
+-- Create a simple table
+CREATE TABLE hello_world (
+    id INT PRIMARY KEY,
+    message VARCHAR(255) NOT NULL
+);
+
+-- Insert a greeting
+INSERT INTO hello_world (id, message) VALUES (1, 'Hello, World!');
+
+-- Query the greeting
+SELECT * FROM hello_world;
+)";
+    } else if (lang == "json") {
+        filename = "data.json";
+        code = R"({
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "A simple JSON example",
+  "greeting": "Hello, World!",
+  "active": true,
+  "count": 1
+}
+)";
+    } else if (lang == "yaml" || lang == "yml") {
+        filename = "config.yaml";
+        code = R"(# Hello World in YAML
+
+name: Hello World
+version: 1.0.0
+description: A simple YAML example
+greeting: Hello, World!
+active: true
+count: 1
+)";
+    } else if (lang == "rust") {
+        filename = "main.rs";
+        code = R"(// Hello World in Rust
+
+fn main() {
+    println!("Hello, World!");
+}
+)";
+    } else if (lang == "go") {
+        filename = "main.go";
+        code = R"(// Hello World in Go
+
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+)";
+    } else if (lang == "csharp" || lang == "cs") {
+        filename = "Program.cs";
+        code = R"(// Hello World in C#
+
+using System;
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("Hello, World!");
+    }
+}
+)";
+    } else if (lang == "ruby") {
+        filename = "hello.rb";
+        code = R"(# Hello World in Ruby
+
+=begin
+A simple Ruby program
+=end
+
+def greet(name = "World")
+  "Hello, #{name}!"
+end
+
+puts greet
+)";
+    } else if (lang == "swift") {
+        filename = "HelloWorld.swift";
+        code = R"(// Hello World in Swift
+
+import Foundation
+
+func greet(name: String = "World") -> String {
+    return "Hello, \(name)!"
+}
+
+print(greet())
+)";
+    } else if (lang == "kotlin") {
+        filename = "HelloWorld.kt";
+        code = R"(// Hello World in Kotlin
+
+fun greet(name: String = "World"): String {
+    return "Hello, $name!"
+}
+
+fun main() {
+    println(greet())
+}
+)";
+    } else {
+        filename = "hello.txt";
+        code = "Hello, World!\n";
+    }
+    
+    // Build Markdown response with code fences so the frontend's
+    // parseMessage() can extract the code and render it in the Code Canvas.
+    std::string markdown = "Here's the " + filename + ":\n\n```" + lang + "\n" + code + "\n```\n";
+    return markdown;
+}
+
 std::string Language::respond(const std::string& message) {
     std::lock_guard<std::mutex> lock(respondMutex);
     if (!embeddingsLoaded || embeddingsByLang.empty()) {
@@ -1275,6 +1716,14 @@ std::string Language::respond(const std::string& message) {
         learnFromExchange(message, response);
         return response;
     }
+    
+    // Code generation request handling - generate complete source files
+    if (isCodeGenerationRequest(message)) {
+        response = Language::generateCode(message);
+        learnFromExchange(message, response);
+        return response;
+    }
+    
     if (lowerMsg.find("what can you do") != std::string::npos || (lowerMsg.find("help me") != std::string::npos && lowerMsg.length() < 20)) {
         response = "That's a fair question! Here's where I can be most useful:\n\n"
                    "• Write and explain code in any language you're working with\n"

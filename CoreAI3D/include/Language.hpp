@@ -39,6 +39,15 @@ public:
     std::string respond(const std::string& message);
     std::string callOllama(const std::string& prompt, const std::string& context = "");
     std::string callFreeLLMApi(const std::string& prompt, const std::string& context = "");
+
+    // --- Code generation intelligence (Phase 2/6) ---
+    // Returns a structured JSON string with type/language/filename/code so the
+    // frontend can open a Code Canvas with the full, properly formatted source.
+    std::string generateCode(const std::string& request);
+    // Detects whether the user message is asking for a source file.
+    bool isCodeGenerationRequest(const std::string& message);
+    // Extracts the requested language from a code-generation request.
+    std::string detectRequestedLanguage(const std::string& message);
     void setLlmConfig(const std::string& provider, const std::string& baseUrl, const std::string& model, double temperature, int maxTokens, const std::string& apiKey = "");
     void learnFromExchange(const std::string& userInput, const std::string& aiResponse);
     std::unordered_map<std::string, std::vector<float>> embeddingsByLang;
