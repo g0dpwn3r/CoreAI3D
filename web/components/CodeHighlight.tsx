@@ -25,7 +25,7 @@ export function CodeHighlight({ language, code }: { language: string; code: stri
   const keywords = KEYWORDS[language.toLowerCase()] || [];
 
   return (
-    <pre className="overflow-x-auto text-sm font-mono leading-relaxed">
+    <pre className="overflow-x-auto text-sm font-mono leading-relaxed whitespace-pre">
       {lines.map((line, i) => (
         <div key={i} className="flex">
           <span className="select-none text-text-muted w-10 text-right pr-3">{i + 1}</span>

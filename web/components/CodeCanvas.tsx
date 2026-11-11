@@ -80,6 +80,11 @@ export function CodeCanvas({ language, filename, code }: CodeCanvasProps) {
   const [message, setMessage] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Update edited state when the code prop changes (e.g. conversation reload, streaming)
+  useEffect(() => {
+    setEdited(code);
+  }, [code]);
+
   useEffect(() => {
     setMounted(true);
     // Initialize ResizeObserver for responsive layout
@@ -185,15 +190,40 @@ export function CodeCanvas({ language, filename, code }: CodeCanvasProps) {
                   <CodeHighlight language={language} code={edited} />
                 </div>
               ) : (
-                <textarea
-                  value={edited}
-                  onChange={(e) => setEdited(e.target.value)}
-                  className={cn(
-                    'w-full min-h-[200px] max-h-[600px] resize-y font-mono text-sm bg-core-bg text-text-primary',
-                    'border border-core-border rounded-lg p-3 focus:outline-none focus:ring-1 focus:ring-electric-blue'
-                  )}
-                  spellCheck={false}
-                />
+              <textarea
+                value={edited}
+                onChange={(e) => setEdited(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const target = e.target as HTMLTextAreaElement;
+                    const start = target.selectionStart;
+                    const end = target.selectionEnd;
+                    const newValue = edited.slice(0, start) + '\n' + edited.slice(end);
+                    setEdited(newValue);
+                    // Move cursor to the new line
+                    requestAnimationFrame(() => {
+                      target.selectionStart = target.selectionEnd = start + 1;
+                    });
+                  } else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const target = e.target as HTMLTextAreaElement;
+                    const start = target.selectionStart;
+                    const end = target.selectionEnd;
+                    const newValue = edited.slice(0, start) + '    ' + edited.slice(end);
+                    setEdited(newValue);
+                    // Move cursor after the inserted spaces
+                    requestAnimationFrame(() => {
+                      target.selectionStart = target.selectionEnd = start + 4;
+                    });
+                  }
+                }}
+                className={cn(
+                  'w-full min-h-[200px] max-h-[600px] resize-y font-mono text-sm bg-core-bg text-text-primary',
+                  'border border-core-border rounded-lg p-3 focus:outline-none focus:ring-1 focus:ring-electric-blue'
+                )}
+                spellCheck={false}
+              />
               )}
               {message && <p className="mt-2 text-xs text-text-muted">{message}</p>}
             </div>

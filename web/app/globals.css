@@ -125,4 +125,17 @@
   .animate-slide-up {
     animation: slideUp 0.2s ease-out forwards;
   }
+
+  /* Preserve whitespace in markdown code blocks and preformatted text */
+  .markdown-body pre,
+  .markdown-body code,
+  .markdown-body pre code {
+    white-space: pre !important;
+    word-break: keep-all;
+    overflow-wrap: normal;
+  }
+
+  .markdown-body pre {
+    overflow-x: auto;
+  }
 }

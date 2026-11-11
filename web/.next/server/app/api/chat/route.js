@@ -4,30 +4,30 @@
       `).run(s,t.id,e,n||"coreai3d")}E.Z.prepare(`
       INSERT INTO messages (id, conversation_id, role, content)
       VALUES (?, ?, 'user', ?)
-    `).run((0,T.Z)(),s,r);let u=new TextEncoder,c=new ReadableStream({async start(e){try{let a=process.env.COREAI3D_API_URL||"http://coreai3d:8080",o=await fetch(`${a}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${t.id}`},body:JSON.stringify({message:r,model:n||"coreai3d",conversation_id:s,stream:!0})});if(!o.ok)throw Error(`Backend error: ${o.status}`);let i=o.body?.getReader();if(!i)throw Error("No response body");let d="",c=!0;e.enqueue(u.encode(`data: ${JSON.stringify({type:"thinking",conversation_id:s})}
+    `).run((0,T.Z)(),s,r);let u=new TextEncoder,c=new ReadableStream({async start(e){try{let a=process.env.COREAI3D_API_URL||"http://coreai3d:8080",i=await fetch(`${a}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${t.id}`},body:JSON.stringify({message:r,model:n||"coreai3d",conversation_id:s,files:o||[],stream:!0})});if(!i.ok)throw Error(`Backend error: ${i.status}`);let d=i.body?.getReader();if(!d)throw Error("No response body");let c="",p=!0;e.enqueue(u.encode(`data: ${JSON.stringify({type:"thinking",conversation_id:s})}
 
-`));let p=[];for(;;){let{done:t,value:r}=await i.read();if(t)break;let n=new TextDecoder().decode(r);for(let t of(p.push(n),n.split("\n").filter(e=>e.trim())))if(t.startsWith("data: ")){let r=t.substring(6);try{let t=JSON.parse(r);if("thinking"===t.type&&c)continue;"token"===t.type||t.content?(c&&(c=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
+`));let l=[];for(;;){let{done:t,value:r}=await d.read();if(t)break;let n=new TextDecoder().decode(r);for(let t of(l.push(n),n.split("\n").filter(e=>e.trim())))if(t.startsWith("data: ")){let r=t.substring(6);try{let t=JSON.parse(r);if("thinking"===t.type&&p)continue;"token"===t.type||t.content?(p&&(p=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
 
-`))),d+=t.content||t.token||"",e.enqueue(u.encode(`data: ${JSON.stringify({type:"token",content:t.content||t.token})}
+`))),c+=t.content||t.token||"",e.enqueue(u.encode(`data: ${JSON.stringify({type:"token",content:t.content||t.token})}
 
 `))):"done"===t.type&&e.enqueue(u.encode(`data: ${JSON.stringify({type:"done",conversation_id:s})}
 
-`))}catch{c&&(c=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
+`))}catch{p&&(p=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
 
-`))),d+=r,e.enqueue(u.encode(`data: ${JSON.stringify({type:"token",content:r})}
+`))),c+=r,e.enqueue(u.encode(`data: ${JSON.stringify({type:"token",content:r})}
 
-`))}}}if(!d&&p.length>0){let t=p.join("");try{let r=JSON.parse(t);r.response?(c&&(c=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
+`))}}}if(!c&&l.length>0){let t=l.join("");try{let r=JSON.parse(t);r.response?(p&&(p=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
 
 `))),e.enqueue(u.encode(`data: ${JSON.stringify({type:"token",content:r.response})}
 
-`)),d=r.response):r.message&&(c&&(c=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
+`)),c=r.response):r.message&&(p&&(p=!1,e.enqueue(u.encode(`data: ${JSON.stringify({type:"generating"})}
 
 `))),e.enqueue(u.encode(`data: ${JSON.stringify({type:"token",content:r.message})}
 
-`)),d=r.message)}catch{}}d&&(E.Z.prepare(`
+`)),c=r.message)}catch{}}c&&(E.Z.prepare(`
               INSERT INTO messages (id, conversation_id, role, content)
               VALUES (?, ?, 'assistant', ?)
-            `).run((0,T.Z)(),s,d),E.Z.prepare(`
+            `).run((0,T.Z)(),s,c),E.Z.prepare(`
               UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
             `).run(s))}catch(t){console.error("Chat stream error:",t),e.enqueue(u.encode(`data: ${JSON.stringify({type:"error",error:"Failed to get response from AI"})}
 
